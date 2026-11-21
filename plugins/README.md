@@ -43,10 +43,13 @@ Starting with the second round, `3/4` means the third round out of four allowed.
 attempts has its own counter. An icon identifies each step. AI steps show their formula title or agent name.
 A recorded outcome summary follows the step name and wraps to fit. In a text client, use `loop-manager run watch run_42` to follow events.
 
-To open the card without asking, turn on the `auto_open` option of `run-card` in Claude Code
-(`/plugin configure run-card@loop-manager` or `/config`). It is a per-user setting, off by default. After Claude
-starts a run with `loop-manager run start` or the `start_run` MCP tool, a plugin hook asks it to show that run's
-card on the daemon the command named with `--socket` or `LOOP_MANAGER_SOCKET=`.
+The card can also open without asking. After the agent starts a run with `loop-manager run start` or the
+`start_run` MCP tool, a plugin hook asks it to show that run's card on the daemon the command named with
+`--socket` or `LOOP_MANAGER_SOCKET=`. This is a per-user setting, off by default:
+
+- In Claude Code, turn on the `auto_open` option (`/plugin configure run-card@loop-manager` or `/config`).
+- Codex has no plugin options: trust the `run-card` PostToolUse hook in `/hooks` to turn it on. An untrusted
+  hook does not run.
 
 The run-card MCP server requires Python 3.8+ and uses **stdio only** between the host and the plugin.
 It reads the local daemon over its Unix socket. By default it follows `LOOP_MANAGER_SOCKET`, then the

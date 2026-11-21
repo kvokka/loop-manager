@@ -1,4 +1,8 @@
-"""PostToolUse hook: when the user turned on auto_open, ask Claude to show the card of a run it just started."""
+"""PostToolUse hook: ask the agent to show the card of a run it just started, when the user turned this on.
+
+Claude Code: the plugin option auto_open. Codex has no plugin options: a plugin hook runs once the user trusts it
+in /hooks, and its events carry the Codex extension turn_id.
+"""
 
 import json
 import os
@@ -23,10 +27,10 @@ def strings(value):
 
 
 def context(event):
-    """The instruction for Claude after this tool call, or None."""
+    """The instruction for the agent after this tool call, or None."""
     args = {}
     if event.get("tool_name") == "Bash":
-        command = event.get("tool_input", {}).get("command", "")
+        command = " ".join(strings(event.get("tool_input", {}).get("command")))
         if not START.search(command):
             return None
         if socket := SOCKET.search(command):
@@ -37,11 +41,12 @@ def context(event):
     if not found:
         return None
     args["run"] = found.group(1) or found.group(2)
-    return (f"Run {args['run']} started. The user turned on run-card auto_open: "
+    return (f"Run {args['run']} started. The user turned on run-card auto-open: "
             f"call show_run_card with {json.dumps(args)} now.")
 
 
 if __name__ == "__main__":
+    event = json.load(sys.stdin)
     enabled = os.environ.get("CLAUDE_PLUGIN_OPTION_AUTO_OPEN", "").strip().lower() in ("true", "1")
-    if enabled and (text := context(json.load(sys.stdin))):
+    if (enabled or "turn_id" in event) and (text := context(event)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}))

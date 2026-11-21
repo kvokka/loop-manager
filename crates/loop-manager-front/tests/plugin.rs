@@ -201,7 +201,7 @@ fn auto_open(option: &str, event: Value) -> Option<String> {
     Some(reply["hookSpecificOutput"]["additionalContext"].as_str()?.to_owned())
 }
 
-/// With `auto_open` on, a started run, by the CLI or the MCP tool, asks for its card on the daemon the command named.
+/// With auto-open on (the Claude Code option, or a Codex event), a started run, by the CLI or the MCP tool, asks for its card on the daemon the command named.
 #[test]
 fn the_run_card_opens_after_a_run_start_only_when_the_user_asked() {
     let bash = |command: &str, stdout: &str| {
@@ -224,4 +224,9 @@ fn the_run_card_opens_after_a_run_start_only_when_the_user_asked() {
     let mcp = serde_json::json!({ "tool_name": "mcp__loop-manager__start_run",
         "tool_response": [{ "type": "text", "text": "run: run_3\nnothing_ready: false" }] });
     assert!(auto_open("true", mcp).unwrap().contains(r#"{"run": "run_3"}"#));
+    // Codex has no plugin options: the hook runs only once the user trusts it, and its event has a turn.
+    let codex = serde_json::json!({ "tool_name": "Bash", "turn_id": "t1",
+        "tool_input": { "command": "loop-manager run start shop check" },
+        "tool_response": "Exit code: 0\nOutput:\nrun_5\n" });
+    assert!(auto_open("", codex).unwrap().contains(r#"{"run": "run_5"}"#));
 }
