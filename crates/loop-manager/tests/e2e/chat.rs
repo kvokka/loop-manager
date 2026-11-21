@@ -71,11 +71,11 @@ agent = "dev"
         ["user", "tool_call", "tool_result", "assistant"].repeat(2),
         "{entries:?}"
     );
-    for turn in entries.chunks_exact(4) {
-        assert!(turn[0]["text"].as_str().unwrap().contains("Build web."));
-        assert_eq!(turn[1]["id"], turn[2]["id"]);
-        assert!(turn[2]["output"].to_string().contains("accepted"));
-        assert_eq!(turn[3]["text"], "Готово.");
+    for [user, call, result, assistant] in entries.as_chunks::<4>().0 {
+        assert!(user["text"].as_str().unwrap().contains("Build web."));
+        assert_eq!(call["id"], result["id"]);
+        assert!(result["output"].to_string().contains("accepted"));
+        assert_eq!(assistant["text"], "Готово.");
     }
 
     let replay = cli().output().await.unwrap();
