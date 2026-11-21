@@ -204,7 +204,7 @@ def dispatch(method, params):
         version = params.get("protocolVersion")
         return {"protocolVersion": version if version in supported else supported[-1],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "run-card", "version": "0.0.8"}}
+                "serverInfo": {"name": "run-card", "version": "0.0.9"}}
     if method in ("ping", "resources/templates/list"):
         return {"resourceTemplates": []} if method.startswith("resources") else {}
     if method == "tools/list":

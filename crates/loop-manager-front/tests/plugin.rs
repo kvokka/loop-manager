@@ -23,8 +23,9 @@ fn entry<'a>(market: &'a Value, name: &str) -> &'a Value {
 
 /// The repository is a marketplace of plugins in the current format of each harness: Claude Code reads
 /// `.claude-plugin/marketplace.json` and the plugin's `.claude-plugin/plugin.json`, Codex reads
-/// `.agents/plugins/marketplace.json` and the plugin's root `plugin.json` (Claude Code 2.1, Codex 0.169). Neither
-/// relies on a format the other harness reads only for compatibility.
+/// `.agents/plugins/marketplace.json` and the plugin's root `plugin.json` (Claude Code 2.1, Codex 0.171). Codex loads
+/// no hooks of a root `plugin.json`, so a plugin with hooks has `.codex-plugin/plugin.json` instead. Neither relies on a
+/// format the other harness reads only for compatibility.
 #[test]
 fn the_manifests_are_what_claude_and_codex_install() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -51,13 +52,18 @@ fn check_plugin(root: &Path, claude_entry: &Value, codex_entry: &Value) {
         "both marketplaces point to one plugin"
     );
     let dir = root.join(source);
+    // A root `plugin.json` would shadow `.codex-plugin/plugin.json` in Codex.
+    let codex = match dir.join("hooks").exists() {
+        true => ".codex-plugin/plugin.json",
+        false => "plugin.json",
+    };
     assert!(
-        !dir.join(".codex-plugin").exists(),
-        "no compatibility manifest of Codex"
+        !dir.join(".codex-plugin").exists() || !dir.join("plugin.json").exists(),
+        "one manifest of Codex"
     );
-    let version = json(&dir.join("plugin.json"))["version"].clone();
+    let version = json(&dir.join(codex))["version"].clone();
     assert!(version.is_string());
-    for manifest in [".claude-plugin/plugin.json", "plugin.json"] {
+    for manifest in [".claude-plugin/plugin.json", codex] {
         let plugin = json(&dir.join(manifest));
         let name = plugin["name"].as_str().unwrap();
         assert!(
@@ -77,7 +83,11 @@ fn check_plugin(root: &Path, claude_entry: &Value, codex_entry: &Value) {
         assert_eq!(plugin["version"], version, "{manifest}");
     }
     if claude_entry["name"] == "run-card" {
-        assert_eq!(json(&dir.join("mcp.json"))["mcpServers"]["run-card"]["type"], "stdio");
+        // Codex starts a plugin's MCP server in its own cwd and expands no plugin root in it.
+        let server = &json(&dir.join("mcp.json"))["mcpServers"]["run-card"];
+        assert_eq!(server["type"], "stdio");
+        assert_eq!(server["cwd"], ".");
+        assert_eq!(json(&dir.join(codex))["mcpServers"], "./mcp.json");
         return;
     }
     assert_eq!(version, env!("CARGO_PKG_VERSION"));
