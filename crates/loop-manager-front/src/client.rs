@@ -81,7 +81,7 @@ impl Client {
         let response = self.send("GET", path, None, None, Some("text/event-stream")).await?;
         Ok(Events {
             body: response.into_body(),
-            buf: String::new(),
+            buf: Vec::new(),
         })
     }
 
@@ -133,15 +133,18 @@ pub struct SseEvent {
 
 pub struct Events {
     body: Incoming,
-    buf: String,
+    buf: Vec<u8>,
 }
 
 impl Events {
     /// The next event; `None` once the daemon ended the stream.
     pub async fn next(&mut self) -> Result<Option<SseEvent>, ClientError> {
+        let mut searched = 0;
         loop {
-            if let Some(end) = self.buf.find("\n\n") {
-                let block: String = self.buf.drain(..end + 2).collect();
+            if let Some(end) = self.buf[searched..].windows(2).position(|w| w == b"\n\n") {
+                let bytes: Vec<_> = self.buf.drain(..searched + end + 2).collect();
+                let block = std::str::from_utf8(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                searched = 0;
                 let mut event = SseEvent {
                     id: None,
                     event: "message".into(),
@@ -161,11 +164,12 @@ impl Events {
                 }
                 continue;
             }
+            searched = self.buf.len().saturating_sub(1);
             let Some(frame) = self.body.frame().await.transpose()? else {
                 return Ok(None);
             };
             if let Ok(data) = frame.into_data() {
-                self.buf.push_str(&String::from_utf8_lossy(&data));
+                self.buf.extend_from_slice(&data);
             }
         }
     }

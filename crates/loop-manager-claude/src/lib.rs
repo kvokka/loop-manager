@@ -4,6 +4,7 @@
 #![deny(clippy::disallowed_methods)]
 
 mod adapter;
+mod chat;
 mod part;
 mod stream;
 
@@ -311,6 +312,13 @@ impl Driver for Claude {
         Box::pin(async move { Ok(transcript(&session.0, key, &part::host_dir())) })
     }
 
+    fn chat_log(&self, session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {
+        Ok(loop_manager_contract::driver::chat::ChatLog {
+            path: transcript_path(&session.0, &part::host_dir()),
+            entries: chat::entries,
+        })
+    }
+
     fn live(&self, session: &SessionRef) -> Option<broadcast::Receiver<Value>> {
         let instances = self.instances.lock().unwrap_or_else(PoisonError::into_inner);
         let id = &session.0["session_id"];
@@ -321,22 +329,21 @@ impl Driver for Claude {
     }
 }
 
-/// Where the prompt `key` stands in the session file `<config>/projects/<workdir, non-alphanumerics as ->/<id>.jsonl`;
+/// The session file `<config>/projects/<workdir, non-alphanumerics as ->/<id>.jsonl`;
 /// the config directory of a session inheriting the host is `host`, the one its process got (`part::daemon_vars`).
-fn transcript(session: &Value, key: PromptKey, host: &Path) -> Transcript {
+fn transcript_path(session: &Value, host: &Path) -> PathBuf {
     let config = session["config_dir"]
         .as_str()
         .map_or_else(|| host.to_owned(), PathBuf::from);
     let workdir = session["workdir"].as_str().unwrap_or_default();
-    let dir: String = workdir
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let file = config
+    config
         .join("projects")
-        .join(dir)
-        .join(format!("{}.jsonl", session["session_id"].as_str().unwrap_or_default()));
-    let Ok(text) = std::fs::read_to_string(file) else {
+        .join(chat::project_dir(workdir))
+        .join(format!("{}.jsonl", session["session_id"].as_str().unwrap_or_default()))
+}
+
+fn transcript(session: &Value, key: PromptKey, host: &Path) -> Transcript {
+    let Ok(text) = std::fs::read_to_string(transcript_path(session, host)) else {
         return Transcript::Missing;
     };
     let records: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();

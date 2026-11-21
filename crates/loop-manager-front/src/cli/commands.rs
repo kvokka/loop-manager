@@ -50,6 +50,9 @@ pub enum RunCommand {
     /// its session from now on. Exits 0 however the run ends; `loop-manager run wait` gives the outcome.
     Watch {
         id: String,
+        /// Show messages, tool calls and results from the beginning of the current session, then follow live.
+        #[arg(long, conflicts_with = "from")]
+        chat: bool,
         #[arg(long)]
         from: Option<i64>,
     },
@@ -198,7 +201,10 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             print(json, &runs);
         }
         RunCommand::Show { id } => print(json, &client.request("GET", &run_path(&id, ""), None, None).await?),
-        RunCommand::Watch { id, from } => {
+        RunCommand::Watch { id, chat: true, .. } => {
+            return super::chat::follow(client.stream(&run_path(&id, "/live?chat=true")).await?, json).await;
+        }
+        RunCommand::Watch { id, from, .. } => {
             let query = from.map(|f| format!("?from={f}")).unwrap_or_default();
             follow(client.stream(&run_path(&id, &format!("/live{query}"))).await?, json).await?;
         }

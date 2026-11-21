@@ -383,6 +383,7 @@ trait Driver: Send + Sync {
 
     // transcript
     fn transcript(&self, instance: &InstanceHandle, session: &SessionRef, key: PromptKey) -> BoxFuture<Result<Transcript, Failure>>;
+    fn chat_log(&self, session: &SessionRef) -> std::io::Result<ChatLog>;
     fn live(&self, session: &SessionRef) -> Option<broadcast::Receiver<serde_json::Value>>;
 }
 ```
@@ -395,13 +396,15 @@ trait Driver: Send + Sync {
 | `SessionPlan` | `New { workdir, run, attempt, token, actor, bead }` or `Resume { session: SessionRef, workdir, run, attempt, token, actor, bead }`; the adapter needs `run`/`attempt` only to name files in the state directory, and `run`, `token`, the tracker `actor` and the run's `bead` (when it has one) to set the attempt environment (4.6) |
 | `Split` | `{ process: ProcessPart, session: SessionPart, fingerprint: Fingerprint }`; the two parts are opaque serializable values of the adapter; `fingerprint` = SHA-256 of the harness name and the canonical JSON of `process` (see 8) |
 | `InstanceHandle` | `{ id, pid, start_time, pgid }`; `start_time` is the kernel start time of `pid` (`/proc/<pid>/stat`), pid + start time identify the process ([event model](event-model.md#state)) |
-| `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. claude: `{session_id, config_dir, workdir}` (`config_dir` null: the session inherits the host, and its transcript is under the daemon's `CLAUDE_CONFIG_DIR`, else `~/.claude`); codex: `{thread_id, codex_home}` (the transcript lives in `CODEX_HOME`; `codex_home` is not read yet: a resume takes the home of the process part) |
+| `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. claude: `{session_id, config_dir, workdir}` (`config_dir` null: the session inherits the host, and its transcript is under the daemon's `CLAUDE_CONFIG_DIR`, else `~/.claude`); codex: `{thread_id, codex_home}` (the transcript lives in `CODEX_HOME`; the chat view uses this home to find a closed thread; a resume takes the home of the process part) |
 | `PromptKey` | UUID v5 of `"loop-manager:prompt:<run>/<attempt n>/<prompt n>"` in the URL namespace; the idempotency key of one prompt (see 6.4) |
 | `Transcript` | `Missing` or `Present { delivered: bool }` — whether the session exists and whether the prompt with `key` is in it; answered or not is not told apart: a resumed session never has a turn in flight (the old process is always stopped before the resume), so a delivered prompt is reconciled either way |
 | `Health` | `Ok`, `Degraded { text }` (the instance stays `ready` and keeps its sessions; `instance.degraded`, 8), `Dead` |
 
 The live tap (`live`) is the direct relay of the live view ([event model](event-model.md#journal)): raw harness
 messages of a session, up to 256 buffered, a slow reader loses messages; nothing of it enters the state or the journal.
+For the chat view, `chat_log` returns the transcript path and a decoder for its JSONL records. The frontend keeps
+one read position for both history and subsequent appends, including partial records at the end of the file.
 
 ### 4.3 Normalized events
 

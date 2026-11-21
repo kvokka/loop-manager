@@ -52,7 +52,7 @@ pub use finish::MAX_REMARKS;
 pub use gates::{GateSpec, valid_key};
 pub use hooks::{BundledHook, ExecHooks, HookRunner};
 pub use msg::{Create, Decision, Msg, Outcome, Verdict};
-pub use read::{Reader, RunFilter};
+pub use read::{AttemptSession, Reader, RunFilter};
 
 type Drivers = Arc<BTreeMap<String, Arc<dyn Driver>>>;
 

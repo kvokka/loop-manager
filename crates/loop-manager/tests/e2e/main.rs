@@ -9,6 +9,7 @@ mod agent_mail;
 mod api;
 mod await_step;
 mod bridge;
+mod chat;
 mod claude;
 mod cli;
 mod cli_local;

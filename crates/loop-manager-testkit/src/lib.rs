@@ -376,6 +376,10 @@ impl Driver for ScriptedDriver {
     }
 
     /// The scripted driver has no raw harness stream.
+    fn chat_log(&self, _session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {
+        Err(std::io::Error::other("scripted sessions have no chat log"))
+    }
+
     fn live(&self, _session: &SessionRef) -> Option<broadcast::Receiver<Value>> {
         None
     }

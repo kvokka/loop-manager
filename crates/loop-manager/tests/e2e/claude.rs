@@ -59,6 +59,16 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, agent: &str) -> Da
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn watch_chat_replays_and_follows_a_running_tool() {
+    let provider = Provider::start(vec![Reply::Turn(vec![
+        Reply::Bash(super::chat::command()),
+        Reply::Text("Готово.".into()),
+    ])])
+    .await;
+    super::chat::check(&daemon(&provider).await, "Bash").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_claude_session_that_calls_the_finisher_passes_its_run() {
     let finish = format!("{} finish pass --summary built", common::EXE);
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;

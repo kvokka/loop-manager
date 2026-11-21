@@ -2,6 +2,7 @@
 //! Local commands include `format`, `daemon`, `cache clear`, `--version`, and `doctor` and `config check|explain`
 //! on a file named with `--config`.
 
+mod chat;
 mod commands;
 mod config;
 mod finish;

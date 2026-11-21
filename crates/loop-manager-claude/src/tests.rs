@@ -58,6 +58,14 @@ fn every_flag_goes_again_on_a_resume_and_isolation_cuts_the_host() {
 }
 
 #[test]
+fn chat_finds_transcripts_in_long_and_unicode_project_paths() {
+    assert_eq!(chat::project_dir("/🚀/x"), "----x");
+    let workdir = format!("/{}🚀", "abc/".repeat(50));
+    let expected = format!("{}-x95qzg", "-abc".repeat(50));
+    assert_eq!(chat::project_dir(&workdir), expected);
+}
+
+#[test]
 fn the_transcript_tells_where_the_prompt_stands() {
     let dir = tempfile::tempdir().unwrap();
     let session = json!({ "session_id": "s1", "config_dir": dir.path(), "workdir": "/w/my rig" });

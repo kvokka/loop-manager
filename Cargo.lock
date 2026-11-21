@@ -664,6 +664,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "walkdir",
 ]
 
 [[package]]
@@ -708,6 +709,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "loop-manager-core",
+ "notify",
  "serde",
  "serde_json",
  "tempfile",

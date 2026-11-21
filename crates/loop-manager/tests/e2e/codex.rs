@@ -55,6 +55,16 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, inherit_host: bool
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn watch_chat_replays_and_follows_a_running_tool() {
+    let provider = Provider::start(vec![Reply::Turn(vec![
+        Reply::Command(super::chat::command()),
+        Reply::Text("Готово.".into()),
+    ])])
+    .await;
+    super::chat::check(&daemon(&provider).await, "exec_command").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_codex_thread_calls_the_mcp_of_the_daemon_over_tcp() {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()

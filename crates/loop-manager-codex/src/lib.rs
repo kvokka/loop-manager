@@ -4,6 +4,7 @@
 #![deny(clippy::disallowed_methods)]
 
 mod adapter;
+mod chat;
 mod part;
 mod roles;
 mod rpc;
@@ -149,7 +150,11 @@ impl Codex {
         lock(&instance.tokens).insert(thread.to_owned(), token.unwrap_or_default().to_owned());
         let model = result["model"].as_str().map(str::to_owned);
         lock(&instance.stream).bind(thread, model);
-        lock(&instance.live).insert(thread.to_owned(), broadcast::channel(256).0);
+        let tap = rpc::ThreadTap {
+            messages: broadcast::channel(256).0,
+            path: result["thread"]["path"].as_str().map(PathBuf::from),
+        };
+        lock(&instance.live).insert(thread.to_owned(), tap);
     }
 }
 
@@ -354,12 +359,32 @@ impl Driver for Codex {
         })
     }
 
+    fn chat_log(&self, session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {
+        let thread = thread_id(session);
+        let active = lock(&self.instances)
+            .values()
+            .find_map(|i| lock(&i.live).get(thread)?.path.clone());
+        let path = match active {
+            Some(path) => path,
+            None => {
+                let home = session.0["codex_home"]
+                    .as_str()
+                    .ok_or_else(|| std::io::Error::other("missing thread home"))?;
+                chat::saved(std::path::Path::new(home), thread)?
+            }
+        };
+        Ok(loop_manager_contract::driver::chat::ChatLog {
+            path,
+            entries: chat::entries,
+        })
+    }
+
     fn live(&self, session: &SessionRef) -> Option<broadcast::Receiver<Value>> {
         let instances = lock(&self.instances);
         let thread = thread_id(session);
         instances
             .values()
-            .find_map(|i| lock(&i.live).get(thread).map(broadcast::Sender::subscribe))
+            .find_map(|i| lock(&i.live).get(thread).map(|tap| tap.messages.subscribe()))
     }
 }
 

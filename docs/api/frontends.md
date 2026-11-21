@@ -34,6 +34,12 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   that falls behind the tap's buffer (256 messages) gets `lagged` with `{"missed": n}` and goes on. The stream ends
   once it has read past the run's terminal event, and when the client leaves. A later attempt's session is picked up
   as it starts.
+- `GET /v1/runs/{id}/live?chat=true` streams the conversation from the beginning of the current attempt’s session.
+  Each `chat` event carries a JSON object with a `type` of `user` or `assistant` (with `text`), `tool_call`
+  (with `name` and `input`), or `tool_result` (with `output`). Calls and results carry the matching `id` when supplied
+  by the harness. A result can also carry `is_error`.
+  The daemon follows the harness transcript as it is written and picks up new sessions until run end. A transcript
+  read failure ends the stream with `chat_error` and its `message`. Journal cursors apply only to the event view.
 
 The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir` — the directory of
 `loop-manager.toml`, `root` and `rigs`, each `{name, path, vars}`; the root is not among the rigs); agents
@@ -73,6 +79,9 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   TOON documents. Journal events include their `seq`, `type` and `data`. Events outside the journal (such as
   `harness` and `lagged`) have `event` and `data` fields. With `--json`, each line contains the original SSE data as
   a JSON value. A watch exits 0 when the run's stream ends. Use `loop-manager run wait` for the outcome.
+- `loop-manager run watch <run> --chat` shows the conversation as readable turns, including tool input and output.
+  Connecting during a tool call shows the call and follows its result. Connecting after the last AI attempt ends
+  replays its chat if it is still the current attempt. With `--json`, each entry is one JSON line.
 - `loop-manager run wait <run>... [--timeout <dur>]` waits on the event stream (not by polling) until every named run is
   terminal, then prints for each `id`, `state`, `class`, `reason` and the finisher's `summary` and `data` (with
   `--json` an array of these objects). A run already terminal is answered at once. Exit codes: 0 when all passed,
@@ -132,7 +141,7 @@ tokens in every session, so an agent names it in its own config
   ([config](../design/config.md#permissions)).
 - The state of a run shows each attempt's `session`: the harness's own session reference (claude
   `{session_id, config_dir, workdir}`, codex `{thread_id, codex_home}`). After the run a human may open that conversation
-  with the harness's own tools; loop-manager takes no part in it.
+  with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
   bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).
 - Joining a live session and handing control over to a human are not in the first release: it has no operation, no

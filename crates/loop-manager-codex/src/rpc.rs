@@ -25,6 +25,11 @@ pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 type Reply = Result<Value, Value>;
 
+pub(crate) struct ThreadTap {
+    pub(crate) messages: broadcast::Sender<Value>,
+    pub(crate) path: Option<std::path::PathBuf>,
+}
+
 pub(crate) struct Instance {
     pub(crate) home: Value,
     pub(crate) stdin: tokio::sync::Mutex<Option<ChildStdin>>,
@@ -35,7 +40,7 @@ pub(crate) struct Instance {
     pub(crate) stream: Mutex<Stream>,
     /// The turn in flight of each thread, for `turn/interrupt`.
     pub(crate) turns: Mutex<HashMap<String, String>>,
-    pub(crate) live: Mutex<HashMap<String, broadcast::Sender<Value>>>,
+    pub(crate) live: Mutex<HashMap<String, ThreadTap>>,
     /// The attempt token of each thread: what the thread's commands carry in their environment.
     pub(crate) tokens: Mutex<HashMap<String, String>>,
 }
@@ -154,7 +159,7 @@ pub(crate) async fn read(
         };
         let thread = msg["params"]["threadId"].as_str().unwrap_or_default();
         if let Some(live) = lock(&instance.live).get(thread) {
-            let _ = live.send(msg.clone());
+            let _ = live.messages.send(msg.clone());
         }
         if method == "turn/started" {
             let turn = msg["params"]["turn"]["id"].as_str().unwrap_or_default().to_owned();

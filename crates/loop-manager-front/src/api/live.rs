@@ -2,6 +2,8 @@
 //! a `seq`, and the raw messages of its current session relayed from the adapter as they come. The core never stores
 //! those messages, so a reconnect gets only the new ones; the history is in the harness's transcript.
 
+mod chat;
+
 use super::{
     Api, ApiError, ErrorReply, Param, State,
     events::{GAP, after_last, event, gap, read},
@@ -31,11 +33,13 @@ const BATCH: usize = 256;
 pub(crate) struct LiveQuery {
     /// The first `seq` to send; absent: from the oldest event held (or after `Last-Event-ID`).
     from: Option<i64>,
+    /// Replay the current session's chat and follow it to run end. Mutually exclusive with a journal cursor.
+    chat: Option<bool>,
 }
 
 /// The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current
 /// session as `event: harness` with no `id`; `event: lagged` with `{"missed": n}` when the reader fell behind the
-/// session. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.
+/// session. With `chat=true`, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.
 #[utoipa::path(get, path = "/v1/runs/{id}/live",
     params(("id" = String, Path), LiveQuery, ("Last-Event-ID" = Option<String>, Header)),
     responses((status = OK, content_type = "text/event-stream", body = String),
@@ -48,14 +52,29 @@ pub(crate) async fn live(
     headers: HeaderMap,
     Param(Query(query)): Param<Query<LiveQuery>>,
 ) -> Result<Response, ApiError> {
-    if state.reader.run(&id)?.is_none() {
+    let Some(view) = state.reader.run(&id)? else {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "not_found",
             format!("no run `{id}`"),
         ));
+    };
+    let cursor = query.from.or_else(|| after_last(&headers));
+    if query.chat == Some(true) {
+        if cursor.is_some() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "chat has no journal cursor",
+            ));
+        }
+        let first = serde_json::from_value::<u32>(view["attempt"].clone())
+            .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
+        let (tx, rx) = mpsc::channel(BATCH);
+        tokio::spawn(async move { chat::relay(&state, &id, first, &tx).await });
+        return Ok(sse(rx));
     }
-    let from = match query.from.or_else(|| after_last(&headers)) {
+    let from = match cursor {
         Some(from) => {
             read(&state, from, 1).map_err(|e| gap(&e))?;
             from
@@ -68,8 +87,13 @@ pub(crate) async fn live(
     };
     let (tx, rx) = mpsc::channel(BATCH);
     tokio::spawn(relay(state.0.clone(), id, from, tx));
-    let stream: ReceiverStream<Result<Event, Infallible>> = ReceiverStream::new(rx);
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()).into_response())
+    Ok(sse(rx))
+}
+
+fn sse(rx: mpsc::Receiver<Result<Event, Infallible>>) -> Response {
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn relay(state: Arc<Api>, run: String, mut next: i64, tx: mpsc::Sender<Result<Event, Infallible>>) {
