@@ -182,3 +182,46 @@ fn every_command_a_skill_names_exists() {
     }
     assert!(seen > 0, "no command found in {}", skills.display());
 }
+
+/// The run-card hook, given a PostToolUse event with the option `auto_open` set to `option`: the context it adds.
+fn auto_open(option: &str, event: Value) -> Option<String> {
+    use std::io::Write;
+    let hook = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/run-card/hooks/auto_open.py");
+    let mut child = std::process::Command::new("python3")
+        .arg(hook)
+        .env("CLAUDE_PLUGIN_OPTION_AUTO_OPEN", option)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    write!(child.stdin.take().unwrap(), "{event}").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let reply: Value = serde_json::from_slice(&out.stdout).ok()?;
+    Some(reply["hookSpecificOutput"]["additionalContext"].as_str()?.to_owned())
+}
+
+/// With `auto_open` on, a started run, by the CLI or the MCP tool, asks for its card on the daemon the command named.
+#[test]
+fn the_run_card_opens_after_a_run_start_only_when_the_user_asked() {
+    let bash = |command: &str, stdout: &str| {
+        serde_json::json!({ "tool_name": "Bash", "tool_input": { "command": command },
+            "tool_response": { "stdout": stdout, "stderr": "" } })
+    };
+    let bare = bash("loop-manager run start shop check", "run_7\n");
+    assert!(auto_open("true", bare.clone()).unwrap().contains(r#"{"run": "run_7"}"#));
+    assert_eq!(auto_open("false", bare), None);
+    let other = bash(
+        "loop-manager --socket /tmp/w.sock run start shop check --json",
+        "{\n  \"run\": \"run_9\",\n  \"continue_from\": \"run_2\"\n}",
+    );
+    assert!(
+        auto_open("true", other)
+            .unwrap()
+            .contains(r#"{"socket": "/tmp/w.sock", "run": "run_9"}"#)
+    );
+    assert_eq!(auto_open("true", bash("loop-manager run watch run_7", "run_7\n")), None);
+    let mcp = serde_json::json!({ "tool_name": "mcp__loop-manager__start_run",
+        "tool_response": [{ "type": "text", "text": "run: run_3\nnothing_ready: false" }] });
+    assert!(auto_open("true", mcp).unwrap().contains(r#"{"run": "run_3"}"#));
+}

@@ -153,6 +153,7 @@ Install `run-card@loop-manager` from the [operator plugin marketplace](../../plu
 In an MCP Apps host, ask to show the expanded card for a run ID. Its formula stays in place while the
 current step, round, step attempt and wait reason change. A dotted arrow marks a possible return;
 the highlighted arrows mark the checks in the run's `back_from`. Click the heading to collapse the card.
+In Claude Code, the per-user plugin option `auto_open` shows the card of every run Claude starts.
 
 The host starts the plugin over stdio. It reads the run and the ordered steps and `back_to` edges of the
 currently configured formula. If the formula was removed, it shows the current step alone. The card

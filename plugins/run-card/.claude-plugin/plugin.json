@@ -1,6 +1,6 @@
 {
   "name": "run-card",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Follow a loop-manager run as a live formula diagram in chat.",
   "mcpServers": {
     "run-card": {
@@ -13,5 +13,13 @@
   "author": {
     "name": "loop-manager",
     "url": "https://github.com/kvokka/loop-manager"
+  },
+  "userConfig": {
+    "auto_open": {
+      "type": "boolean",
+      "title": "Open the card on run start",
+      "description": "After Claude starts a run with `loop-manager run start` or the `start_run` tool, show its live card without being asked.",
+      "default": false
+    }
   }
 }
