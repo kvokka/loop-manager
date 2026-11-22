@@ -311,7 +311,7 @@ async fn acp_replays_a_task_follows_its_tool_reads_only_and_survives_the_client(
     assert_eq!(messages.count(), 0, "{live:#?}");
 
     // A second resume replays from scratch, with the new comment.
-    let (again, response) = acp.call(6, "session/resume", resume).await;
+    let (again, response) = acp.call(6, "session/resume", resume.clone()).await;
     assert_eq!(response, json!({ "jsonrpc": "2.0", "id": 6, "result": {} }));
     let third = (on(&again, &ids.root).into_iter())
         .find(|u| u["messageId"] == "c3")
@@ -329,6 +329,22 @@ async fn acp_replays_a_task_follows_its_tool_reads_only_and_survives_the_client(
     if !again.iter().any(second) {
         acp.until("the second tool call", second).await;
     }
+
+    // A resume that supersedes one still replaying, and a close: every request has exactly one response.
+    let request = |id: u64, method: &str| json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": resume });
+    acp.send(request(7, "session/resume")).await;
+    let (_, response) = acp.call(8, "session/resume", resume.clone()).await;
+    assert_eq!(response, json!({ "jsonrpc": "2.0", "id": 8, "result": {} }));
+    let (_, response) = acp.call(9, "session/close", json!({ "sessionId": ids.root })).await;
+    assert_eq!(response, json!({ "jsonrpc": "2.0", "id": 9, "result": {} }));
+    let answers = |id: u64| acp.seen.iter().filter(|l| l["id"] == id).cloned().collect::<Vec<_>>();
+    let first = answers(7);
+    assert_eq!(first.len(), 1, "{:#?}", acp.seen);
+    let superseded = json!({ "code": -32800, "message": "Request cancelled: superseded by a later session/resume" });
+    assert!(
+        first[0]["result"] == json!({}) || first[0]["error"] == superseded,
+        "{first:#?}"
+    );
     drop(acp.stdin.take());
     let exit = tokio::time::timeout(common::WAIT, acp.child.wait()).await;
     assert!(exit.expect("acp exits").unwrap().success());

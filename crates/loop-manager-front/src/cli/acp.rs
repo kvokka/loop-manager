@@ -47,7 +47,7 @@ pub(super) async fn serve(client: &Client) -> ExitCode {
     let (done_tx, mut done) = oneshot::channel();
     thread::spawn(move || done_tx.send(write(rx)));
     let mut agent = Agent::default();
-    let mut open: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let mut open: HashMap<String, Relay> = HashMap::new();
     loop {
         let line = tokio::select! {
             line = lines.recv() => line,
@@ -63,7 +63,7 @@ pub(super) async fn serve(client: &Client) -> ExitCode {
             }),
             Some(Call::Resume { id, root, path, replay }) => {
                 if let Some(old) = open.remove(&root) {
-                    old.abort();
+                    old.stop("superseded by a later session/resume").await;
                 }
                 match resume(client, &out, id, &root, &path, replay).await {
                     Ok(relay) => {
@@ -75,7 +75,7 @@ pub(super) async fn serve(client: &Client) -> ExitCode {
             }
             Some(Call::Close { id, root }) => Some(match open.remove(&root) {
                 Some(relay) => {
-                    relay.abort();
+                    relay.stop("the session was closed").await;
                     result(id, json!({}))
                 }
                 None => missing(id, &root),
@@ -87,7 +87,7 @@ pub(super) async fn serve(client: &Client) -> ExitCode {
             break;
         }
     }
-    open.values().for_each(JoinHandle::abort);
+    open.values().for_each(|relay| relay.task.abort());
     drop(out);
     done.await.unwrap_or(ExitCode::FAILURE)
 }
@@ -111,6 +111,21 @@ fn write(mut rx: mpsc::Receiver<Out>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The relay of an open root, and the way to stop it.
+struct Relay {
+    task: JoinHandle<()>,
+    stop: oneshot::Sender<&'static str>,
+}
+
+impl Relay {
+    /// Stops the relay once it has answered a `session/resume` still waiting for its replay with `reason`.
+    async fn stop(self, reason: &'static str) {
+        // A relay that already ended has nothing left to answer.
+        let _ = self.stop.send(reason);
+        let _ = self.task.await;
+    }
+}
+
 /// Opens the stream of `root` and starts its relay; the snapshot of the bead goes out first when `replay`.
 async fn resume(
     client: &Client,
@@ -119,7 +134,7 @@ async fn resume(
     root: &str,
     path: &str,
     replay: bool,
-) -> Result<JoinHandle<()>, Value> {
+) -> Result<Relay, Value> {
     let failure = |e: ClientError| match e {
         ClientError::Api { status: 404, .. } => missing(id.clone(), root),
         e => error(id.clone(), -32603, &e.to_string()),
@@ -133,13 +148,30 @@ async fn resume(
         // The writer is gone only when the process ends anyway.
         let _ = out.send(Out::Line(line)).await;
     }
-    Ok(tokio::spawn(relay(events, View::new(root, id, replay), out.clone())))
+    let (stop, stopped) = oneshot::channel();
+    let task = tokio::spawn(relay(events, View::new(root, id, replay), out.clone(), stopped));
+    Ok(Relay { task, stop })
 }
 
-/// Sends the updates of each event of a root's stream; an end of the stream ends the process.
-async fn relay(mut events: Events, mut view: View, out: mpsc::Sender<Out>) {
+/// Sends the updates of each event of a root's stream; an end of the stream ends the process. A stop answers the
+/// pending `session/resume`, if any, and ends the relay alone.
+async fn relay(
+    mut events: Events,
+    mut view: View,
+    out: mpsc::Sender<Out>,
+    mut stopped: oneshot::Receiver<&'static str>,
+) {
     let reason = loop {
-        let event = match events.next().await {
+        let next = tokio::select! {
+            next = events.next() => next,
+            reason = &mut stopped => {
+                if let Some(reply) = reason.ok().and_then(|reason| view.cancel(reason)) {
+                    let _ = out.send(Out::Line(reply)).await;
+                }
+                return;
+            }
+        };
+        let event = match next {
             Ok(Some(event)) => event,
             Ok(None) => break "the daemon ended the stream".to_owned(),
             Err(e) => break e.to_string(),
@@ -459,6 +491,11 @@ impl View {
             }
         };
         Ok(vec![update(&self.child(thread), update_)])
+    }
+
+    /// The answer to a `session/resume` still waiting for the end of its replay when the view is dropped.
+    fn cancel(&mut self, reason: &str) -> Option<Value> {
+        (self.request.take()).map(|id| error(id, -32800, &format!("Request cancelled: {reason}")))
     }
 
     /// The end of the replay: each session's `replay_complete` when the history was asked for, the root's state, and

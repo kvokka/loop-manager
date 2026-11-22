@@ -395,3 +395,19 @@ fn a_failed_stream_ends_the_process() {
     );
     assert!(view.updates("node", "{").is_err());
 }
+
+#[test]
+fn a_dropped_view_answers_its_pending_resume_once() {
+    let mut view = View::new("shop/t-1", json!(7), true);
+    assert_eq!(
+        view.cancel("superseded by a later session/resume"),
+        Some(json!({"jsonrpc":"2.0","id":7,"error":{"code":-32800,
+            "message":"Request cancelled: superseded by a later session/resume"}}))
+    );
+    assert_eq!(view.cancel("the session was closed"), None);
+    assert!(view.updates("replayed", "{}").unwrap().is_empty());
+
+    let mut replayed = View::new("shop/t-1", json!(8), true);
+    replayed.updates("replayed", "{}").unwrap();
+    assert_eq!(replayed.cancel("the session was closed"), None);
+}

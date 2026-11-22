@@ -65,8 +65,8 @@ translator, which tells a child by its `#`.
 |---|---|
 | `initialize` | `{protocolVersion: 2, capabilities: {session: {}}, info: {name: "loop-manager", title: "loop-manager", version}}`. A version under 2: `-32022` with `{requested, supported: [2]}`; not an integer: `-32602`. Any other request before it, or `initialize` after another request: `-32600`. |
 | `session/list` | Every task, most recently active first, as `{sessionId, cwd, title, updatedAt}`: `cwd` is the project's root directory, `title` `<bead> <title>`. With `cwd`, only the tasks whose directory is exactly it. One page: a `cursor` or a relative `cwd` is `-32602`. |
-| `session/resume` | Below. A child id: `-32602`. A task the daemon does not know: `-32002` with `data.sessionId`. A `replayFrom` other than `{"type": "start"}`: `-32602`. A task already open is opened again from scratch. |
-| `session/close` | An open task: its stream is dropped, `{}`. A child: `-32602`. Anything else: `-32002`. |
+| `session/resume` | Below. A child id: `-32602`. A task the daemon does not know: `-32002` with `data.sessionId`. A `replayFrom` other than `{"type": "start"}`: `-32602`. A task already open is opened again from scratch; a resume of it still replaying is answered `-32800`. |
+| `session/close` | An open task: its stream is dropped, `{}`, after a resume of it still replaying is answered `-32800`. A child: `-32602`. Anything else: `-32002`. |
 | `session/new`, `session/prompt` | Error `1`, `loop-manager acp is read-only: start work with loop-manager run start` (a prompt to a child: `-32602`). Nothing is inserted. |
 | `session/cancel`, any notification | Ignored. |
 | anything else | `-32601`. A batch: `-32600` with `id: null`; a line that is not JSON: `-32700`. |
