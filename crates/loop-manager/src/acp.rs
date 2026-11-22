@@ -1,6 +1,7 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an ACP v2 agent over stdio for an outside client, and a client of
 //! the daemon's API. Its sessions are the daemon's runs: listed, replayed from their history and followed as the
-//! history grows. It observes: a prompt is refused, and closing a session leaves the run as it is.
+//! history grows. A prompt is one of the commands `/lm-takeover` and `/lm-continue`, sent to the daemon with the attempt
+//! the session shows; any other prompt is refused, and closing a session leaves the run as it is.
 
 mod translate;
 
@@ -19,7 +20,10 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::oneshot;
@@ -38,8 +42,31 @@ struct Daemon {
     project: Option<String>,
 }
 
-/// The sessions followed, by run: dropping the sender stops the follower.
-type Following = Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>;
+/// The commands a prompt may be: the name, what it does, the operation of the run in the API.
+const COMMANDS: [(&str, &str, &str); 2] = [
+    (
+        "lm-takeover",
+        "Take the run over: nothing of loop-manager moves it until /lm-continue",
+        "takeover",
+    ),
+    (
+        "lm-continue",
+        "Hand the run back to loop-manager, in the same attempt",
+        "continue",
+    ),
+];
+
+/// The sessions of the client, by run.
+#[derive(Default)]
+struct Sessions {
+    /// The sessions followed: dropping the sender stops the follower.
+    following: HashMap<String, oneshot::Sender<()>>,
+    /// The attempt each session opened has shown its client: of the last attempt boundary sent, or that the state at
+    /// its opening was in. A closed session keeps it: the client's screen still shows that attempt.
+    shown: HashMap<String, u32>,
+}
+
+type Shared = Arc<Mutex<Sessions>>;
 
 /// Serves one client on stdin and stdout until it goes; logs go to stderr.
 pub(crate) fn run(socket: Option<PathBuf>, project: Option<String>) -> ExitCode {
@@ -67,8 +94,9 @@ fn fail(message: &str) -> ExitCode {
 }
 
 async fn serve(daemon: Arc<Daemon>) -> Result<()> {
-    let following = Following::default();
-    let (list, resume, close) = (daemon.clone(), (daemon, following.clone()), following);
+    let sessions = Shared::default();
+    let (list, prompt) = (daemon.clone(), (daemon.clone(), sessions.clone()));
+    let (resume, close) = ((daemon, sessions.clone()), sessions);
     Agent
         .v2()
         .name("loop-manager")
@@ -112,9 +140,13 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
                 let run = request.session_id.to_string();
                 let (stop_tx, stop) = oneshot::channel();
                 // A session resumed again drops its earlier follower.
-                lock(&resume.1).insert(run.clone(), stop_tx);
+                let mut sessions = lock(&resume.1);
+                sessions.following.insert(run.clone(), stop_tx);
+                sessions.shown.insert(run.clone(), 0);
+                drop(sessions);
                 let follower = Follower {
                     daemon: resume.0.clone(),
+                    sessions: resume.1.clone(),
                     connection: connection.clone(),
                     run,
                     replay,
@@ -127,7 +159,7 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
             async move |request: schema::CloseSessionRequest,
                         responder: Responder<schema::CloseSessionResponse>,
                         _: ConnectionTo<Peer>| {
-                lock(&close).remove(&request.session_id.to_string());
+                lock(&close).following.remove(&request.session_id.to_string());
                 responder.respond(schema::CloseSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
@@ -145,17 +177,16 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async |request: schema::PromptRequest,
-                   responder: Responder<schema::PromptResponse>,
-                   _: ConnectionTo<Peer>| {
-                let error = agent_client_protocol::Error::new(
-                    ErrorCode::INVALID_REQUEST,
-                    format!(
-                        "run `{}` is observed only: `loop-manager acp` takes no prompts",
-                        request.session_id
-                    ),
-                );
-                responder.respond_with_error(error)
+            async move |request: schema::PromptRequest,
+                        responder: Responder<schema::PromptResponse>,
+                        connection: ConnectionTo<Peer>| {
+                let (daemon, sessions) = prompt.clone();
+                connection.clone().spawn(async move {
+                    match command(&daemon, &sessions, &connection, &request).await {
+                        Ok(answer) => responder.respond(answer),
+                        Err(e) => responder.respond_with_error(e),
+                    }
+                })
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -194,6 +225,92 @@ impl Daemon {
             Ok(view) => matches!(view["state"].as_str(), Some("passed" | "failed" | "cancelled")),
             Err(ClientError::Api { status, .. }) => status == 404,
             Err(ClientError::Io(_)) => false,
+        }
+    }
+}
+
+/// Sends the command `request` is to the daemon with the attempt its session shows, then the command and the daemon's
+/// answer to the client: the answer to `session/prompt` comes once the daemon has taken or refused it.
+async fn command(
+    daemon: &Daemon,
+    sessions: &Shared,
+    connection: &ConnectionTo<Peer>,
+    request: &schema::PromptRequest,
+) -> Result<schema::PromptResponse> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let run = request.session_id.to_string();
+    let blocks = serde_json::to_value(&request.prompt).map_err(|e| internal(&e))?;
+    let text: String = (blocks.as_array().into_iter().flatten())
+        .filter_map(|block| block["text"].as_str())
+        .collect();
+    let text = text.trim();
+    let Some(&(name, _, operation)) = COMMANDS.iter().find(|(name, ..)| text.strip_prefix('/') == Some(*name)) else {
+        let error = format!(
+            "run `{run}` takes commands only: `/lm-takeover` takes it over, `/lm-continue` hands it back to loop-manager"
+        );
+        return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_REQUEST, error));
+    };
+    let Some(attempt) = lock(sessions).shown.get(&run).copied() else {
+        let error =
+            format!("session `{run}` is not open: `session/resume` opens it, and a command carries its attempt");
+        return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_REQUEST, error));
+    };
+    // The client's key is unique within its session only, and a key of the daemon is one of the whole daemon.
+    let key = (request.idempotency_key.as_ref()).map(|key| format!("acp:{run}:{}", key.as_ref()));
+    let path = run_path(&run, &format!("/{operation}"));
+    let body = json!({ "attempt": attempt });
+    let line = match daemon.client.request("POST", &path, Some(&body), key.as_deref()).await {
+        Ok(reply) => answered(name, reply["answer"].as_str().unwrap_or_default(), attempt),
+        Err(ClientError::Api { error, .. }) => {
+            format!("/{name} failed: {}", error["message"].as_str().unwrap_or_default())
+        }
+        Err(e) => return Err(internal(&e)),
+    };
+    let id = match &request.idempotency_key {
+        Some(key) => format!("lm-key-{}", key.as_ref()),
+        None => format!("lm-command-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+    };
+    send(
+        connection,
+        &run,
+        json!({ "sessionUpdate": "user_message_chunk", "messageId": id,
+        "content": { "type": "text", "text": text } }),
+    )?;
+    send(
+        connection,
+        &run,
+        json!({ "sessionUpdate": "agent_message_chunk", "messageId": format!("{id}-reply"),
+        "content": { "type": "text", "text": format!("— {line} —\n") } }),
+    )?;
+    Ok(schema::PromptResponse::new(id))
+}
+
+/// The notice line of the daemon's `answer` to the command `name` sent with `attempt`: what came of it, and what to do.
+fn answered(name: &str, answer: &str, attempt: u32) -> String {
+    match (name, answer) {
+        ("lm-takeover", "accepted") => {
+            "/lm-takeover accepted: nothing of loop-manager moves the run until /lm-continue".into()
+        }
+        (_, "accepted") => "/lm-continue accepted: loop-manager goes on with the run in the same attempt".into(),
+        (_, "stale_attempt") => format!(
+            "/{name} refused: the run is past attempt {attempt} that this session shows; once its current attempt shows \
+             (`session/resume` brings a closed session up to date), send /{name} again"
+        ),
+        (_, "run_terminal") => format!("/{name} refused: the run has ended"),
+        (_, "not_manual") => format!("/{name} refused: the run is not taken over; /lm-takeover takes it"),
+        (_, answer) => format!("/{name} refused: {answer}"),
+    }
+}
+
+/// Sends `update` as a `session/update` of `run`; one the schema does not take is logged and skipped.
+fn send(connection: &ConnectionTo<Peer>, run: &str, update: Value) -> Result<()> {
+    let kind = update["sessionUpdate"].clone();
+    let notification = json!({ "sessionId": run, "update": update });
+    match serde_json::from_value::<schema::UpdateSessionNotification>(notification) {
+        Ok(notification) => connection.send_notification(notification),
+        Err(e) => {
+            eprintln!("loop-manager acp: run `{run}`: a `{kind}` update ACP does not take: {e}");
+            Ok(())
         }
     }
 }
@@ -241,6 +358,7 @@ fn session(run: &Value, projects: &Value) -> Value {
 /// What follows one run for the client.
 struct Follower {
     daemon: Arc<Daemon>,
+    sessions: Shared,
     connection: ConnectionTo<Peer>,
     run: String,
     replay: bool,
@@ -290,6 +408,11 @@ impl Follower {
                             }
                             next = n + 1;
                             ended |= record["kind"] == "run";
+                            if record["kind"] == "attempt"
+                                && let Some(attempt) = record["attempt"].as_u64().and_then(|a| u32::try_from(a).ok())
+                            {
+                                lock(&self.sessions).shown.insert(self.run.clone(), attempt);
+                            }
                             let updates = translator.record(&record);
                             if self.replay || responder.is_none() {
                                 updates.into_iter().try_for_each(|u| self.send(u))?;
@@ -325,25 +448,17 @@ impl Follower {
         responder.map_or(Ok(()), |r| r.respond_with_error(internal(&error)))
     }
 
-    /// The current state, then the answer to `session/resume`: the protocol's mark of a replay done.
+    /// The current state and the commands, then the answer to `session/resume`: the protocol's mark of a replay done.
     fn answer(&self, responder: Responder<schema::ResumeSessionResponse>, state: &str) -> Result<()> {
         self.send(json!({ "sessionUpdate": "state_update", "state": state }))?;
+        let commands: Vec<Value> = (COMMANDS.iter())
+            .map(|(name, description, _)| json!({ "type": "command", "name": name, "description": description }))
+            .collect();
+        self.send(json!({ "sessionUpdate": "available_commands_update", "availableCommands": commands }))?;
         responder.respond(schema::ResumeSessionResponse::new())
     }
 
-    /// Sends `update` as a `session/update` of the run; one the schema does not take is logged and skipped.
     fn send(&self, update: Value) -> Result<()> {
-        let kind = update["sessionUpdate"].clone();
-        let notification = json!({ "sessionId": self.run, "update": update });
-        match serde_json::from_value::<schema::UpdateSessionNotification>(notification) {
-            Ok(notification) => self.connection.send_notification(notification),
-            Err(e) => {
-                eprintln!(
-                    "loop-manager acp: run `{}`: a `{kind}` update ACP does not take: {e}",
-                    self.run
-                );
-                Ok(())
-            }
-        }
+        send(&self.connection, &self.run, update)
     }
 }

@@ -149,8 +149,8 @@ Code: `crates/loop-manager/src/acp.rs` and `acp/translate.rs`; the guide is [ACP
 client (T3 Code, Zed, any ACP client), started by the client, locally or over `ssh -T`. Each client runs its own
 process; it reaches the daemon on its API socket (`--socket`, else `LOOP_MANAGER_SOCKET`, else the XDG default, as
 every command does), and the harnesses stay with the daemon. Logs go to stderr. One ACP session is one run: the
-session id is the run id, across steps, attempts and harnesses. The command observes runs: it lists them, replays
-their history and follows it.
+session id is the run id, across steps, attempts and harnesses. The command lists runs, replays their history and
+follows it, and takes a run over and hands it back ([Humans and runs](#humans-and-runs)).
 
 - `initialize`: protocol version 2 only; a client that asks for version 1 gets `-32022`. The capabilities are the
   baseline `session` (`{}`); `agentInfo` is `loop-manager` and the binary's version.
@@ -161,14 +161,24 @@ their history and follows it.
 - `session/resume` of a run id: `replayFrom: {"type": "start"}` sends every record of the run's history
   ([History of a run](#http-api)) from the first as `session/update` notifications; without `replayFrom` nothing of
   the past is sent. Then a `state_update` gives the current state (`running` while the run lives, `idle` once it
-  ended), and the answer follows: the protocol's mark that the replay is done. The records written afterwards follow
+  ended), an `available_commands_update` the commands below (`{"type": "command", "name": "lm-takeover", …}`), and
+  the answer follows: the protocol's mark that the replay is done. The records written afterwards follow
   as they come, until `session/close`, the client leaving, or the run's end, after which an `idle` `state_update`
   comes. A broken history stream (a restart of the daemon, a dropped connection) is opened again every second from
   the record after the last one read: no hole, no repeat. An unknown run is `-32002`; another replay cursor is
   `-32602`.
-- `session/close` stops following; the run goes on. `session/cancel` is ignored. `session/new` is `-32601` with the
-  message "runs are started with `loop-manager run start`". `session/prompt` is `-32600`: the run is observed only.
-  Other methods are `-32601`.
+- `session/prompt` is a command when its text, trimmed, is `/lm-takeover` (`POST /v1/runs/{id}/takeover`) or
+  `/lm-continue` (`POST /v1/runs/{id}/continue`). The request's `attempt` is the attempt the session has shown: of the
+  last `attempt` record of the run's history the process has read for it, kept after `session/close`; a daemon whose
+  run is at another attempt answers `stale_attempt` and changes nothing. The client's `idempotencyKey` goes as the
+  `Idempotency-Key` `acp:<run>:<key>` (a client keeps its keys unique within one session). Once the daemon answered,
+  the session gets the command as a `user_message_chunk` (`messageId` `lm-key-<key>`, or `lm-command-<n>` without a
+  key) and the answer as an `agent_message_chunk` notice line (`messageId` `<that id>-reply`): `accepted`, or a
+  refusal (`stale_attempt`, `run_terminal`, `not_manual`) with what to do; an error reply of the daemon is a notice
+  line too, an unreachable daemon `-32603`. The answer to the prompt is that `messageId`. Any other prompt is
+  `-32600` with a message that names the two commands; so is a command to a session this process has not opened.
+- `session/close` stops following; the run goes on, manual or not. `session/cancel` is ignored. `session/new` is
+  `-32601` with the message "runs are started with `loop-manager run start`". Other methods are `-32601`.
 - Several clients on one run each get the same stream: each is its own process reading the history.
 
 How a history record becomes updates:
@@ -185,8 +195,8 @@ How a history record becomes updates:
 The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
 history, and a client may drop it.
 
-Not supported: control of a run from an ACP client (taking over its session, instructions, commands, answers to
-permission requests).
+Not supported from an ACP client: instructions to a run taken over, `session/cancel` as a stop, answers to permission
+requests.
 
 ## Humans and runs
 
@@ -201,8 +211,9 @@ permission requests).
   with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
   bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).
-- A human takes a run over (`loop-manager run takeover`, `POST /v1/runs/{id}/takeover`) and hands it back
-  (`loop-manager run continue`, `POST /v1/runs/{id}/continue`). While it is manual (`control: "manual"` in its
+- A human takes a run over (`loop-manager run takeover`, `POST /v1/runs/{id}/takeover`, `/lm-takeover` from an
+  [ACP client](#acp)) and hands it back (`loop-manager run continue`, `POST /v1/runs/{id}/continue`,
+  `/lm-continue`). While it is manual (`control: "manual"` in its
   state), nothing of loop-manager moves it: no next step, retry, policy decision or timeout, nor the timeout of a
   parent step that waits for it; what was already running goes on and is recorded, and the event that would have
   moved it shows as `manual.deferred`. Continue gives every budget back whole and applies that event once, in the same

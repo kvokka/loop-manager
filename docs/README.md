@@ -16,7 +16,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/addons.md](guide/addons.md) | using addons: declare, attach, parameters; an agent's subagents |
 | [guide/addon-development.md](guide/addon-development.md) | writing an addon: the manifest, the agent side and the orchestrator side, tests, changelogs and releases |
 | [design/config.md](design/config.md) | every config file and key; layers and "explain config"; packs, agents, formulas, triggers, addons |
-| [guide/acp-clients.md](guide/acp-clients.md) | watching runs from an ACP client (T3 Code, Zed, JetBrains), locally or over ssh |
+| [guide/acp-clients.md](guide/acp-clients.md) | watching and taking over runs from an ACP client (T3 Code, Zed, JetBrains), locally or over ssh |
 | [api/frontends.md](api/frontends.md) | the HTTP API, the CLI and `loop-manager acp`; what a human sees and does with a run |
 | [api/mcp.md](api/mcp.md), [api/openapi.json](api/openapi.json) | the MCP server; the OpenAPI document |
 | [../demos/README.md](../demos/README.md) | two live examples |

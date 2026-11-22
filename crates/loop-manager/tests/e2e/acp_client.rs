@@ -1,5 +1,5 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an outside ACP v2 client, the SDK's, on the built binary over
-//! stdio, observing the runs of a daemon whose harness is the `acp-agent` fixture. No model.
+//! stdio, observing and taking over the runs of a daemon whose harness is the `acp-agent` fixture. No model.
 
 use crate::common::{self, Daemon};
 use agent_client_protocol::schema::ProtocolVersion;
@@ -10,6 +10,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Stdio,
+    time::Instant,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -157,6 +158,25 @@ impl Acp {
         Ok(before)
     }
 
+    /// `session/prompt` of `text` to `run`, with the idempotency key `key`: the answer.
+    async fn prompt(&self, run: &str, text: &str, key: Option<&str>) -> Result<Value, agent_client_protocol::Error> {
+        let mut request = json!({ "sessionId": run, "prompt": [{ "type": "text", "text": text }] });
+        if let Some(key) = key {
+            request["idempotencyKey"] = json!(key);
+        }
+        let request: schema::PromptRequest = serde_json::from_value(request).unwrap();
+        let answer = self.cx.send_request(request).block_task().await?;
+        Ok(serde_json::to_value(answer).unwrap())
+    }
+
+    /// The command `text` to `run`, answered: its echo and the notice of the daemon's answer, which comes last.
+    async fn command(&mut self, run: &str, text: &str, key: Option<&str>) -> (Value, Vec<Value>) {
+        let answer = self.prompt(run, text, key).await.unwrap();
+        let reply = format!("{}-reply", answer["messageId"].as_str().unwrap());
+        let seen = self.until(|u| u["update"]["messageId"] == reply.as_str()).await;
+        (answer, seen)
+    }
+
     /// The updates up to the first that `stop` takes, which comes last.
     async fn until(&mut self, stop: impl Fn(&Value) -> bool) -> Vec<Value> {
         let mut seen = Vec::new();
@@ -179,6 +199,21 @@ fn text(update: &Value) -> &str {
         .as_str()
         .or(content["content"]["text"].as_str())
         .unwrap_or_default()
+}
+
+/// The names of the commands an `available_commands_update` lists; none for another update.
+fn commands(update: &Value) -> Vec<&str> {
+    let commands = update["update"]["availableCommands"].as_array().into_iter().flatten();
+    commands.map(|c| c["name"].as_str().unwrap()).collect()
+}
+
+/// The control of `run` (`lm` or `manual`) and its attempt, from its view.
+async fn control(d: &Daemon, run: &str) -> (String, u64) {
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    (
+        view["control"].as_str().unwrap().to_owned(),
+        view["attempt"].as_u64().unwrap(),
+    )
 }
 
 fn printed(update: &Value) -> bool {
@@ -234,7 +269,11 @@ async fn clients_replay_a_running_run_follow_it_live_and_leave_it_running_when_t
     let again = second.resume(&run, true).await.unwrap();
     assert!(again.iter().all(|u| u["sessionId"] == run.as_str()), "{again:#?}");
     assert!(text(&again[0]).starts_with("— step "), "{again:#?}");
-    assert_eq!(state(again.last().unwrap()), "running", "{again:#?}");
+    let [.., now, commands_now] = again.as_slice() else {
+        panic!("{again:#?}")
+    };
+    assert_eq!(state(now), "running", "{again:#?}");
+    assert_eq!(commands(commands_now), ["lm-takeover", "lm-continue"], "{again:#?}");
     let texts: Vec<&str> = again.iter().map(text).collect();
     assert!(texts.contains(&"— attempt 1: new_session on fake —\n"), "{texts:#?}");
     assert!(texts.contains(&"Build web."), "{texts:#?}");
@@ -243,7 +282,7 @@ async fn clients_replay_a_running_run_follow_it_live_and_leave_it_running_when_t
     // A client without a replay gets only the current state, then what comes.
     let mut live = Acp::start(&d, &[]).await;
     let now = live.resume(&run, false).await.unwrap();
-    assert_eq!(now.iter().map(state).collect::<Vec<_>>(), ["running"], "{now:#?}");
+    assert_eq!(now.iter().map(state).collect::<Vec<_>>(), ["running", ""], "{now:#?}");
     // Closing a session and a client leaves the run running.
     let close: schema::CloseSessionRequest = serde_json::from_value(json!({ "sessionId": run })).unwrap();
     first.cx.send_request(close).block_task().await.unwrap();
@@ -272,6 +311,11 @@ async fn a_new_session_a_prompt_an_unknown_run_and_a_v1_client_get_their_errors(
     let prompt: schema::PromptRequest =
         serde_json::from_value(json!({ "sessionId": "r1", "prompt": [{ "type": "text", "text": "hi" }] })).unwrap();
     let error = acp.cx.send_request(prompt).block_task().await.unwrap_err();
+    assert_eq!(i32::from(error.code), -32600, "{error:?}");
+    assert!(error.message.contains("`/lm-takeover`"), "{error:?}");
+    assert!(error.message.contains("`/lm-continue`"), "{error:?}");
+    // A command needs the attempt of a session open here.
+    let error = acp.prompt("r1", "/lm-takeover", None).await.unwrap_err();
     assert_eq!(i32::from(error.code), -32600, "{error:?}");
     let error = acp.resume("no-such-run", true).await.unwrap_err();
     assert_eq!(i32::from(error.code), -32002, "{error:?}");
@@ -311,4 +355,105 @@ async fn a_client_follows_a_run_across_a_restart_of_the_daemon_with_no_hole_and_
         .collect();
     let numbers: Vec<u64> = notices.iter().map(|id| id[3..].parse().unwrap()).collect();
     assert!(numbers.is_sorted_by(|a, b| a < b), "{seen:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn commands_take_a_run_over_and_hand_it_back_in_the_same_attempt_and_another_client_sees_it() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut first = Acp::start(&d, &[]).await;
+    let mut replayed = first.resume(&run, true).await.unwrap();
+    // The commands come after the state, with and without a replay.
+    let at = replayed.iter().position(|u| state(u) == "running").unwrap();
+    assert_eq!(
+        commands(&replayed[at + 1]),
+        ["lm-takeover", "lm-continue"],
+        "{replayed:#?}"
+    );
+    // The session has shown attempt 1 once the tool has printed.
+    if !replayed.iter().any(printed) {
+        replayed.extend(first.until(printed).await);
+    }
+    let mut second = Acp::start(&d, &[]).await;
+    let now = second.resume(&run, false).await.unwrap();
+    assert_eq!(commands(&now[1]), ["lm-takeover", "lm-continue"], "{now:#?}");
+
+    let (answer, seen) = first.command(&run, "/lm-takeover", Some("k1")).await;
+    let echo = seen.iter().find(|u| u["update"]["messageId"] == answer["messageId"]);
+    assert_eq!(echo.map(text), Some("/lm-takeover"), "{seen:#?}");
+    assert!(
+        text(seen.last().unwrap()).starts_with("— /lm-takeover accepted"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("manual".to_owned(), 1));
+    second.until(|u| text(u) == "— taken over by an operator —\n").await;
+    // The same key again is the same submission.
+    let (again, _) = first.command(&run, "/lm-takeover", Some("k1")).await;
+    assert_eq!(again["messageId"], answer["messageId"]);
+
+    // A repeat of a key gets the daemon's first answer and changes nothing.
+    for _ in 0..2 {
+        let (_, seen) = first.command(&run, "/lm-continue", Some("k2")).await;
+        let accepted = text(seen.last().unwrap());
+        assert!(accepted.starts_with("— /lm-continue accepted"), "{seen:#?}");
+        assert_eq!(control(&d, &run).await, ("lm".to_owned(), 1));
+    }
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["state"], "running");
+    second.until(|u| text(u) == "— handed back to loop-manager —\n").await;
+    let (_, seen) = second.command(&run, "/lm-continue", None).await;
+    let refused = text(seen.last().unwrap());
+    assert!(
+        refused.starts_with("— /lm-continue refused: the run is not taken over"),
+        "{seen:#?}"
+    );
+
+    // The clients go; the run stays manual.
+    second.command(&run, "/lm-takeover", None).await;
+    drop((first, second));
+    assert_eq!(control(&d, &run).await, ("manual".to_owned(), 1));
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_from_the_screen_of_an_earlier_attempt_is_refused_and_changes_nothing() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    let seen = acp.resume(&run, true).await.unwrap();
+    if !seen.iter().any(printed) {
+        acp.until(printed).await;
+    }
+    // Closed, the session still shows attempt 1, while a restart of the daemon resumes the run in attempt 2.
+    let close: schema::CloseSessionRequest = serde_json::from_value(json!({ "sessionId": run })).unwrap();
+    acp.cx.send_request(close).block_task().await.unwrap();
+    d.post("/v1/daemon/restart?timeout_s=1", json!({}), None).await.unwrap();
+    let deadline = Instant::now() + common::WAIT;
+    loop {
+        let view = d.client.request("GET", &format!("/v1/runs/{run}"), None, None).await;
+        if view.is_ok_and(|view| view["attempt"] == 2) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{run} stays in attempt 1");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let (_, seen) = acp.command(&run, "/lm-takeover", None).await;
+    let refused = text(seen.last().unwrap());
+    assert!(
+        refused.starts_with("— /lm-takeover refused: the run is past attempt 1"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("lm".to_owned(), 2));
+    // Opened again, the session shows attempt 2, and the command goes through.
+    acp.resume(&run, false).await.unwrap();
+    let (_, seen) = acp.command(&run, "/lm-takeover", None).await;
+    assert!(
+        text(seen.last().unwrap()).starts_with("— /lm-takeover accepted"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("manual".to_owned(), 2));
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
 }
