@@ -4,8 +4,8 @@ A harness is an agent CLI loop-manager drives (claude, codex). The core treats e
 ([contracts 4](contracts.md#4-driver-interface)); an adapter translates the harness's protocol into the trait. A
 harness that speaks the Agent Client Protocol, version 2, is driven by the one ACP driver, `crates/loop-manager-acp`
 ([ACP v2 harnesses](#acp-v2-harnesses)): named in the config alone, or known to the build by a
-[profile](#profiles), as claude is. A harness with a protocol of its own gets an adapter crate,
-`crates/loop-manager-<name>`, as codex does. Everything known of one harness — its protocol, the shape of its
+[profile](#profiles), as claude and codex are. A harness with a protocol of its own gets an adapter crate,
+`crates/loop-manager-<name>`. Everything known of one harness — its protocol, the shape of its
 failures, its options, its model short names, its `doctor` checks — lives in its adapter or profile. Adapters are
 modules of the one `loop-manager` binary, not processes of their own.
 
@@ -22,7 +22,7 @@ A harness comes in one of three ways, the first that fits:
   no code and no rebuild.
 - **An ACP v2 agent with a profile.** An agent that takes more than ACP carries (hooks, skills, subagents, a native
   block, an isolated home), reports its failures in fields of its own, or needs `doctor` checks gets a
-  [profile](#profiles) of the ACP driver, as claude does:
+  [profile](#profiles) of the ACP driver, as claude and codex do:
   1. `src/profile/<name>.rs` in `crates/loop-manager-acp` with the functions of the points of the table in
      "Profiles", and one row in `PROFILES` (`src/profile.rs`) naming them and `minimum`, the oldest version of the
      agent the profile supports, inclusive.
@@ -31,9 +31,9 @@ A harness comes in one of three ways, the first that fits:
      is an adapter of the build, and its `[harness.<name>]` takes the keys of an ACP harness (`command`, `args`,
      `env`, `model`, `trace`); a `binary` is a config error.
   3. One row in `ADAPTERS` (`crates/loop-manager/src/harness.rs`).
-  4. The agent pinned in `mise.toml` at an exact version, with the runtime it needs (claude: `node`), and the
+  4. The agent pinned in `mise.toml` at an exact version, with the runtime it needs (claude, codex: `node`), and the
      contract suite in `crates/loop-manager-acp/tests/harness/` ([harness updates](../harness-updates.md)).
-- **A harness with a protocol of its own** gets an adapter crate, as codex does:
+- **A harness with a protocol of its own** gets an adapter crate:
   1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Driver`.
   2. In it, one exported description of itself:
 
@@ -70,10 +70,11 @@ latest of each) lists none. The core reads them from `Config::adapters`, which t
 when it loads the config (`config::load_for`); the core knows no harness by name. Which vendor a harness reaches its
 model through is the harness's own setting (host config or `native.<harness>`); the core neither reads nor names it.
 
-A test of the adapter checks the table against the harness's own model list, with no model call (codex: `model/list`
-of `codex app-server`, `crates/loop-manager-codex/tests/harness/models.rs`). A target the harness does not list, or
-marks as replaced, fails it: that is a finding for the owner, who picks the new name; the table is never switched to
-another model silently.
+A test of the adapter checks the table against the harness's own model list, with no model call (codex: the values of
+the `model` option `codex-acp` offers in its `session/new` answer,
+`crates/loop-manager-acp/tests/harness/codex/models.rs`). A target the harness does not list, or marks as replaced,
+fails it: that is a finding for the owner, who picks the new name; the table is never switched to another model
+silently.
 
 Nothing else in the root names a harness; a `[harness.<name>]` with neither a row in `ADAPTERS` nor a `command` is a
 config error that lists the known ones.
@@ -254,30 +255,28 @@ its process. Its minimum version is 0.109.1, the version its contract suite runs
   `.claude.json`, which start in every session that inherits the host (`host_mcp_check`).
 
 **`codex`** drives `codex-acp`, the ACP adapter of codex (`@agentclientprotocol/codex-acp` on npm, pinned in
-`mise.toml`); the adapter carries its own codex and starts `codex app-server` with the `node` it runs on, so a
-session is three processes in the adapter's group. `loop_manager_acp::CODEX` is its adapter: the executable is
-`command` of `[harness.codex]`, else `mise which codex-acp`, else `codex-acp` on `PATH`; the short model names of the
-native driver (`astra`, `luna`, `terra`, `sol`); minimum version 2.9.0, the version its contract suite runs on.
-`[harness.codex]` takes the keys of an ACP harness; `max_sessions` and `instance_idle_s` are a config error, "the key
-is gone: an ACP harness runs one process per session". The build's `ADAPTERS` still lists the native codex driver
-(`loop-manager-codex`), and `loop_manager_acp::profiled` answers false for `codex`, so `[harness.codex]` keeps the
-native driver's keys and no codex agent is checked against this profile when the config loads.
+`mise.toml`); the adapter carries its own codex (`@openai/codex`) and runs it with the `node` it runs on, so a session
+is three processes in the adapter's group. `ADAPTERS` lists it as `loop_manager_acp::CODEX`: the executable is
+`command` of `[harness.codex]`, else `mise which codex-acp`, else `codex-acp` on `PATH`; when mise found it, the
+directory of `mise which node` goes first in the `PATH` of its process. Its short model names are `astra`, `luna`,
+`terra`, `sol`; its minimum version is 2.9.0, the version its contract suite runs on. `[harness.codex]` takes the
+keys of an ACP harness; `max_sessions` and `instance_idle_s` are a config error, "the key is gone: an ACP harness
+runs one process per session".
 
 - **What it sends.** Nothing beyond ACP in `session/new` and `session/resume`, and no MCP servers there: the codex
-  config goes as JSON in `CODEX_CONFIG` of the adapter's process, which hands it to every thread it opens. In order,
-  a later key over an earlier one: `analytics.enabled`, `feedback.enabled`, `check_for_update_on_startup` false and
-  `notify = []`; for an isolated session without a key of its own, the model provider the host's `config.toml`
-  selects (`model_provider` and `model_providers.<name>`, without `http_headers` and `experimental_bearer_token`: the
-  adapter puts the provider in the argv of the app-server); the `native.codex` block without `approval_policy` and
+  config goes as JSON in `CODEX_CONFIG` of the adapter's process, which hands it to every thread it opens. In order, a
+  later key over an earlier one: `analytics.enabled`, `feedback.enabled`, `check_for_update_on_startup` false and
+  `notify = []`; for an isolated session without a key of its own, the model provider the host's `config.toml` selects
+  (`model_provider` and `model_providers.<name>`, without `http_headers` and `experimental_bearer_token`: the adapter
+  puts the provider in the arguments it starts codex with); the `native.codex` block without `approval_policy` and
   `sandbox_mode`; `model` and `model_reasoning_effort` of the config; the attempt's variables in
   `shell_environment_policy.set` of the block; the MCP servers as codex's own `mcp_servers`, each `required = true`,
-  over the block's of the same name; the enabled hooks added to the block's `hooks` (in the shape of claude's
-  settings, the timeout in seconds) with `bypass_hook_trust = true`; the targets as `agents.<name> = {description,
-  config_file}` over the block's `agents`. An empty key is not written. The MCP servers go there and not in
-  `mcpServers` because the adapter drops `required`, takes a stdio command only as an absolute path and skips a
-  server the host config names; the model and the effort go there because the adapter offers as options only the
-  models codex lists. So the session part has no `model`, `effort` or MCP servers, and the driver sets one config
-  option: `mode`.
+  over the block's of the same name; the enabled hooks added to the block's `hooks` (in the shape of claude's settings,
+  the timeout in seconds) with `bypass_hook_trust = true`; the targets as `agents.<name> = {description, config_file}`
+  over the block's `agents`. An empty key is not written. The MCP servers go there and not in `mcpServers` because the
+  adapter drops `required`, takes a stdio command only as an absolute path and skips a server the host config names; the
+  model and the effort go there because the adapter offers as options only the models codex lists. So the session part
+  has no `model`, `effort` or MCP servers, and the driver sets one config option: `mode`.
 - **The mode.** The adapter sets the approval policy and the sandbox of every turn by the session's mode alone. The
   mode follows `native.codex.approval_policy` (else `never`, decision 117) and `native.codex.sandbox_mode`, else
   `sandbox_mode` of the host's `config.toml` for a session that inherits the host, else `danger-full-access`
@@ -309,15 +308,15 @@ native driver's keys and no codex agent is checked against this profile when the
   its own: the adapter logs codex in by that key, and codex writes it to the session's own home. The protocol trace
   redacts those two variables and the values of the `env` and `headers` of the MCP servers.
 - **Failures.** The final error of a turn carries only codex's words, so after the code (`-32000` `auth_required`,
-  `-32602` `config_error`, `-32002` on a resume `transcript_divergence`, `1001`, the adapter's app-server lost,
+  `-32602` `config_error`, `-32002` on a resume `transcript_divergence`, `1001`, codex lost under the adapter,
   `harness_crash`) the message decides: `required MCP servers failed to initialize` is `tool_failure`; a message that
   starts with `Quota exceeded.`, `To use Codex with your ChatGPT plan`, `Your workspace is out of credits.` or `You hit
-  your spend cap` is `billing`; `hit your usage limit` is `quota_exhausted`, with no `retry_at_ms`; `ran out of room
-  in the model's context window` is `context_overflow`; a message that starts with `Selected model is at capacity` is
-  `overloaded`. Then the HTTP status after `exceeded retry limit, last status:` (`retried_by_harness`) or after
-  `unexpected status`: 429 `rate_limited`; 408, 500 to 504 and 529 `overloaded` (`retried_by_harness`); 401, 403
-  `auth_required`; 400, 404 `config_error`. Anything else is `unknown` with the message. No `notice` stands for a
-  failure.
+  your spend cap` is `billing`; `hit your usage limit` is `quota_exhausted`, with no `retry_at_ms`; `ran out of room in
+  the model's context window` is `context_overflow`; a message that starts with `Selected model is at capacity` is
+  `overloaded` (`retried_by_harness`). Then the HTTP status after `exceeded retry limit, last status:`
+  (`retried_by_harness`) or after `unexpected status`: 429 `rate_limited`; 408, 500 to 504 and 529 `overloaded`
+  (`retried_by_harness`); 401, 403 `auth_required`; 400, 404 `config_error`. Anything else is `unknown` with the
+  message. No `notice` stands for a failure.
 - **The account.** The native codex driver's hash (`Fingerprint::of("codex", …)`): the name and value of the first
   credential variable of `env`, else the host's codex home (`CODEX_HOME` of the daemon, else `~/.codex`). The hashes
   are fixed by test.
@@ -383,11 +382,12 @@ sender, `health`, the stop ladder `stop`, `watch` (a panic of the reader task be
 
 ## Contract suite
 
-Every adapter has `crates/loop-manager-<name>/tests/harness/contract.rs`, the module `contract` of its one integration
-test binary: the fifteen scenarios of [harness updates](../harness-updates.md) on the real binary against a fake
-provider of `crates/loop-manager-testkit` (`anthropic` or `openai`; a harness on either API needs no new fake). They
-check the events the adapter sends, not the fake. A harness update is accepted when the suite passes on it (harness
-updates, steps).
+Every adapter crate has `crates/loop-manager-<name>/tests/harness/contract.rs`, the module `contract` of its one
+integration test binary, and every profile its own module of the test binary `harness` of `crates/loop-manager-acp`
+(claude `contract.rs`, codex `codex/contract.rs`): the fifteen scenarios of [harness updates](../harness-updates.md) on
+the real binary against a fake provider of `crates/loop-manager-testkit` (`anthropic` or `openai`; a harness on either
+API needs no new fake). They check the events the adapter sends, not the fake. A harness update is accepted when the
+suite passes on it (harness updates, steps).
 
 ## Known limits of the driver interface
 
@@ -402,12 +402,11 @@ Made for the two harnesses there are; none is changed before a harness needs it.
   A harness that takes no client id or keeps no readable history can only answer whether the session exists, and
   the guard against a double delivery after the daemon died does not hold for it.
 - Hooks of `EffectiveConfig` are in the Claude dialect (`event`, `matcher`, `command`, `timeout`). codex takes the same
-  form, with the attempt environment exported in front of the command (a codex hook runs with the process environment,
-  not the thread's); a harness without command hooks can only refuse an agent that has any, as a `config_error` at the
+  form in its config; a harness without command hooks can only refuse an agent that has any, as a `config_error` at the
   start of a run.
 - `EffectiveConfig.targets` (the subagents a session may call) is delivered as the harness's own subagent
-  definitions: claude takes them in `agents` of `_meta.claudeCode.options`, codex as agent roles of the thread
-  (`config.agents`, a generated role file per target).
+  definitions: claude takes them in `agents` of `_meta.claudeCode.options`, codex as agent roles
+  (`agents` of its config, a generated role file per target).
 - `capabilities(&ProcessPart)` takes a process part although the minimum version does not depend on it; the root
   reads it from `Adapter.minimum` instead.
 - `InstanceHandle{pid, start_time, pgid}`: an instance is a local child process of the daemon.

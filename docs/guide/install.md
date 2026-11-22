@@ -37,11 +37,12 @@ rustup); `cargo build` then works as above.
 
 loop-manager starts agents through their own command-line harnesses and never downloads or installs them:
 
-- `claude-agent-acp` (the ACP adapter of Claude Code, with the `node` it runs on) and/or `codex` (Codex CLI): the
-  harnesses your agents use. The adapter carries its own Claude Code CLI, so the `claude` harness needs no separate
-  `claude`. Log in to each once as you normally do, or give the agents an API key in `env` (see
-  [the first formula](first-formula.md)). A codex whose host config selects a model provider with an `env_key` needs
-  no login: `codex login status` then says "Not logged in", and `loop-manager doctor` checks that variable instead.
+- `claude-agent-acp` (the ACP adapter of Claude Code) and/or `codex-acp` (the ACP adapter of Codex), with the `node`
+  they run on: the harnesses your agents use. Each adapter carries its own CLI, so the `claude` harness needs no
+  separate `claude` and the `codex` harness no separate `codex`. Log in to each once as you normally do, or give the
+  agents an API key in `env` (see [the first formula](first-formula.md)). A codex whose host config selects a model
+  provider with an `env_key` needs no login: `codex login status` then says "Not logged in", and `loop-manager doctor`
+  checks that variable instead.
 - `br` (beads_rust): only for projects that keep their tasks in a `.beads` tracker. Read
   [its license](../../README.md#the-br-tracker-and-its-license) before you install it.
 
@@ -70,7 +71,7 @@ the same harness settings.
 | Harness | Defaults | Override in the agent config |
 |---|---|---|
 | Claude Code | Sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `DISABLE_FEEDBACK_COMMAND` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` to `1`. The feedback switch covers `/bug` too. | Set the variable in `env` or `native.claude.env`. To opt back into telemetry or error reporting, use an empty string. Claude treats any nonempty value for either as an opt-out. |
-| Codex app-server | Sets `analytics.enabled = false`, `feedback.enabled = false`, `check_for_update_on_startup = false` and `notify = []`. | Set the key under `native.codex`, for example `native.codex.feedback.enabled = true`. |
+| Codex (`codex-acp`) | Sets `analytics.enabled = false`, `feedback.enabled = false`, `check_for_update_on_startup = false` and `notify = []`. | Set the key under `native.codex`, for example `native.codex.feedback.enabled = true`. |
 
 Disabling Claude telemetry also disables remote feature-flag fetching. The broader
 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` switch would additionally suppress the check for a lifted rate limit.
@@ -89,21 +90,21 @@ global `~/.config/mise/config.toml`:
 [tools]
 node = "26.12.0"
 "npm:@agentclientprotocol/claude-agent-acp" = "0.109.1"
-codex = "0"
+"npm:@agentclientprotocol/codex-acp" = "2.9.0"
 "github:Dicklesworthstone/beads_rust" = "0.7.6"
 ```
 
-These are what to install (the repository's `mise.toml` takes node, `claude-agent-acp` and br at an exact version and
-codex by release line). The adapter needs node 22 or newer, and its CLI comes as an optional dependency of its npm
-package, so do not install it with `--omit=optional`. This release supports `claude-agent-acp` 0.109.1 and codex
-0.171.0 and any newer version; below these, or when `--version` shows no version, `loop-manager doctor` and the
+These are what to install (the repository's `mise.toml` takes them at the same exact versions). `claude-agent-acp`
+needs node 22 or newer, and each adapter's CLI comes as an optional dependency of its npm package, so do not install
+them with `--omit=optional`. This release supports `claude-agent-acp` 0.109.1 and `codex-acp` 2.9.0 and any newer
+version; below these, or when `--version` shows no version, `loop-manager doctor` and the
 daemon print a warning naming the minimum and still run the harness. br has its own tested range
 ([tracker-br](../design/tracker-br.md#versions)).
 
 The daemon resolves each binary in this order: the config (`[harness.claude] command = "/path/to/claude-agent-acp"`,
-`[harness.codex] binary = "/path/to/codex"`; br has no such key), then `mise which <name>` (`claude-agent-acp`,
-`codex`, `br`), then `PATH`. A daemon under systemd or launchd has no mise shims on its `PATH`, which is why mise is
-asked directly. `claude-agent-acp` is a node script: when mise found it, the directory of `mise which node` goes first
+`[harness.codex] command = "/path/to/codex-acp"`; br has no such key), then `mise which <name>` (`claude-agent-acp`,
+`codex-acp`, `br`), then `PATH`. A daemon under systemd or launchd has no mise shims on its `PATH`, which is why mise is
+asked directly. Both adapters are node scripts: when mise found one, the directory of `mise which node` goes first
 in the `PATH` of its process, so the daemon needs no node of its own on `PATH`; an adapter named in the config or found
 on `PATH` runs with the daemon's `PATH`, and node must be on it. Without mise, or when mise does not know the tool, the
 bare name is looked up on the daemon's `PATH`; `loop-manager doctor` shows which source each binary came from.
@@ -112,6 +113,9 @@ claude logs in through the CLI the adapter carries: run `mise exec -- claude-age
 `/login` (a `claude` you installed yourself logs in to the same place). On Linux the login is
 `~/.claude/.credentials.json`, which every session without a key of its own uses, isolated sessions too. macOS keeps
 it in the keychain, which loop-manager does not read: an isolated session there needs a key in `env`.
+
+codex reads its login from `~/.codex/auth.json` (or `auth.json` in the daemon's `CODEX_HOME`): log in once with
+`codex login`. Every session without a key of its own uses it; an isolated session gets a link to it.
 
 ## Check the setup
 
@@ -124,7 +128,10 @@ loop-manager doctor                                      # with the daemon runni
 license, the modes of the state and socket directories, and the state with its outbox. claude gets three lines:
 `claude`, the adapter's path, its `--version` and where it was found; `claude login`, whether a session can log in
 (the host's `.credentials.json`, or a key in the agents' `env`); `claude host mcp`, a warning naming the stdio MCP
-servers of your `~/.claude.json`, which start in every session that inherits the host. An ACP harness of the config
+servers of your `~/.claude.json`, which start in every session that inherits the host. codex gets the same three,
+`codex login` checking instead the daemon's `env_key` variable when your `~/.codex/config.toml` selects a model
+provider with one, and `codex sandbox`, a warning naming the agents that run with no sandbox (the mode
+`agent-full-access`). Both get `<name> acp` too, as an ACP harness of the config does. An ACP harness of the config
 gets one line, `<name> acp`: the agent is started, asked `initialize` and stopped, with no session and no tokens
 spent; the line names the agent and its version, the negotiated protocol and the capabilities it advertised
 (`acp-agent 0.0.1, ACP protocol 2; capabilities: session.mcp (stdio, http)`), or is an `error` saying why the agent

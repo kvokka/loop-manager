@@ -52,7 +52,7 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   by the harness. A result can also carry `is_error`.
   The daemon follows the harness transcript as it is written and picks up new sessions until run end. A transcript
   read failure ends the stream with `chat_error` and its `message`. Journal cursors apply only to the event view.
-  An ACP harness (claude, and one named in the config) has no transcript to read: its chat stream ends at once
+  An ACP harness (claude, codex, and one named in the config) has no transcript to read: its chat stream ends at once
   with `chat_error`, and its conversation is in the run's history (`/v1/runs/{id}/history`).
 
 The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir` — the directory of
@@ -99,7 +99,7 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `loop-manager run watch <run> --chat` shows the conversation as readable turns, including tool input and output.
   Connecting during a tool call shows the call and follows its result. Connecting after the last AI attempt ends
   replays its chat if it is still the current attempt. With `--json`, each entry is one JSON line. An ACP harness
-  (claude, and one named in the config) has no chat view; `run watch --history` shows its conversation.
+  (claude, codex, and one named in the config) has no chat view; `run watch --history` shows its conversation.
 - `loop-manager run wait <run>... [--timeout <dur>]` waits on the event stream (not by polling) until every named run is
   terminal, then prints for each `id`, `state`, `class`, `reason` and the finisher's `summary` and `data` (with
   `--json` an array of these objects). A run already terminal is answered at once. Exit codes: 0 when all passed,
@@ -210,8 +210,8 @@ permission requests).
   loop-manager plugin for Claude Code and Codex (`plugins/loop-manager/`) shows a user's agent the runs that wait and passes on the
   user's outcome or cancel. A human answers no permission request: the harness decides them from the config
   ([config](../design/config.md#permissions)).
-- The state of a run shows each attempt's `session`: the harness's own session reference (claude
-  `{session_id, cwd, home?}`, codex `{thread_id, codex_home}`). After the run a human may open that conversation
+- The state of a run shows each attempt's `session`: the harness's own session reference (claude and
+  codex `{session_id, cwd, home?}`). After the run a human may open that conversation
   with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
   bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).

@@ -30,8 +30,8 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **project** | a directory with `loop-manager.toml`: a root, a set of rigs, packs, addons and one tracker database |
 | **root** | the root directory of a project: where agents of scope `root` work, and in a one-repository project the executors too. By default the directory of `loop-manager.toml`, named `root`; both are settings. It need not be a git repository |
 | **rig** | a repository of a project on disk, with its bead prefix and variables (`test_cmd`, `lint_cmd`, …) |
-| **harness** | a kind of agent CLI: `claude`, `codex`, one adapter each; or an ACP v2 agent named in the config, all on one ACP driver |
-| **harness instance** | a running harness process (an app-server or a session process) that serves one or several sessions |
+| **harness** | a kind of agent CLI: `claude`, `codex`, each a profile of the ACP driver; or an ACP v2 agent named in the config on the same driver |
+| **harness instance** | a running harness process that serves sessions; an ACP harness runs one per session |
 | **agent** | a general role (`coder`, `planner`): a role prompt, a prompt template, skills, a scope and default launch settings. It knows nothing of a concrete task. The core's code names no role |
 | **agent scope** | `rig`: the agent works in one rig's directory; `root`: in the root, over all rigs of the project |
 | **launch settings** | three scalars: harness, model, effort |
@@ -68,7 +68,6 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id", and a [history](design/event-model.md#history) of each run's steps, attempts, prompts and outcomes |
 | opencode | The next release, after a spike ([experiments](design/experiments.md)) |
 | pi and other harnesses | Not planned |
-| ACP for codex | Its native app-server protocol; claude runs through `claude-agent-acp`, and a harness the build has no adapter for is an ACP v2 agent named in the config ([adapters](design/adapters.md#acp-v2-harnesses)) |
 | A human joining a live session, handover of control | An operator takes a run over and hands it back (`run takeover`, `run continue`); the run's orchestration stands meanwhile ([contracts 6.1](design/contracts.md#61-states)). Instructions to the session from a client are not supported |
 | An ACP hub "up" for editors | Not planned |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |

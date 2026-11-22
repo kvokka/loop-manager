@@ -105,8 +105,9 @@ permission_mode = "acceptEdits"
 permissions = { allow = ["Bash(loop-manager finish *)"] }
 ```
 
-Under a codex `approval_policy` other than `never`, a command that needs approval is declined. More in
-[config](../design/config.md#permissions).
+A codex agent takes `approval_policy = "never"`, or `"on-request"` with `sandbox_mode` `workspace-write` or
+`read-only`; another policy is a config error. Under `on-request` a command that asks to leave the sandbox is refused,
+and the refusal ends the turn. More in [config](../design/config.md#permissions).
 
 ## 4. Run it
 

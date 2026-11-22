@@ -188,7 +188,7 @@ fn codex_config(
         table(&mut codex, "mcp_servers")?.extend(servers);
     }
     if add_hooks(&mut codex, config.hooks.iter().map(|(name, h)| (name, &h.value)))? {
-        // A hook given in the config of a thread runs only with the bypass.
+        // A hook the adapter hands codex as `-c hooks=` runs only with the bypass of hook trust.
         codex.insert("bypass_hook_trust".into(), json!(true));
     }
     let (agents, roles) = roles::of(config, state)?;

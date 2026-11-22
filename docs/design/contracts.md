@@ -117,7 +117,7 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.taken_over` | `{run}`; an operator took the run over (6.1): its orchestration stands until `run.handed_back` |
 | `run.handed_back` | `{run, deferred}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
-| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the harness or the adapter denied the agent a tool (4.3) and nothing waits on it: `tool` and `tool_use_id` are the harness's (codex: the server request's method and `itemId`), `input` the tool input (null when the harness does not tell it; codex: the request's `params`), `reason` its reason or null |
+| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the harness or the adapter denied the agent a tool (4.3) and nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` its reason or null |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
 | `trigger.skipped` | `{trigger, cause_seq, reason: "overlap"\|"input_unresolved"\|"depth"\|"nothing_ready"\|"rejected", detail}` |
 | `trigger.switched` | `{trigger, enabled}`; the operator switched a trigger on a rig off or back on (`POST /v1/triggers/disable`, `/enable`): off, neither its schedule nor its events fire it, a hand firing still does, and the switch outlives restarts and reloads |
@@ -263,7 +263,7 @@ timeout = "30s"
   one, observed events on the other (see 3.5), so an observer never delays a decision.
 - The hooks of `run.attempt_failed` start once the process the failed attempt stopped is dead, so a hook that reads
   the transcript reads it whole. The wait is at most the stop grace (10 s, after which the process is killed), and
-  none when the instance stays up (a shared app-server).
+  none when the instance stays up (one that serves other sessions).
 - Delivery is at least once: a hook cut by a daemon crash runs again after restart if its run is still in the state
   that emitted the event (see 3.4); observed hooks always run again. Hooks must be idempotent; `seq` identifies the
   event.
@@ -400,7 +400,7 @@ trait Driver: Send + Sync {
 | `SessionPlan` | `New { workdir, run, attempt, token, actor, bead }` or `Resume { session: SessionRef, workdir, run, attempt, token, actor, bead }`; the adapter needs `run`/`attempt` only to name files in the state directory, and `run`, `token`, the tracker `actor` and the run's `bead` (when it has one) to set the attempt environment (4.6) |
 | `Split` | `{ process: ProcessPart, session: SessionPart, fingerprint: Fingerprint }`; the two parts are opaque serializable values of the adapter; `fingerprint` = SHA-256 of the harness name and the canonical JSON of `process` (see 8) |
 | `InstanceHandle` | `{ id, pid, start_time, pgid }`; `start_time` is the kernel start time of `pid` (`/proc/<pid>/stat`), pid + start time identify the process ([event model](event-model.md#state)) |
-| `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. an ACP harness (claude among them): `{session_id, cwd, home?}` (`home`, of an isolated claude session only: the process's `CLAUDE_CONFIG_DIR`, which holds its transcript; without it the session inherits the host's claude config); codex: `{thread_id, codex_home}` (the transcript lives in `CODEX_HOME`; the chat view uses this home to find a closed thread; a resume takes the home of the process part) |
+| `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. an ACP harness (claude and codex among them): `{session_id, cwd, home?}`. `home` is the agent's own config directory, which holds the session's transcript, and a resume takes it again: of an isolated claude session the process's `CLAUDE_CONFIG_DIR`; of a codex session with a home of its own (an isolated one, or one that inherits the host and has skills) the process's `CODEX_HOME`, which holds the thread's rollout; without it the session runs in the host's config. codex's `session_id` is the id of its thread |
 | `PromptKey` | UUID v5 of `"loop-manager:prompt:<run>/<attempt n>/<prompt n>"` in the URL namespace; the idempotency key of one prompt (see 6.4) |
 | `Transcript` | `Missing` or `Present { delivered: bool }` — whether the session exists and whether the prompt with `key` is in it; answered or not is not told apart: a resumed session never has a turn in flight (the old process is always stopped before the resume), so a delivered prompt is reconciled either way |
 | `Health` | `Ok`, `Degraded { text }` (the instance stays `ready` and keeps its sessions; `instance.degraded`, 8), `Dead` |
@@ -466,24 +466,24 @@ Success traps are the adapter's: claude `subtype:"success"` with `is_error:true`
 
 `Capabilities { sessions_per_instance, instance_idle, min_version }`:
 
-- `sessions_per_instance`: claude 1 (a process of its ACP adapter per session, 8); codex the config value
-  `max_sessions` (default 8); an ACP harness of the config 1 ([adapters](adapters.md#acp-v2-harnesses)).
-- `instance_idle`: how long an instance without sessions lives on (8): claude 0, codex the config value
-  `instance_idle_s` (default 60 s), an ACP harness 0.
+- `sessions_per_instance`: 1 on every ACP harness, claude and codex among them: a process of the agent per session
+  (8, [adapters](adapters.md#acp-v2-harnesses)).
+- `instance_idle`: how long an instance without sessions lives on (8): 0 on every ACP harness.
 - Whether the harness retries 429 itself is the adapter's knowledge: it sets `Failure.retried_by_harness` on the
   failure, and the policy never retries on top of a harness that already did. The claude CLI under `claude-agent-acp`
   retries 429 and 5xx itself, up to 10 times by default (`CLAUDE_CODE_MAX_RETRIES` in the process environment; 7 seen
   in the experiment log, claude 2.1.322), so its `rate_limited` and `overloaded` are always retried. codex retries
   5xx, but a 429 only when the provider sent `Retry-After`, once after that pause: a 429 without it is never retried
   by codex and the policy must do it. Whether a quota failure carries `retry_at` shows on the failure itself (claude:
-  subscription login only, from `data.rateLimit.resetsAt` of the turn's error; codex: yes, from the rate-limit
-  update).
+  subscription login only, from `data.rateLimit.resetsAt` of the turn's error; codex: never, its error carries only
+  codex's words, so the policy parks the account for `quota_wait_s` of `default-policy`).
   <!-- MEASURE id=claude-self-retries date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/34 note="delays 0.57→32.8 s on a fake API; set by CLAUDE_CODE_MAX_RETRIES" -->
 - `min_version`: the oldest supported version of the harness binary, inclusive, with no upper bound; the same as
   `Adapter.minimum` ([adapters](adapters.md)): claude 0.109.1, the version of `claude-agent-acp` (not of the claude
-  CLI it carries), codex 0.171.0. A version below it, or `--version` output with no `major.minor.patch` in it, gets a
-  warning naming the minimum from the daemon at start and from `loop-manager doctor`; the harness still runs. An ACP
-  harness of the config has no known version: its check is the protocol version `initialize` settles on.
+  CLI it carries), codex 2.9.0, the version of `codex-acp` (not of the codex it carries). A version below it, or
+  `--version` output with no `major.minor.patch` in it, gets a warning naming the minimum from the daemon at start
+  and from `loop-manager doctor`; the harness still runs. An ACP harness of the config has no known version: its
+  check is the protocol version `initialize` settles on.
 
 `account(process)` returns the account id the gates use (7): a stable hash of the credential source of the
 process part, never the credential itself; an `env` reference counts as written (`${NAME}`), so the id says where
@@ -496,18 +496,18 @@ is given as a reference.
 
 | Concern | claude | codex |
 |---|---|---|
-| Process and session | a `claude-agent-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the generated-files directory, the `home` of an isolated session, the skills and the host inheritance switch, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, MCP servers, system prompt in `append` mode, `_meta.claudeCode.options` with `settingSources`, `settings`, `agents`, `plugins`) and the config options `model`, `effort`, `mode`; the `SessionRef` keeps the session id, cwd and `home` | one app-server per fingerprint over stdio; `ProcessPart` = `CODEX_HOME`, `HOME`, skills (the session's and its subagent targets', links in its own `CODEX_HOME/skills`; with host inheritance that home links the host's `auth.json` and `config.toml`), the default `sandbox_mode`, provider and key variable, process environment; `SessionPart` = cwd, model, effort, instructions, MCP, hooks with `bypass_hook_trust`, the agent roles of the subagent targets, command environment ([experiments](experiments.md#config-and-credential-delivery-experiments-4-and-5)) |
-| Prompt key | `idempotencyKey` of `session/prompt` | `clientUserMessageId` |
-| `prompt.acked` | the answer to `session/prompt` or the first `state_update: running`, whichever comes first | `turn/start` response with a turn id |
-| Turn end | `state_update: idle` with its `stopReason`; `background` while the update lists background work ([adapters](adapters.md#acp-v2-harnesses)) | `turn/completed` only; thread status `idle` does not end a turn (below) |
-| Cancel | `session/cancel`; the idle with `stopReason: cancelled` is `turn.ended{cancelled}` | `turn/interrupt` |
-| Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | full thread config again on every `thread/resume`, after app-server closed the thread (`thread/unsubscribe` until `notLoaded`, at most 10 s, else `transcript_divergence`; a `thread/resume` refused because the thread is still closing is retried within the same 10 s): a thread it still holds keeps the old config |
-| Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | `shell_environment_policy.set` of the thread; a hook runs with the process environment, so each hook command starts with `export` of the same variables |
-| Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | `thread/backgroundTerminals/clean{threadId}` (experimental API): only that thread's commands go, each one's `item/completed` follows; a command that detached itself goes on `close_session`, killed by the thread's attempt token |
-| Transcript check | none: ACP does not tell whether the session holds the prompt, so `Present { delivered: false }` and the prompt goes again with the same idempotency key | `thread/read` with turns: `userMessage` with `clientId == key`, completed turn after it |
+| Process and session | a `claude-agent-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the generated-files directory, the `home` of an isolated session, the skills and the host inheritance switch, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, MCP servers, system prompt in `append` mode, `_meta.claudeCode.options` with `settingSources`, `settings`, `agents`, `plugins`) and the config options `model`, `effort`, `mode`; the `SessionRef` keeps the session id, cwd and `home` | a `codex-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the session's `CODEX_HOME` and the `HOME` of an isolated session, the host's codex home its own home links from, the key variable of the host's model provider, the skills, the codex config of `CODEX_CONFIG` (model, effort, MCP servers, hooks, the agent roles of the subagent targets, the attempt environment, the native block) and the role files, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, system prompt in `append` mode, no MCP servers) and the config option `mode`; the `SessionRef` keeps the session id, cwd and `home` |
+| Prompt key | `idempotencyKey` of `session/prompt` | `idempotencyKey` of `session/prompt`, which the adapter passes on as codex's `clientUserMessageId` |
+| `prompt.acked` | the answer to `session/prompt` or the first `state_update: running`, whichever comes first | as claude |
+| Turn end | `state_update: idle` with its `stopReason`; `background` while the update lists background work ([adapters](adapters.md#acp-v2-harnesses)) | as claude |
+| Cancel | `session/cancel`; the idle with `stopReason: cancelled` is `turn.ended{cancelled}` | as claude |
+| Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | `session/resume` in a new process with the same session part, then `mode` again by `session/set_config_option` (the adapter resumes a session in a mode of its own); the codex config of the new attempt, model and effort included, comes in that process's `CODEX_CONFIG`, its `CODEX_HOME` from the `SessionRef` |
+| Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | the environment of the adapter's process, which codex and its hooks inherit, and the same variables in `shell_environment_policy.set` of the codex config, so codex keeps them in a command's environment |
+| Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | as claude; a command that detached itself goes when the session's process stops, on the sweep of the instance marker |
+| Transcript check | none: ACP does not tell whether the session holds the prompt, so `Present { delivered: false }` and the prompt goes again with the same idempotency key | none, as claude; the adapter does not insert a prompt whose key the thread's history already holds |
 
-Every adapter runs each session process (claude) or instance process (codex) in its own process group, and takes
-the end of a turn from the harness's authoritative signal, never from the answer to a request.
+The driver runs each agent process in its own process group, and takes the end of a turn from the harness's
+authoritative signal, never from the answer to a request.
 
 claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.md#profiles)):
 
@@ -559,43 +559,54 @@ claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.m
   call's id and raw input. A denial claude makes by its own rules (a `deny` rule) reaches the driver only as a failed
   tool call: ACP has no event for it, so it is no `permission_denied`.
 
-codex (`crates/loop-manager-codex`):
+codex (the `codex` profile of `crates/loop-manager-acp`, [adapters](adapters.md#profiles)):
 
-- Transport: loop-manager's own `codex app-server` over stdio; the user's own codex daemon is never used. Protocol types
-  are not generated from the schema: the adapter reads the fields it uses by hand, and the contract suite
-  ([harness updates](../harness-updates.md)) catches a change on every codex update.
-- Signals read: `error` with `willRetry` and `codexErrorInfo`, `turn/completed` with its status,
-  `thread/status/changed`, `account/rateLimits/updated` with the reset time, `rateLimitReachedType` and
-  `spendControlReached`.
-- Thread status `idle` comes before `turn/completed`, and a command that outlives its turn (`exec_command` yields while
-  it runs) runs while the status is `idle`: the turn ends `idle` with `background`, and its late `item/completed` makes
-  the thread idle without background (contract scenario 14). While the provider is silent before its response headers
-  there is no notification at all and codex has no timeout of its own: the core's watchdog owns it.
-- The thread starts with `approvalPolicy = "never"` unless `native.codex.approval_policy` sets another
-  ([config](config.md#permissions)); under another policy the adapter declines command and file-change approvals
-  (`{"decision":"decline"}`, the turn goes on) and answers every other server request with an error; each refused
-  request of a thread is a `permission_denied`.
-- Every MCP server loop-manager gives a thread is `required`: one that does not start fails `thread/start` or
-  `thread/resume` (`required MCP servers failed to initialize`), which is a `tool_failure` before the first prompt. A
-  server of the rig or the host that does not start comes as `mcpServer/startupStatus/updated{status: failed}`: a
-  `tool_failure` of the thread, told at once in a turn and otherwise held until the thread is known to the core (the end
-  of `start_session`/`resume_session`, the next `send_prompt` or `turn/started`, whichever comes first).
-- Two `turn/start` on one thread are not queued but merged: the second becomes a steer of the first. The core sends
-  a session's next prompt only after its turn ended (6.2), so this never happens.
-- Hooks run with the environment of the app-server process, not of the thread (4.6 table, attempt environment); so
-  the attempt token stands in the `export` of the hook command and is visible in its argv, which is accepted.
-- Subagent targets are agent roles of the thread: `config.agents.<type> = {description, config_file}`, over the
-  `agents` table of the native block, which a thread's `agents` would replace. codex takes a role only from a
-  file, so the adapter writes each (`developer_instructions`, `model`, `model_reasoning_effort`,
-  `[[skills.config]]` turning off the process's skills the target has not; any other key drops the role) as
-  `<state>/codex/roles/<hash of its content>.toml` before `thread/start` and `thread/resume`. Roles are not in
-  the fingerprint: sessions with different targets share an app-server. The multi-agent version is codex's
-  choice by the model. A child thread's notifications carry its own thread id and belong to no session
-  ([experiments](experiments.md#codex-subagent-roles-experiment-10)).
-- app-server syncs its plugins over the network by itself (a `git fetch` of the vendor's plugins repository, seen
-  on 0.168), as a child that carries the instance marker. It outlives a killed daemon until a restarted one sweeps it,
+- Transport: `codex-acp` (`@agentclientprotocol/codex-acp`), ACP v2 over its stdio, a process per session; it runs the
+  codex it carries (`@openai/codex`) with the `node` it runs on, so a session is three processes in the adapter's group.
+  What codex takes beyond ACP goes in the environment of the adapter's process, which codex inherits: `CODEX_HOME`, the
+  `HOME` of an isolated session, and the codex config as JSON in `CODEX_CONFIG`, which the adapter gives every thread it
+  opens. `session/new` and `session/resume` carry nothing beyond ACP and no MCP servers. The model and the effort are
+  keys of that config, not config options: the adapter offers as options only the models codex lists. The permission
+  mode is the config option `mode`, set after `session/new` and again after `session/resume`. The generated files are in
+  `<state>/acp/codex/<run>-<attempt>/`: the homes of a session that needs its own (`codex-home`, and `home` of an
+  isolated one), made before the spawn, stay with the thread's rollout, and the `SessionRef` carries `codex-home` as
+  `home`, so a resume takes it again; the role files are shared by content in `<state>/acp/codex/roles/`.
+- Signals read: the `session/update`s of ACP, as for claude, and the JSON-RPC errors of requests. ACP carries no
+  retry and no rate limit event: codex's own retries are not seen (no `retrying`), a turn's `usage` has no
+  `rate_limit`, and the reset time of a limit is not told at all (the adapter keeps codex's rate-limit snapshot to
+  itself). While the provider is silent before its response headers no update comes and codex has no timeout of its
+  own: the core's watchdog owns it.
+- When the daemon dies, the adapter loses its stdin and stops codex, and the open turn ends with it (contract
+  scenario 11). The next attempt resumes the session by `session/resume` in a new process, its `CODEX_HOME` from the
+  `SessionRef`, and sends the prompt again with the same idempotency key: the adapter makes it codex's
+  `clientUserMessageId` and does not insert a prompt whose key the thread's history already holds (read in the
+  adapter's code, not run across a daemon's death).
+- The permission mode follows `native.codex.approval_policy` and `sandbox_mode` ([config](config.md#permissions)).
+  Under `agent-full-access`, the default, no request comes; under `workspace-write` and `read-only` what the sandbox
+  does not allow comes as `session/request_permission`, which the driver declines at once, so nothing waits and the
+  model sees the denial.
+- Every MCP server loop-manager gives a session goes in `mcp_servers` of the codex config with `required = true`: one
+  that does not start fails `session/new` or `session/resume` (`required MCP servers failed to initialize`), which is a
+  `tool_failure` before the first prompt. A server of the rig or the host that fails is not told: the adapter reports
+  only on the servers of `mcpServers` of the request, which the driver leaves empty.
+- Hooks go in `hooks` of the codex config, which the adapter passes to codex at its start, with
+  `bypass_hook_trust = true` (without it codex runs no hook it has not trusted itself). A hook runs with the
+  environment of the process, which is the attempt's own.
+- Subagent targets are agent roles: `agents.<type> = {description, config_file}` of the codex config, over the
+  `agents` table of the native block. codex takes a role only from a file, so the profile writes each
+  (`developer_instructions`, `model`, `model_reasoning_effort`, `[[skills.config]]` turning off the process's skills
+  the target has not; any other key drops the role) as `<state>/acp/codex/roles/<hash of its content>.toml`, whole,
+  before the spawn. The multi-agent version is codex's choice by the model. A subagent comes as a child session:
+  activity, never the state ([experiments](experiments.md#codex-subagent-roles-experiment-10)).
+- The adapter marks the session's `cwd` a trusted project, so the rig's `.codex/config.toml` always applies.
+- The adapter asks the model `gpt-5.6-luna` for a session title once, after the first turn of a new session, in a
+  thread of its own; it has no switch, the model gate does not see that request, and on a provider without that model
+  it fails unseen.
+- codex syncs its plugins over the network by itself (a `git fetch` of the vendor's plugins repository, seen on
+  0.168), as a child that carries the instance marker. It outlives a killed daemon until a restarted one sweeps it,
   and through it a session without a model still touches the network.
-- app-server is marked `[experimental]` and codex ships often; see [harness updates](../harness-updates.md).
+- `codex-acp` is pinned at an exact version and its shapes change between versions; see
+  [harness updates](../harness-updates.md).
 
 The core does not rely on the harnesses' own watchdogs, whether they fire before its own or after. claude cuts a silent
 response stream after 180 s by bytes (300 s behind `ANTHROPIC_BASE_URL`) and 300 s by events, and a silent background
@@ -604,9 +615,10 @@ subagent after 10 min (vendor documentation for 2.1.322, not measured). codex gi
 estimate).
 
 A failed turn is classified by the structured fields of the harness, the first field that names a kind deciding;
-text is a narrow fallback, and a value no rule knows is never an error: the next field decides, and what none tells
-apart is `unknown` with the harness words (or `field=value`) in `text` and the message in `raw`. A refusal of the
-model by policy and a network break without a status are `unknown` on both harnesses.
+text is the fallback (narrow on claude; on codex, whose errors carry no fields beyond the code, the main rule), and
+a value no rule knows is never an error: the next field decides, and what none tells apart is `unknown` with the
+harness words (or `field=value`) in `text` and the message in `raw`. A refusal of the model by policy and a network
+break without a status are `unknown` on both harnesses.
 
 - claude, in order: the turn's `stopReason` (`max_tokens` `context_overflow`, `max_turn_requests` `runaway_turn`,
   `refusal` `unknown`); then, for an error of a turn or a request, `classify` of the profile: the JSON-RPC code
@@ -622,13 +634,17 @@ model by policy and a network break without a status are `unknown` on both harne
   configuration reasons `config_error`; a reason that may pass by itself, such as remote settings that did not
   arrive, is `unknown`); `data.cause`, or a message that starts with `Claude Code stopped` (the CLI died under the
   adapter), `harness_crash`. A text rule reads claude's words after the adapter's prefix `Internal error:`.
-- codex: the variant of `codexErrorInfo` and its `httpStatusCode` (401 and 403 `auth_required`, 429
-  `rate_limited`, 404 `config_error`, 408, 5xx and 529 `overloaded`; `flexUnavailable` and
-  `policyCapacityUnavailable` `overloaded`, `sandboxError` `config_error`). `usageLimitExceeded` stands for a used-up
-  plan, a missing plan, no credit and a spend cap alike: it is `billing` when the last rate-limit snapshot says
-  `rateLimitReachedType` `workspace_*` or `spendControlReached`, or its message is one of codex's plan and credit
-  messages, and otherwise `quota_exhausted` with the reset of the exhausted window. A retry with 401 or 403 is
-  `auth_required` at once; a JSON-RPC answer `-32001` (the app-server's request queue is full) is `overloaded`.
+- codex, in order: the turn's `stopReason`, as for claude; then, for an error of a turn or a request, `classify` of
+  the profile: the JSON-RPC code (`-32000` `auth_required`, `-32602` `config_error`; `-32002` or `-32601` on a resume
+  `transcript_divergence`; `1001`, codex lost under the adapter, `harness_crash`). The final error of a turn carries
+  no `data`, only codex's words, so a text rule decides next: `required MCP servers failed to initialize`
+  `tool_failure`; a message that starts with one of codex's plan and credit messages (`Quota exceeded.`, `To use
+  Codex with your ChatGPT plan`, `Your workspace is out of credits.`, `You hit your spend cap`) `billing`; `hit your
+  usage limit` `quota_exhausted`, with no reset time; `ran out of room in the model's context window`
+  `context_overflow`; a message that starts with `Selected model is at capacity` `overloaded`; then the HTTP status
+  after `exceeded retry limit, last status:` or `unexpected status` (401 and 403 `auth_required`, 429
+  `rate_limited`, 400 and 404 `config_error`, 408, 500 to 504 and 529 `overloaded`). `retried_by_harness` is set
+  after `exceeded retry limit` and on every `overloaded`.
 
 The tables are owned by the adapters and pinned by the contract tests ([harness updates](../harness-updates.md#how-the-suite-is-built)).
 
@@ -954,9 +970,9 @@ for it is not.
 
 - Every prompt has a delivery record `intent → sent → acked → settled` and a `PromptKey`. `intent` is written
   with the decision to send; `sent` after `send_prompt` returned; `acked` on `prompt.acked`; `settled` when the turn
-  ended. No marker in the prompt text: both harnesses keep the key in the transcript natively
-  ([experiments](experiments.md)), so the transcript check finds it. An ACP harness of the config has no transcript
-  check: only the agent's memory of the idempotency key protects the prompt, and the delivery may repeat
+  ended. No marker in the prompt text: the key goes as the harness's own idempotency key. An ACP harness, claude
+  and codex among them, has no transcript check: only the agent's memory of the key protects the prompt (codex's
+  adapter looks it up in the thread's history, 4.6), and otherwise the delivery may repeat
   ([adapters](adapters.md#acp-v2-harnesses)).
 - Daemon start ([invariants](invariants.md#recovery)): open the state and drain the outbox; for every recorded instance check pid + start time, kill its
   process group and sweep every process carrying its marker `LOOP_MANAGER_INSTANCE=<id>` in the environment, wait for
@@ -1036,8 +1052,8 @@ subsystem of their own. The adapter reports the account id (4.5, `Driver::accoun
 
 - Fingerprint = SHA-256 of the harness name and the canonical JSON (sorted keys) of the `ProcessPart`; two agents
   with equal process parts share an instance (criterion 13). The adapter decides what is the process part (4.6):
-  claude puts everything in it, so every session has its own process (no shared server, no memory saved); codex
-  shares one app-server per fingerprint. So an addon whose agent side changes the process part gives another
+  claude and codex put everything in it, so every session has its own process (no shared server, no memory
+  saved). So an addon whose agent side changes the process part gives another
   fingerprint and another instance by itself, and an addon that works only on the orchestrator side adds no instance.
 - An instance that holds many sessions has a session cap (`sessions_per_instance`, 4.5): its crash takes all its
   sessions down at once. Past the cap a second instance with the same fingerprint starts (acquire, below).
@@ -1098,7 +1114,7 @@ subsystem of their own. The adapter reports the account id (4.5, `Driver::accoun
 ## 9. Fakes in the real daemon
 
 The daemon has no test mode. Harness binaries are resolved through mise or taken from an explicit path in config:
-`[harness.claude] binary = "<path>"`. Contract tests and model-free acceptance scenarios use exactly this:
+`[harness.claude] command = "<path>"`. Contract tests and model-free acceptance scenarios use exactly this:
 
 - the real `claude`/`codex` against a fake provider, configured by ordinary settings (claude: `ANTHROPIC_BASE_URL`
   in the agent env; codex: a `model_providers` entry in the native block);

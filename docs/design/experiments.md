@@ -210,7 +210,9 @@ removed from the tree after recording, last in commit `1629c3a`; `src/bin/gen.rs
 last in commit `3f59356`). Output:
 `experiments/03-codex-appserver/logs/run.txt`, message logs next to it. No live model: every
 turn goes to the fake provider, `HOME` and `CODEX_HOME` are fresh directories, the process environment holds only
-`PATH`, `HOME`, `CODEX_HOME`, `SHELL`.
+`PATH`, `HOME`, `CODEX_HOME`, `SHELL`. The product drives codex through its ACP adapter, `codex-acp`, which starts
+codex itself ([adapters](adapters.md#profiles)), so the findings below describe the codex under that adapter,
+not what the driver reads.
 
 <!-- MEASURE id=codex-appserver-exp2 date=2026-11-12 ver=codex-0.167.2 env=linux-arm64-orbstack src=experiments/03-codex-appserver/logs/run.txt note="fake provider, n=1 per scenario and transport in the recorded run; 2–3 earlier development runs agreed" -->
 
@@ -361,8 +363,8 @@ Open: refresh of a delivered OAuth token after expiry ([config](config.md#host-i
   inheritance off = own `CODEX_HOME` **and** own `HOME` (or the host's `~/.agents/skills` leak in); the rig's
   `.codex/`, `AGENTS.md` and `.agents/skills` keep working — the rig-config rule of `config.md` holds for codex too.
   Without a key of its own, an isolated process logs in as the host does: the host `auth.json` is linked into its
-  `CODEX_HOME`, and a model provider the host config selects comes as the first `-c` flags with its `env_key`
-  variable passed from the daemon's environment (`loop-manager-codex/src/part.rs::host_provider`).
+  `CODEX_HOME`, and a model provider the host config selects comes in the session's codex config with its `env_key`
+  variable passed from the daemon's environment (`provider` in `crates/loop-manager-acp/src/profile/codex.rs`).
 
 ## Background work after the outcome (experiment 8, criterion 34)
 
@@ -448,12 +450,11 @@ Limits and things to get right:
 
 What the product does (contracts 4.1, 4.6, 6.3): step 1 as recommended, through the driver call `stop_background`,
 which the core makes once the outcome is declared and the turn has ended with background, from the idle event or from
-a finisher that comes after the turn. claude, through `claude-agent-acp`, stops what any ACP agent stops: the
+a finisher that comes after the turn. claude and codex, through their ACP adapters, stop what any ACP agent stops: the
 background terminals and tool calls of the last idle that advertise `capabilities.cancel`
 ([adapters](adapters.md#acp-v2-harnesses)); a background subagent is never stopped (criterion 4a). Step 2 comes when the session ends, not with the stop: a command that
-detached itself holds no step, so the run does not wait for it. With claude it goes with the session's process on
-the orphan sweep by `LOOP_MANAGER_INSTANCE`; with codex `close_session` kills every process with the thread's attempt
-token (the app-server does not carry one, the other threads have tokens of their own).
+detached itself holds no step, so the run does not wait for it. It goes with the session's process on the orphan
+sweep by `LOOP_MANAGER_INSTANCE`.
 
 ## Compaction and native subagents (experiment 9)
 
@@ -503,7 +504,7 @@ Stopping from a hook (window 100000, 150000 tokens; a hook answers `{"continue":
 | `PostCompact`: `continue:false` | The compaction is done, the turn ends `interrupted`; the next turn runs. |
 | `PreCompact`: exit 2 | The hook is `failed`, the compaction happens anyway. |
 | Other hooks: `continue:false` | `PreToolUse`: unsupported (`failed`, "PreToolUse hook returned unsupported continue:false"), the command runs. `UserPromptSubmit`: `stopped`, the turn ends `completed` without a model request. |
-| loop-manager adapter | A turn `interrupted` that the adapter did not interrupt maps to `cancelled`, without a failure (`crates/loop-manager-codex/src/stream.rs`). |
+| loop-manager adapter | `codex-acp` ends a turn `interrupted` with `stopReason: cancelled` (`turnEndState` of 2.9.0, read, not run), which the ACP driver maps to `cancelled`, without a failure. |
 
 ### codex roles and skills per thread
 

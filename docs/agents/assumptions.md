@@ -151,9 +151,10 @@ Open questions the code must not lean on without an experiment
 - br's "refuse rather than lose" in a long unattended loop; whether the rider of br's license applies to Claude and
   Codex agents running `br`.
 - Whether claude's `result.usage` counts one turn or the whole process.
-- The stop of what a session left running, beyond the fake providers of one version pair: codex 0.167.2
-  (`thread/backgroundTerminals/clean` was run on 0.168.0 only), a background subagent of claude, which
-  `claude-agent-acp` offers no cancel for, so it ends only with the process, and whether the MCP servers of a codex thread, which carry the attempt token, die with it.
+- The stop of what a session left running, beyond the fake providers of one version pair: `terminal/cancel` of
+  `codex-acp` (run on 2.9.0 only), a background subagent of claude, which `claude-agent-acp` offers no cancel for,
+  so it ends only with the process, and a command codex runs in a session of its own, which goes only on the sweep of
+  the instance marker.
 - opencode altogether.
 
 ## Risks the owner accepted
@@ -161,9 +162,9 @@ Open questions the code must not lean on without an experiment
 | Risk | What holds it back |
 |---|---|
 | Agents commit faster than a human checks | the workspace Clippy lints in `mise run ci` and review against the "no code for later" rule |
-| Vendor protocols drift: codex app-server is experimental, harnesses ship weekly | release lines in `mise.toml`, the minimum supported version of each adapter, contract tests, a narrow subset of the protocol |
+| Vendor protocols drift: ACP v2 is unstable, the ACP adapters and the harnesses they carry ship weekly | exact pins of the adapters in `mise.toml`, the minimum supported version of each profile, contract tests, a narrow subset of the protocol |
 | Subscription policy: headless use spends subscription limits, and vendor terms limit commercial and hosted use | API keys are supported; the install guide says keeping to the vendor's terms is the user's responsibility and [what claude's entrypoint label does](../guide/install.md#what-loop-manager-runs) |
 | br in a public project: one author, no outside PRs, a license with a rider | br is installed apart; the license warning in the README, the install guide and `doctor`; a narrow tracker interface |
-| A daemon's death cuts claude sessions | `session/resume` through `claude-agent-acp`, a drain on a planned restart |
+| A daemon's death cuts claude and codex sessions | `session/resume` through their ACP adapters, a drain on a planned restart |
 | Vendors close the niche | the rule "check the vendor first" and the stop conditions of the [code rules](rules-code.md#less-code) |
 | The core grows by "one more mechanism" | the mechanism and policy boundary checked by `scripts/core-boundary.sh` |

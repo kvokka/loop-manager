@@ -1,15 +1,16 @@
 # Developing loop-manager
 
 The repository pins its toolchain with [mise](https://mise.jdx.dev); `mise install` brings Rust, the cargo
-tools and br (exact versions) and claude and codex (a release line: `2.1`, `0`; there is no `mise.lock`).
+tools, br and the ACP adapters of claude and codex (exact versions) and claude and codex (a release line: `2.1`, `0`;
+there is no `mise.lock`).
 Every check below is a mise task (`mise.toml`).
 
 mise is a convenience, not a requirement: install the same tools any way you like.
 
 - Rust 1.100 with the components `clippy`, `rustfmt`, `rust-src`, `rust-analyzer`.
 - cargo-nextest 0.9.151, cargo-deny 0.20.2, cargo-machete 0.9.2 (`cargo install --locked <crate>@<version>`).
-- node 26.12.0 and the npm package `@agentclientprotocol/claude-agent-acp` 0.109.1: the ACP agent of the `claude`
-  harness profile.
+- node 26.12.0 and the npm packages `@agentclientprotocol/claude-agent-acp` 0.109.1 and
+  `@agentclientprotocol/codex-acp` 2.9.0: the ACP agents of the `claude` and `codex` harness profiles.
 - br 0.7.6, claude (line `2.1`), codex (line `0`): for the acceptance scenarios that run them; jq 1.8.2 for the
   demos' `run.sh`, which `mise run acceptance` runs; jq and rumdl 0.3.4 also for the model-free scenario of demo 2's
   format step. Demo 3 also needs gh 2.103.2, logged in, from its own `mise.toml` (`mise install` in
@@ -35,7 +36,7 @@ Each task is a list of plain commands in `[tasks.<name>]` of `mise.toml`; run th
 | Task | What it runs | When | Wall time |
 |---|---|---|---|
 | `mise run test` | unit and integration tests (`cargo nextest run`), without the chaos stand | the everyday loop, usually narrowed to a crate or a test | 25 s (2026-11-17, `57d8ff8`) |
-| `mise run ci` | the above plus formatting, clippy, `cargo deny`, `cargo machete`, the unused-`pub` check, the `MEASURE` marker check, the core boundary (`scripts/core-boundary.sh`: no harness name, `br`, `max_sessions`, `instance_idle_s`, `beads_dir` or `.beads` in the code of the core, `loop-manager-contract` and `loop-manager-core`, and no `loop-manager-core` among the normal and build dependencies of `loop-manager-acp`, `loop-manager-codex`, `loop-manager-br` and `loop-manager-addons`; the harness names are those of the ACP driver's profiles and of the native adapter crates), the fixed branch order of its `select!` (`scripts/select-biased.sh`: `biased;` with a comment on the order), no absolute home paths in the repository and no test that starts `loop-manager` past the common constructor, which keeps out the environment of a loop-manager session the tests may run in ([test rules](../agents/rules-tests.md)), and the pack in `devloop/` ([its README](../../devloop/README.md)): the self-test of its scripts and a load of its config | **the gate of a change**: locally before handing work over; CI on every commit | 33 s (2026-11-17, `57d8ff8`) |
+| `mise run ci` | the above plus formatting, clippy, `cargo deny`, `cargo machete`, the unused-`pub` check, the `MEASURE` marker check, the core boundary (`scripts/core-boundary.sh`: no harness name, `br`, `max_sessions`, `instance_idle_s`, `beads_dir` or `.beads` in the code of the core, `loop-manager-contract` and `loop-manager-core`, and no `loop-manager-core` among the normal and build dependencies of `loop-manager-acp`, `loop-manager-br` and `loop-manager-addons`; the harness names are those of the ACP driver's profiles), the fixed branch order of its `select!` (`scripts/select-biased.sh`: `biased;` with a comment on the order), no absolute home paths in the repository and no test that starts `loop-manager` past the common constructor, which keeps out the environment of a loop-manager session the tests may run in ([test rules](../agents/rules-tests.md)), and the pack in `devloop/` ([its README](../../devloop/README.md)): the self-test of its scripts and a load of its config | **the gate of a change**: locally before handing work over; CI on every commit | 33 s (2026-11-17, `57d8ff8`) |
 | `mise run acceptance-ci` | the [acceptance scenarios](../acceptance.md) without a model, each on a real `loop-manager daemon`, and the chaos stand | on request, in the workflow `acceptance` (started by hand) | 144 s (2026-11-16, `04984d6`) |
 | `mise run acceptance` | all acceptance scenarios, including those on a real model and the demos, whose result stays in the demo's directory, ignored by git | on request: they cost money and need a harness login | 2650 s (2026-11-16, `b32c55c`) |
 
