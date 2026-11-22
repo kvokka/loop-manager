@@ -67,7 +67,8 @@ pub(crate) async fn operator(
     play.log.push(format!("{what} {run}#{seen} -> {answer:?}"));
 }
 
-/// The operator hands back every run they hold: a manual run has no deadline to take it to an end.
+/// The operator hands back every run they hold: a manual run has no deadline to take it to an end. A disputed one is
+/// refused until its dispute is settled ([`crate::delivery::settle_all`] goes first).
 pub(crate) async fn hand_back_all(w: &World, play: &mut Play) {
     for (run, attempt, ..) in held(w) {
         let msg = Msg::Continue {
@@ -158,8 +159,9 @@ pub(crate) fn event(run: &str, kind: &str, data: &Value, play: &mut Play) -> Res
     }
 }
 
-/// The live manual runs, and the parents up the chain whose step waits for one: a manual run stands with no deadline,
-/// and a waiting parent has no step timeout (M1).
+/// The live manual runs, the disputed runs an attempt holds the session of, and the parents up the chain whose step
+/// waits for a manual or disputed one: such a run stands with no deadline, and a waiting parent has no step timeout
+/// (M1, P2).
 /// The state and the journal agree on which runs are manual.
 pub(crate) fn frozen(conn: &rusqlite::Connection, play: &Play) -> Result<BTreeSet<String>, String> {
     let mut manual: Vec<String> = conn
@@ -176,6 +178,10 @@ pub(crate) fn frozen(conn: &rusqlite::Connection, play: &Play) -> Result<BTreeSe
             play.manual
         ));
     }
+    // A run that stands for the choice on a disputed delivery has no clock either while an attempt holds its session,
+    // and an open dispute stops the step timeout of the parents that wait for it (contracts 6.4).
+    frozen.extend(crate::delivery::standing(conn));
+    manual.extend(crate::delivery::disputed(conn));
     while let Some(child) = manual.pop() {
         let parent: Option<(String, bool)> = conn
             .query_row(
@@ -190,7 +196,7 @@ pub(crate) fn frozen(conn: &rusqlite::Connection, play: &Play) -> Result<BTreeSe
         let Some((parent, timed)) = parent else { continue };
         if timed {
             return Err(format!(
-                "{parent} runs its step timeout while its child {child} is manual (M1)"
+                "{parent} runs its step timeout while its child {child} stands for the operator (M1, P2)"
             ));
         }
         if frozen.insert(parent.clone()) {

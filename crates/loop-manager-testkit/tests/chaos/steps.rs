@@ -53,6 +53,8 @@ pub(crate) struct Play {
     pub(crate) finishing: BTreeMap<String, u64>,
     /// The manual runs the last crash found, for the check after the restart.
     pub(crate) crashed: Option<Vec<crate::manual::Held>>,
+    /// The open dispute of each disputed run at the last check and the number of its prompts sent to the harness then.
+    pub(crate) disputes: BTreeMap<String, (String, usize)>,
 }
 
 /// The run of the idempotency key `key`: of `build` (0, 1), of the three steps of `ship` (2, 3), of `fix` on the
@@ -180,21 +182,30 @@ pub(crate) async fn step(w: &mut World, rng: &mut Rng, play: &mut Play, calm: bo
     // Half of the steps move a run on as a well-behaved agent and policy would: a pass from the agent, the first
     // decision of its kind; the other half are anything.
     let natural = calm || rng.below(2) == 0;
+    // A well-behaved operator chooses on a disputed delivery.
+    let disputed = !crate::delivery::disputed(&state(w)).is_empty();
     let op = match (natural, rng.below(3)) {
         (true, 0) => 3,
         (true, 1) => 7,
+        (true, _) if disputed => 27,
         (true, _) => 10,
-        (false, _) => rng.below(27),
+        (false, _) => rng.below(29),
     };
     // kill -9 cuts a step short that sets work going: a killer task among the writer's and the effects' dies after
     // a few turns of the scheduler, wherever the writer is then. A run past its first step is rare under the faults:
     // every step that is anything kills then, so that a restart goes on from the step a run is at.
     let kill = matches!(op, 19 | 22) || !natural && past_first(&state(w));
     let op = if kill {
-        *rng.pick(&[0, 7, 7, 10, 10, 16, 17, 24, 25]).unwrap()
+        *rng.pick(&[0, 7, 7, 10, 10, 16, 17, 24, 25, 27]).unwrap()
     } else {
         op
     };
+    // Before some crashes the harness takes the prompts it gets and their answers are lost: a resume finds them in
+    // the replay (contracts 6.4).
+    let swallowed = kill && rng.below(3) == 0;
+    if swallowed {
+        w.driver.swallow_acks(true);
+    }
     let killer = kill.then(|| {
         let (writer, turns) = (w.killer(), rng.below(8));
         tokio::spawn(async move {
@@ -237,8 +248,15 @@ pub(crate) async fn step(w: &mut World, rng: &mut Rng, play: &mut Play, calm: bo
     if lost {
         w.driver.lose_transcripts();
     }
-    play.log
-        .push(format!("crash before {undone:?} done, transcripts lost: {lost}"));
+    // The next daemon's harness may take the prompts of the resumed attempts with their answers lost, and end its
+    // replays short: a resume cannot tell, and the delivery is disputed.
+    let (swallowing, partial) = (rng.below(3) == 0, rng.below(2) == 0);
+    w.driver.swallow_acks(swallowing);
+    w.driver.partial_replays(partial);
+    play.log.push(format!(
+        "crash before {undone:?} done, acks lost: {swallowed}, transcripts lost: {lost}; then acks lost: {swallowing}, \
+         replays partial: {partial}"
+    ));
 }
 
 type Run = (String, String, u32, Option<i64>);
@@ -277,7 +295,20 @@ async fn act(w: &mut World, rng: &mut Rng, play: &mut Play, op: u64, natural: bo
         3..=6 => {
             let (name, steps) = scenario(rng, natural);
             w.driver.script(steps);
-            play.log.push(format!("script {name}"));
+            // Now and then, until the daemon dies, the harness goes on taking prompts whose answers are lost, or ends
+            // its replays short: a start timeout or a crash fails the attempt, and the resume checks the prompt in the
+            // replay, or cannot tell (contracts 6.4).
+            let swallowing = !natural && rng.below(3) == 0;
+            let partial = !natural && rng.below(2) == 0;
+            if swallowing {
+                w.driver.swallow_acks(true);
+            }
+            if partial {
+                w.driver.partial_replays(true);
+            }
+            play.log.push(format!(
+                "script {name}, acks lost: {swallowing}, replays partial: {partial}"
+            ));
         }
         7..=9 => finish(w, rng, play, natural, live).await,
         10..=15 => {
@@ -346,6 +377,7 @@ async fn act(w: &mut World, rng: &mut Rng, play: &mut Play, op: u64, natural: bo
             play.log.push(format!("close gate until {until_ms:?}"));
         }
         24 | 26 => crate::manual::operator(w, rng, play, live, true).await,
+        27 | 28 => crate::delivery::choose(w, rng, play, natural, live).await,
         21 | 25 => crate::manual::operator(w, rng, play, live, false).await,
         18 => {
             let msg = Msg::OpenGate {

@@ -131,6 +131,7 @@ pub(crate) fn check(w: &World, play: &mut Play) -> Result<(), String> {
         }
     }
     crate::manual::survived(&conn, play)?;
+    crate::delivery::delivered(w, &conn, play)?;
     stepped(&conn, play)?;
     crate::repeat::counted(&conn, play)?;
     crate::drain::drained(&conn, play)?;

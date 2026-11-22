@@ -1,8 +1,9 @@
 //! The deterministic check of the core invariants (docs/design/invariants.md; acceptance criterion 35): for each seed a
-//! sequence of commands, harness behaviour, policy hooks, operator actions, repeated and lost deliveries and daemon
-//! crashes (`kill -9` cuts a step short wherever the writer is then, and takes the effects in flight with it) plays on
-//! the run machine with the managed clock. The invariants are checked on the state and the journal after every step;
-//! once the faults stop, every run must reach an end and every hooked event must have had its hooks run. Each full
+//! sequence of commands, harness behaviour, policy hooks, operator actions, repeated and lost deliveries, prompts whose
+//! answers are lost, short replays, disputed deliveries and daemon crashes (`kill -9` cuts a step short wherever the
+//! writer is then, and takes the effects in flight with it) plays on the run machine with the managed clock. The
+//! invariants are checked on the state and the journal after every step; once the faults stop, the operator settles
+//! every disputed delivery, every run must reach an end and every hooked event must have had its hooks run. Each full
 //! share of seeds plays on until it has killed the daemon with tracker, harness and hook calls recorded and not yet
 //! done.
 //!
@@ -13,6 +14,7 @@
 mod check;
 #[path = "../common/mod.rs"]
 mod common;
+mod delivery;
 mod drain;
 mod manual;
 mod repeat;
@@ -188,7 +190,10 @@ async fn play(seed: u64) -> Result<Played, String> {
             return Err(report(&play, why));
         }
     }
+    delivery::settle_all(&w, &mut play).await;
     manual::hand_back_all(&w, &mut play).await;
+    // The harness answers again; its replays may still end short, and the disputes they open are settled below.
+    w.driver.swallow_acks(false);
     play.log.push(format!(
         "-- quiet, {} --",
         if behave { "behaving" } else { "nobody acts" }
@@ -198,6 +203,8 @@ async fn play(seed: u64) -> Result<Played, String> {
         if runs(&w).iter().all(|r| TERMINAL.contains(&r.1.as_str())) {
             break;
         }
+        // A replay may still not tell, after an earlier prompt whose answer was lost: the operator settles it.
+        delivery::settle_all(&w, &mut play).await;
         // A run the operator's gate holds ends by its own deadline, after the calm steps.
         if behave && i < 100 {
             step(&mut w, &mut rng, &mut play, true).await;

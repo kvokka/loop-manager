@@ -49,7 +49,10 @@ handing them back among the faults, now and then from a stale screen that must c
 deciding event, park or change of state moves a manual run, and a parent whose step waits for one runs no step
 timeout; M2: Continue applies the event the run deferred, in the attempt it was deferred in, and no attempt fails
 twice nor reaches `finishing` twice without a new turn; M3: a crash of the daemon keeps a manual run manual, with
-its deferred event and no new attempt, the attempt it cut waiting in the slot). Each full share of seeds kills the
+its deferred event and no new attempt, the attempt it cut waiting in the slot) and the delivery check, with acks
+lost, replays cut short and the operator's choices, current or stale, among the faults (P1: no prompt key is inserted
+into a session twice; P2: a run whose attempt holds a disputed session runs no `state` or `silence` deadline, sends
+no prompt while the dispute stays open, and a parent whose step waits for it runs no step timeout). Each full share of seeds kills the
 daemon mid-drain at least once. Every run
 plays new seeds from a random base it prints; a failure names its seed and `LOOP_MANAGER_CHAOS_SEED=<n>` replays it.
 Invariant 6 runs real marked processes (`loop-manager-testkit/tests/core/old_instances.rs`,
