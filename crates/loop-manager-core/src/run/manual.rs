@@ -30,6 +30,8 @@ pub(super) enum Deferred {
     Prepare,
     /// A decision on the deciding event `seq`.
     Decision { seq: i64, decision: Decision },
+    /// The check script of `attempt` could not start: `text` says why.
+    CheckRefused { attempt: u32, text: String },
     /// The check script of `attempt` ended.
     Check {
         attempt: u32,
@@ -153,6 +155,7 @@ impl RunHandler {
                 stdout,
                 stderr,
             }) => self.check_done(tx, row, attempt, exit, (&stdout, &stderr))?,
+            Some(Deferred::CheckRefused { attempt, text }) => self.check_refused(tx, run, attempt, &text)?,
         }
         self.schedule(tx)?;
         Ok(answer("accepted"))
@@ -214,6 +217,8 @@ impl RunHandler {
             }
             ("running", "exec") | ("finishing", _) => command_due(now, row),
             ("running", "await") => now.saturating_add(row.timeout_ms.unwrap_or(AWAIT_TIMEOUT_MS)),
+            // A step that waits for a child still manual keeps its timeout off.
+            ("running", _) if Self::holds_manual(tx, &row.id)? => return Ok(()),
             ("running", _) => now.saturating_add(row.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS)),
             // An interrupted run with its decision taken starts its next attempt at once (`go_on`).
             _ => return Ok(()),
@@ -263,7 +268,7 @@ impl RunHandler {
     }
 
     /// A live child of `run`, of its step, is manual or holds a manual run below it.
-    fn holds_manual(tx: &Tx<'_>, run: &str) -> Result<bool, Error> {
+    pub(super) fn holds_manual(tx: &Tx<'_>, run: &str) -> Result<bool, Error> {
         let children: Vec<String> = {
             let mut stmt = tx.sql().prepare(
                 "SELECT id FROM runs WHERE parent_run = ?1 AND trigger IS NULL \

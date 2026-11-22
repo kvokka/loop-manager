@@ -39,12 +39,18 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 
 How they are checked: the deterministic chaos stand (`loop-manager-testkit/tests/chaos`) plays seeded sequences of
 commands, harness behaviour, policy hooks, operator actions, lost and repeated deliveries and daemon crashes, and
-checks invariants 2, 3, 10, 12, 13, 14, 15, 16 and 17 on the state and the journal after every step. Its formulas
+checks invariants 2, 3, 10, 12, 13, 14, 15, 16, 17 and 21 on the state and the journal after every step. Its formulas
 have several steps, and one starts with a `drain` step over a root bead with two children; besides the invariants
 the stand checks the steps (S1–S4: each step finishes once and in order, attempts follow the steps, no session
 serves two steps, a run passes from its last step) and the drain step (D1: a bead gets at most one child run per
 entry into the step; D2: once the step finished, no child run on a bead is alive; D3: the attempt of a drain step
-that a crash of the daemon caught ends with `daemon_crash`). Each full share of seeds kills the daemon mid-drain at least once. Every run
+that a crash of the daemon caught ends with `daemon_crash`) and manual mode, the operator taking runs over and
+handing them back among the faults, now and then from a stale screen that must change nothing (M1: no step, attempt,
+deciding event, park or change of state moves a manual run, and a parent whose step waits for one runs no step
+timeout; M2: Continue applies the event the run deferred, in the attempt it was deferred in, and no attempt fails
+twice nor reaches `finishing` twice without a new turn; M3: a crash of the daemon keeps a manual run manual, with
+its deferred event and no new attempt, the attempt it cut waiting in the slot). Each full share of seeds kills the
+daemon mid-drain at least once. Every run
 plays new seeds from a random base it prints; a failure names its seed and `LOOP_MANAGER_CHAOS_SEED=<n>` replays it.
 Invariant 6 runs real marked processes (`loop-manager-testkit/tests/core/old_instances.rs`,
 `process::tests::wait_gone_*`). The others are covered by the integration suites of `loop-manager-testkit/tests` and by
@@ -65,7 +71,10 @@ At daemon start ([contracts](contracts.md) 6.4 has the exact state rules):
 3. Runs with a live attempt — `starting`, `running` in a turn — move to `interrupted` with the attempt failure
    `daemon_crash`, the deciding hooks they still had queued dropped (after the sweep of item 2); the policy decides
    what follows. A run an operator holds stays manual: its failure waits for Continue in its deferred slot instead,
-   and none of its deadlines acts before Continue (invariant 21). A run waiting for a decision on a deciding
+   as does the turn it settled with a declared outcome, no attempt of it starts and none of its deadlines acts before
+   Continue, which hands the failure to the policy once, with every budget whole (invariant 21). A parent whose
+   `formula` or `drain` step waits for a manual child loses its attempt as any run, and its next attempt waits for the
+   child with no step timeout. A run waiting for a decision on a deciding
    event (`preparing`, `interrupted`, `finishing`, `running` after a turn without an outcome) keeps waiting for it:
    its hooks run again, the declared outcome and an exec command's result stand. A step check script that was running in `finishing` is killed by its marker and runs again, the repeat counter untouched. A `remark` or `continue` then
    fails the attempt with `daemon_crash`, as the session it needs is gone (contracts 3.4, 6.4). A run goes on from
@@ -83,7 +92,8 @@ At daemon start ([contracts](contracts.md) 6.4 has the exact state rules):
 A planned restart drains first (`POST /v1/daemon/drain`, `POST /v1/daemon/restart`, `loop-manager drain`,
 `loop-manager restart`): no new run starts and no new attempt either (a retry decided meanwhile parks with
 `run.parked{gate: null}` and the next daemon starts it, `run.resumed{gate_key: "daemon_stopping"}`), the active runs — a
-run in a turn, a hook, a policy decision or a preparation — go on until none is left or the drain timeout (default 300
+run in a turn, a hook, a policy decision or a preparation; a manual run only while its work in flight goes on, not once
+it stands for the operator — go on until none is left or the drain timeout (default 300
 s) passes; a `remark` or `continue` at the turn boundary starts no turn but fails the attempt with `daemon_crash`, so
 its retry parks with the remark kept for the next daemon. Then the daemon stops (`daemon.stopping{reason}`) and recovery
 resumes what the drain cut.

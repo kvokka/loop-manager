@@ -14,6 +14,7 @@ mod check;
 #[path = "../common/mod.rs"]
 mod common;
 mod drain;
+mod manual;
 mod repeat;
 mod steps;
 
@@ -187,6 +188,7 @@ async fn play(seed: u64) -> Result<Played, String> {
             return Err(report(&play, why));
         }
     }
+    manual::hand_back_all(&w, &mut play).await;
     play.log.push(format!(
         "-- quiet, {} --",
         if behave { "behaving" } else { "nobody acts" }

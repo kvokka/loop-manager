@@ -72,8 +72,8 @@ Shared objects:
   for a step other than `ai`, `class` is null until `failed`, `bead` is the bead id or null, `depth` is the chain
   depth of 6.1 (0 for a run started by hand), `parent_run` the run whose event triggered it or whose session started
   it. `control` is `manual` while an operator holds the run (6.1), and `manual` is then `{since, deferred}`: since when,
-  and the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`, or null); `manual`
-  is null under `lm`. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
+  and the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`, `check_refused`,
+  or null); `manual` is null under `lm`. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`{input_tokens, output_tokens}`, summed
   over every attempt) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the
@@ -799,15 +799,20 @@ run keeps its state, its work in flight keeps its course, and `control` of the `
   run's deadlines go (`state`, silence, `decide`); the scheduler passes a manual run over (a queued one waits with
   `waiting_for = "manual"`), and a started one keeps its slot and its place in its rig. Up the chain of `parent_run`,
   while the parent is `running` in the `formula` or `drain` step that started the run, the parent's step timeout goes
-  too. Other runs, the siblings under a drain among them, go on.
+  too, and no new attempt of that step (after a restart or a park) nor the parent's own Continue starts it while the
+  child is manual. Other runs, the siblings under a drain among them, go on.
 - While the run is manual its orchestration stands, and the work in flight is accounted as ever: prompt acks, the end
   of the turn, usage, the history, the finisher's outcome (stored in the attempt; the session's background is not
   stopped), the outcome of an exec command or of a child, an attempt failure (the attempt ends with it, its session and
   instance are stopped). The one event that would move the run waits in the state instead: the settled turn
   (`settled`), the failed attempt (`failed`), the outcome of a step with no session (`outcome`), the prompt of the step
-  about to render (`prepare`), a hook's decision (`decision`), the end of a step check script (`check`). There is one
-  slot: a later event replaces an earlier one, but a turn that ended with a declared outcome stays `settled` when its
-  process fails after. A drain step gives out no bead; a deadline that still fires is dropped.
+  about to render (`prepare`), a hook's decision (`decision`), the end of a step check script (`check`) or its refusal
+  to start for a variable the daemon lacks (`check_refused`). There is one slot: a later event replaces an earlier
+  one, but a turn that ended with a declared outcome stays `settled` when its process fails after. A decision is kept
+  as it would have been applied: the first one the deciding event takes; one it does not take, or any later one on
+  the same event, is refused at once (3.4). A drain step gives out no bead; a deadline that still fires is dropped. A
+  planned drain of the daemon waits for a manual run only while its work in flight goes on: once an event waits in
+  its slot, or the hooks of its decision are done, the run stands for the operator and does not hold the drain.
 - Continue, in one transaction: the mode goes, with the history record `control` and `run.handed_back`, and every
   budget of the run's state starts whole: `queued` — `queue_timeout`; `parked` — `park_timeout`, or the gate's `until`
   if later; `preparing` and `starting` — `start_timeout`; `running` — the step `timeout`, and the silence budget in an
@@ -959,7 +964,9 @@ for it is not.
   waiting in an `await` step: its attempt and deadline stay, and a deadline passed while the daemon was down fires at
   start) (a `drain` attempt too: its next attempt gives no bead its entry of the step gave out), the launches, prompts
   and deciding hooks they still had queued dropped (a manual run stays manual: its failure waits in its deferred slot
-  for Continue instead of going to the policy, and none of its deadlines acts before Continue, 6.1), and the command of an exec step killed by its
+  for Continue instead of going to the policy, and none of its deadlines acts before Continue, 6.1; a parent whose
+  `formula` or `drain` step waits for it is interrupted as any, and its next attempt waits for the child with no step
+  timeout), and the command of an exec step killed by its
   `LOOP_MANAGER_INSTANCE` marker (random per attempt) before any later attempt runs it. A run that waits for a decision
   on a deciding event keeps its state and waits for the same decision (3.4): `preparing`, `interrupted` waiting for the
   policy, `finishing`, and `running` after a turn that ended without an outcome; `finishing` with a step check script

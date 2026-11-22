@@ -11,6 +11,21 @@ use rusqlite::params;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
+/// Whether `decision` is one the deciding event `row` waits on takes ([`RunHandler::apply`]); `abstain` is "no addon
+/// decision", which every event takes.
+fn applies(row: &Row, decision: &Decision) -> bool {
+    use Decision as D;
+    match (row.state.as_str(), decision) {
+        (_, D::Abstain)
+        | ("preparing", D::Proceed { .. } | D::Deny { .. })
+        | ("interrupted", D::Fail { .. } | D::Resume { .. } | D::NewSession { .. } | D::Park { .. })
+        | ("running", D::Fail { .. } | D::Continue { .. })
+        | ("finishing", D::Accept | D::Veto { .. }) => true,
+        ("finishing", D::Remark { .. }) => row.step_kind == "ai",
+        _ => false,
+    }
+}
+
 /// The slack of a deciding event's deadline (contracts 3.3).
 pub(super) const DECIDE_SLACK_MS: i64 = 5_000;
 /// The longest wait of a hook effect for the death of the process a failed attempt stopped (contracts 3.1).
@@ -79,7 +94,19 @@ impl RunHandler {
         if waiting != Some(seq) {
             return Err(rejected(format!("`{run}` does not wait for a decision on event {seq}")));
         }
+        // A manual run keeps the first decision that applies, as `apply` would have taken it: a later one, or one
+        // the event does not take, is refused now and not on Continue (contracts 6.1).
         if row.manual {
+            let deferred = row.deferred.as_deref().and_then(|d| serde_json::from_str(d).ok());
+            if matches!(deferred, Some(super::manual::Deferred::Decision { seq: s, .. }) if s == seq) {
+                return Err(rejected(format!("`{run}` does not wait for a decision on event {seq}")));
+            }
+            if !applies(&row, &decision) {
+                return Err(rejected(format!(
+                    "{decision:?} does not apply to a run in `{}`",
+                    row.state
+                )));
+            }
             return Self::defer(tx, &row, &super::manual::Deferred::Decision { seq, decision });
         }
         self.apply(tx, row, Some(decision).filter(|d| *d != Decision::Abstain))

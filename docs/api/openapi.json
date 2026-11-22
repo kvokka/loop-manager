@@ -3403,7 +3403,7 @@
               "string",
               "null"
             ],
-            "description": "The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,\n`prepare`, `decision` or `check`."
+            "description": "The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,\n`prepare`, `decision`, `check` or `check_refused`."
           },
           "since": {
             "type": "string",

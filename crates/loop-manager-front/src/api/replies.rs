@@ -72,7 +72,7 @@ pub(crate) struct Manual {
     /// Since when.
     since: String,
     /// The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,
-    /// `prepare`, `decision` or `check`.
+    /// `prepare`, `decision`, `check` or `check_refused`.
     deferred: Option<String>,
 }
 

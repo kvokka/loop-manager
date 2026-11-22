@@ -62,6 +62,7 @@ pub(crate) async fn restart(w: &mut World, play: &mut Play, cut: &Mutex<Option<A
     for at in &undone {
         *KILLS.lock().unwrap().entry(at).or_default() += 1;
     }
+    play.crashed = Some(crate::manual::held(w));
     w.restart().await;
     play.log.push(format!("crash in a check script before {undone:?} done"));
 }

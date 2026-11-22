@@ -56,6 +56,7 @@ pub(crate) fn check(w: &World, play: &mut Play) -> Result<(), String> {
     }
     let conn = state(w);
     let all = runs(w);
+    let frozen = crate::manual::frozen(&conn, play)?;
     // The children of drain steps come from no create of the test.
     let created: u32 = conn
         .query_row("SELECT COUNT(*) FROM runs WHERE parent_run IS NULL", [], |r| r.get(0))
@@ -104,10 +105,13 @@ pub(crate) fn check(w: &World, play: &mut Play) -> Result<(), String> {
                 r.get(0)
             })
             .unwrap();
-        if deadlines == 0 {
+        // A manual run, and a parent whose step waits for one, stand with no clock (invariant 21).
+        if deadlines == 0 && !frozen.contains(run) {
             return Err(format!("{run} is {state} with no deadline (invariant 14)"));
         }
-        watched(&conn, run, state, waiting.is_some())?;
+        if !frozen.contains(run) {
+            watched(&conn, run, state, waiting.is_some())?;
+        }
         if state == "running" {
             let session: Option<String> = conn
                 .query_row(
@@ -126,6 +130,7 @@ pub(crate) fn check(w: &World, play: &mut Play) -> Result<(), String> {
             }
         }
     }
+    crate::manual::survived(&conn, play)?;
     stepped(&conn, play)?;
     crate::repeat::counted(&conn, play)?;
     crate::drain::drained(&conn, play)?;
@@ -177,6 +182,7 @@ fn check_event(e: &Value, play: &mut Play) -> Result<(), String> {
             failed(run, &e["data"], play)?;
         }
     }
+    crate::manual::event(run, kind, &e["data"], play)?;
     if !crate::repeat::repeated(run, kind, &e["data"], play)? {
         step_finished(run, kind, &e["data"]["run"], play)?;
     }

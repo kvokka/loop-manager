@@ -9,11 +9,17 @@ use serde_json::Value;
 
 impl RunHandler {
     /// The attempt of a formula step: the child of this entry if an earlier attempt made it (a restart cut that
-    /// attempt), else a new one; its deadline is the step's timeout.
+    /// attempt), else a new one; its deadline is the step's timeout, unless the child is manual.
     pub(super) fn start_formula(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
         Self::run_attempt(tx, &mut row, "formula")?;
-        let timeout_ms = row.timeout_ms.unwrap_or(super::render::DRAIN_TIMEOUT_MS);
-        tx.set_deadline(&row.deadline("state"), tx.now_ms().saturating_add(timeout_ms))?;
+        // A child an operator holds keeps the step timeout off until Continue (contracts 6.1), and the deadline of
+        // the state before (a park) goes.
+        if Self::holds_manual(tx, &row.id)? {
+            tx.clear_deadline(&row.deadline("state"))?;
+        } else {
+            let timeout_ms = row.timeout_ms.unwrap_or(super::render::DRAIN_TIMEOUT_MS);
+            tx.set_deadline(&row.deadline("state"), tx.now_ms().saturating_add(timeout_ms))?;
+        }
         if let Some(child) = Self::entry_child(tx, &row)? {
             return self.child_ended(tx, &row.id, &child);
         }

@@ -42,6 +42,17 @@ pub(crate) struct Play {
     pub(crate) caught: BTreeSet<(String, i64)>,
     /// The repeats of each step of each run.
     pub(crate) repeats: BTreeMap<(String, String), u32>,
+    /// The runs the journal says are manual.
+    pub(crate) manual: BTreeSet<String>,
+    /// The runs handed back with a deferred failure, settled turn or outcome, and the attempt it was deferred in, until
+    /// the event that consumes it.
+    pub(crate) returned: BTreeMap<String, (String, u64)>,
+    /// Every failed attempt, by run and number.
+    pub(crate) failed_attempts: BTreeSet<(String, u64)>,
+    /// The attempt of each run that reached `finishing`, until its next turn.
+    pub(crate) finishing: BTreeMap<String, u64>,
+    /// The manual runs the last crash found, for the check after the restart.
+    pub(crate) crashed: Option<Vec<crate::manual::Held>>,
 }
 
 /// The run of the idempotency key `key`: of `build` (0, 1), of the three steps of `ship` (2, 3), of `fix` on the
@@ -173,14 +184,14 @@ pub(crate) async fn step(w: &mut World, rng: &mut Rng, play: &mut Play, calm: bo
         (true, 0) => 3,
         (true, 1) => 7,
         (true, _) => 10,
-        (false, _) => rng.below(24),
+        (false, _) => rng.below(27),
     };
     // kill -9 cuts a step short that sets work going: a killer task among the writer's and the effects' dies after
     // a few turns of the scheduler, wherever the writer is then. A run past its first step is rare under the faults:
     // every step that is anything kills then, so that a restart goes on from the step a run is at.
     let kill = matches!(op, 19 | 22) || !natural && past_first(&state(w));
     let op = if kill {
-        *rng.pick(&[0, 7, 7, 10, 10, 16, 17]).unwrap()
+        *rng.pick(&[0, 7, 7, 10, 10, 16, 17, 24, 25]).unwrap()
     } else {
         op
     };
@@ -219,6 +230,7 @@ pub(crate) async fn step(w: &mut World, rng: &mut Rng, play: &mut Play, calm: bo
     for at in &undone {
         *KILLS.lock().unwrap().entry(at).or_default() += 1;
     }
+    play.crashed = Some(crate::manual::held(w));
     w.restart().await;
     // Some crashes take the transcripts of the dead sessions with them: a resume must find out (invariant 17).
     let lost = rng.below(3) == 0;
@@ -333,6 +345,8 @@ async fn act(w: &mut World, rng: &mut Rng, play: &mut Play, op: u64, natural: bo
             let _ = w.core.send(None, Msg::CloseGate(gate)).await;
             play.log.push(format!("close gate until {until_ms:?}"));
         }
+        24 | 26 => crate::manual::operator(w, rng, play, live, true).await,
+        21 | 25 => crate::manual::operator(w, rng, play, live, false).await,
         18 => {
             let msg = Msg::OpenGate {
                 key: "rig:shop/web".into(),

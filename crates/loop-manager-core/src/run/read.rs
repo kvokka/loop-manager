@@ -120,7 +120,7 @@ impl Reader {
 
     /// `{outbox_depth, outbox_oldest_ms, active_runs}` for the daemon status (contracts 3.5): the outbox rows the
     /// journal has not acknowledged, the time of the oldest one, and the runs a drain waits for (one in a turn,
-    /// a hook, a policy decision or a preparation).
+    /// a hook, a policy decision or a preparation; a manual one only while its work in flight goes on).
     pub fn status(&self) -> Result<Value, Error> {
         let conn = self.conn();
         let (depth, oldest): (i64, Option<i64>) =
@@ -128,12 +128,15 @@ impl Reader {
                 Ok((r.get(0)?, r.get(1)?))
             })?;
         // A run in a step with no process (drain, formula, await) loses no work to a restart, so a drain does not wait
-        // for it.
+        // for it. Nor for a manual run once its work in flight is over — the event that would move it waits in its
+        // slot, or the hooks of its decision are done: it stands for the operator, however long (contracts 6.1).
         let active: i64 = conn.query_row(
             &format!(
                 "SELECT COUNT(*) FROM runs \
                  WHERE (state IN ('preparing', 'starting', 'running', 'finishing') \
-                 OR (state = 'interrupted' AND waiting IS NOT NULL)) AND NOT {}",
+                 OR (state = 'interrupted' AND waiting IS NOT NULL)) AND NOT {} \
+                 AND (manual = 0 OR (deferred IS NULL AND (waiting IS NULL \
+                 OR EXISTS (SELECT 1 FROM effects WHERE key = 'hooks:' || runs.id))))",
                 super::drain::NO_PROCESS
             ),
             [],

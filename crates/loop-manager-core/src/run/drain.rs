@@ -30,7 +30,8 @@ pub(super) const NO_PROCESS: &str = "(step_kind IN ('drain', 'formula', 'await')
 
 impl RunHandler {
     /// The attempt of a drain step: the read of the tracker it asks for makes the first pass; its deadline is the
-    /// step's timeout. A run that held a slot before (an attempt cut by a restart) frees it here.
+    /// step's timeout, unless a child of the run is manual. A run that held a slot before (an attempt cut by a restart)
+    /// frees it here.
     pub(super) fn start_drain(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
         if row.bead.is_none() || !self.trackers.contains_key(&row.project) {
             let reason = "a drain step needs the bead of the run";
@@ -39,8 +40,14 @@ impl RunHandler {
         Self::run_attempt(tx, &mut row, "drain")?;
         let dedupe = format!("sync:drain:{}:{}", row.id, row.attempt);
         tx.effect(&tracker_key(&row.project), &dedupe, &sync(tx, &row.project)?)?;
-        let timeout_ms = row.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS);
-        tx.set_deadline(&row.deadline("state"), tx.now_ms().saturating_add(timeout_ms))?;
+        // A child an operator holds keeps the step timeout off until Continue (contracts 6.1), and the deadline of
+        // the state before (a park) goes.
+        if Self::holds_manual(tx, &row.id)? {
+            tx.clear_deadline(&row.deadline("state"))?;
+        } else {
+            let timeout_ms = row.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS);
+            tx.set_deadline(&row.deadline("state"), tx.now_ms().saturating_add(timeout_ms))?;
+        }
         self.schedule(tx)
     }
 

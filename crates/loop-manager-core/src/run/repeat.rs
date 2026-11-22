@@ -69,11 +69,19 @@ impl RunHandler {
     }
 
     /// The check script of the step of `run` was not started for a variable its `env` names and the daemon lacks: the
-    /// run fails as `config_error` at once, with no repeat and no policy (docs/design/config.md).
+    /// run fails as `config_error` at once, with no repeat and no policy (docs/design/config.md); a manual run, on
+    /// Continue.
     pub(super) fn check_refused(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, text: &str) -> Result<(), Error> {
         let row = Row::load(tx, run)?;
         if !Self::checking(tx, &row, attempt)? {
             return Ok(());
+        }
+        if row.manual {
+            let refused = super::manual::Deferred::CheckRefused {
+                attempt,
+                text: text.to_owned(),
+            };
+            return Self::defer(tx, &row, &refused);
         }
         let reason = format!("config_error: check script: {text}");
         self.terminal(tx, row, "failed", Some("infrastructure"), &reason)

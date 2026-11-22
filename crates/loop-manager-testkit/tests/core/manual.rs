@@ -8,7 +8,7 @@ use crate::common;
 use common::{POLICY, World, beads::slow_turn, drain::SWEEP, hollow_turn, world};
 use loop_manager_core::{
     driver::{Normalized, SessionState, StopReason},
-    run::{Create, GateSpec, Msg, Reader, Verdict},
+    run::{Create, Decision, GateSpec, Msg, Reader, Verdict},
 };
 use loop_manager_testkit::Step;
 use rusqlite::OptionalExtension;
@@ -313,6 +313,13 @@ async fn a_parent_formula_step_waits_for_a_manual_child_and_gets_its_whole_timeo
     tokio::time::sleep(Duration::from_secs(3 * HOUR)).await;
     assert_eq!(w.count_of(&parent, "run.attempt_failed").await, 0);
     assert_eq!(w.run_view(&parent)["state"], "running");
+    assert_eq!(w.control(&parent, 1, true).await, "accepted");
+    assert_eq!(w.control(&parent, 1, false).await, "accepted");
+    assert_eq!(
+        w.deadline_at(&parent_state),
+        None,
+        "the parent's own Continue waits for the child"
+    );
 
     assert_eq!(w.control(&child, 1, false).await, "accepted");
     let now = w.clock.now_ms();
@@ -433,7 +440,61 @@ async fn a_queued_manual_run_does_not_start() {
     w.until(Some(&run), "run.started", 0).await;
 }
 
-/// A restart keeps the run manual: the attempt it cut waits for Continue instead of the policy.
+/// A manual run keeps the first decision that applies to what it waits on, as it would have taken it: one the event
+/// does not take, or any after it, is refused at once, and Continue applies the one kept.
+#[tokio::test(start_paused = true)]
+async fn a_manual_run_keeps_the_first_decision_that_applies() {
+    let w = common::world_with(POLICY, std::sync::Arc::new(common::Lost));
+    w.driver.script(vec![
+        Step::Emit(Normalized::TurnStarted),
+        Step::Exit {
+            code: None,
+            signal: Some(9),
+        },
+    ]);
+    let run = w.create().await;
+    let seq = w.seq_of(&run, "run.attempt_failed", 0).await;
+    assert_eq!(w.control(&run, 1, true).await, "accepted");
+    let (core, of) = (&w.core, &run);
+    let decide = |decision| {
+        core.send(
+            None,
+            Msg::Decide {
+                run: of.clone(),
+                seq,
+                decision,
+            },
+        )
+    };
+    let go_on = Decision::Continue {
+        message: "go on".into(),
+    };
+    assert!(decide(go_on).await.is_err(), "a failed attempt takes no `continue`");
+    let retry = Decision::NewSession {
+        after: Duration::ZERO,
+        gate: None,
+    };
+    decide(retry).await.unwrap();
+    let fail = Decision::Fail {
+        reason: "late".into(),
+        gate: None,
+    };
+    assert!(decide(fail).await.is_err(), "the first decision is kept");
+    assert_eq!(w.run_view(&run)["manual"]["deferred"], "decision");
+
+    assert_eq!(w.control(&run, 1, false).await, "accepted");
+    let start = Instant::now();
+    while w.driver.token(&run, 2).is_none() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the decision kept was not applied"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A restart keeps the run manual: the attempt it cut waits for Continue instead of the policy, no clock of the run is
+/// armed and no attempt starts; Continue hands the failure to the policy once, with the whole time of its hooks.
 #[tokio::test(start_paused = true)]
 async fn a_restart_keeps_the_run_manual_and_defers_its_crash() {
     let mut w = world(POLICY);
@@ -446,13 +507,179 @@ async fn a_restart_keeps_the_run_manual_and_defers_its_crash() {
     assert_eq!(w.count_of(&run, "run.attempt_failed").await, 0);
     let view = w.run_view(&run);
     assert_eq!(
-        (&view["control"], &view["manual"]["deferred"]),
-        (&json!("manual"), &json!("failed"))
+        (&view["control"], &view["manual"]["deferred"], &view["state"]),
+        (&json!("manual"), &json!("failed"), &json!("running"))
     );
+    assert_eq!(view["attempts"].as_array().unwrap().len(), 1, "no attempt started");
     assert_eq!(view["attempts"][0]["failure_kind"], "daemon_crash");
+    for what in ["state", "silence", "decide"] {
+        assert_eq!(w.deadline_at(&format!("{run}:{what}")), None, "{what}");
+    }
     assert_eq!(w.all("daemon.started").last().unwrap()["interrupted_runs"], 0);
 
     assert_eq!(w.control(&run, 1, false).await, "accepted");
     let failed = w.until(Some(&run), "run.attempt_failed", 0).await;
     assert_eq!(failed["failure"]["kind"], "daemon_crash");
+    let decide = w.deadline_at(&format!("{run}:decide")).unwrap();
+    assert!(decide >= w.clock.now_ms() + 15_000, "the hooks have their whole time");
+    let retry = Decision::NewSession {
+        after: Duration::ZERO,
+        gate: None,
+    };
+    w.decide(&run, "run.attempt_failed", 0, retry).await;
+    let start = Instant::now();
+    while w.driver.token(&run, 2).is_none() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the policy's attempt never started"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(w.count_of(&run, "run.attempt_failed").await, 1);
+}
+
+/// A turn that ended with its outcome while manual stays settled across a restart: Continue moves the run to
+/// `finishing` once, in the same attempt.
+#[tokio::test(start_paused = true)]
+async fn a_restart_keeps_a_settled_outcome_for_continue() {
+    let mut w = world(POLICY);
+    w.driver.script(slow_turn());
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.control(&run, 1, true).await, "accepted");
+    assert_eq!(w.declare_outcome(&run, 1, Verdict::Pass).await, "accepted");
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(w.run_view(&run)["manual"]["deferred"], "settled");
+    w.restart().await;
+    tokio::time::sleep(Duration::from_secs(HOUR)).await;
+    let view = w.run_view(&run);
+    assert_eq!(
+        (&view["control"], &view["manual"]["deferred"]),
+        (&json!("manual"), &json!("settled"))
+    );
+    assert_eq!(w.count_of(&run, "run.finishing").await, 0);
+
+    assert_eq!(w.control(&run, 1, false).await, "accepted");
+    w.until(Some(&run), "run.passed", 0).await;
+    assert_eq!(w.count_of(&run, "run.finishing").await, 1);
+    assert_eq!(w.count_of(&run, "run.attempt_failed").await, 0);
+    assert_eq!(w.run_view(&run)["attempt"], 1);
+}
+
+/// A restart cuts the attempt of a parent formula step whose child is manual: its next attempt waits for the child
+/// with no step timeout, which starts whole on the child's Continue.
+#[tokio::test(start_paused = true)]
+async fn a_restart_keeps_the_step_timeout_of_a_waiting_parent_off() {
+    let mut w = world(&[POLICY, &[CHILD, SHIP]].concat());
+    w.driver.script(endless());
+    let reply = w.core.send(None, create("ship", json!({}))).await.unwrap();
+    let parent = reply["run"].as_str().unwrap().to_owned();
+    let child = w.until(None, "run.queued", 1).await["run"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.control(&child, 1, true).await, "accepted");
+    w.restart().await;
+    let retry = Decision::NewSession {
+        after: Duration::ZERO,
+        gate: None,
+    };
+    w.decide(&parent, "run.attempt_failed", 0, retry).await;
+    tokio::time::sleep(Duration::from_secs(3 * HOUR)).await;
+    let parent_state = format!("{parent}:state");
+    assert_eq!(w.deadline_at(&parent_state), None);
+    let view = w.run_view(&parent);
+    assert_eq!(
+        (&view["state"], &view["step_kind"]),
+        (&json!("running"), &json!("formula"))
+    );
+    let failures: Vec<Value> = (w.all("run.attempt_failed").into_iter())
+        .filter(|d| d["run"]["id"] == parent.as_str())
+        .map(|d| d["failure"]["kind"].clone())
+        .collect();
+    assert_eq!(failures, [json!("daemon_crash")], "no step timeout");
+    assert_eq!(w.run_view(&child)["manual"]["deferred"], "failed");
+
+    assert_eq!(w.control(&child, 1, false).await, "accepted");
+    assert_eq!(w.deadline_at(&parent_state), Some(w.clock.now_ms() + 3_600_000));
+}
+
+/// A queued run taken over stays queued across a restart, its rig open or not.
+#[tokio::test(start_paused = true)]
+async fn a_queued_manual_run_does_not_start_after_a_restart() {
+    let mut w = world(&[]);
+    w.driver.script(hollow_turn());
+    let gate = GateSpec {
+        key: "rig:shop/web".into(),
+        until_ms: None,
+        reason: "hold".into(),
+    };
+    w.core.send(None, Msg::CloseGate(gate)).await.unwrap();
+    let run = w.create().await;
+    assert_eq!(w.control(&run, 0, true).await, "accepted");
+    w.restart().await;
+    let open = Msg::OpenGate {
+        key: "rig:shop/web".into(),
+    };
+    w.core.send(None, open).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(HOUR)).await;
+    assert_eq!(w.count_of(&run, "run.started").await, 0);
+    assert_eq!(w.run_view(&run)["control"], "manual");
+
+    assert_eq!(w.control(&run, 0, false).await, "accepted");
+    w.until(Some(&run), "run.started", 0).await;
+}
+
+/// A planned drain waits for a manual run while its turn goes on, not once the turn settled and the run stands for
+/// the operator.
+#[tokio::test(start_paused = true)]
+async fn a_drain_waits_for_a_manual_run_only_while_its_work_goes_on() {
+    let w = world(&[]);
+    w.driver.script(slow_turn());
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.control(&run, 1, true).await, "accepted");
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    assert_eq!(reader.status().unwrap()["active_runs"], 1, "the turn goes on");
+    assert_eq!(w.declare_outcome(&run, 1, Verdict::Pass).await, "accepted");
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(w.run_view(&run)["manual"]["deferred"], "settled");
+    assert_eq!(reader.status().unwrap()["active_runs"], 0);
+}
+
+/// A check script refused while the run is manual — the message the runner sends for a script whose `[exec]` names a
+/// variable the daemon lacks — fails the run only after Continue. Real time: the check script is a real process.
+#[tokio::test]
+async fn a_refused_check_script_fails_a_manual_run_after_continue() {
+    let w = crate::step_repeat::repeating(1, "0", "sleep 30", "", &[]);
+    let turn = w.repeat_turn();
+    let run = w.create().await;
+    w.repeat_declare(&run, 1, Verdict::Pass, &turn).await;
+    let start = Instant::now();
+    while w.check_calls() == 0 || w.run_view(&run)["state"] != "finishing" {
+        assert!(start.elapsed() < Duration::from_secs(10), "the check script never ran");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(w.control(&run, 1, true).await, "accepted");
+    let refused = Msg::CheckRefused {
+        run: run.clone(),
+        attempt: 1,
+        text: "env `GH_TOKEN`: no variable `NONE`".into(),
+    };
+    w.core.send(None, refused).await.unwrap();
+    let view = w.run_view(&run);
+    assert_eq!(
+        (&view["state"], &view["manual"]["deferred"]),
+        (&json!("finishing"), &json!("check_refused"))
+    );
+    assert_eq!(w.count_of(&run, "run.failed").await, 0);
+
+    assert_eq!(w.control(&run, 1, false).await, "accepted");
+    let (kind, data) = w.repeat_end(&run).await;
+    assert_eq!(kind, "run.failed", "{data}");
+    assert_eq!(
+        data["reason"],
+        "config_error: check script: env `GH_TOKEN`: no variable `NONE`"
+    );
 }
