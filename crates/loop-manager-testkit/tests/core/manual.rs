@@ -371,6 +371,50 @@ async fn an_independent_sibling_under_a_drain_goes_on() {
     assert_eq!(w.deadline_at(&drain_state), Some(now + 24 * 3_600_000));
 }
 
+/// A manual child cancelled gives the drain that waits for it, and for its other child, the whole step timeout back.
+#[tokio::test(start_paused = true)]
+async fn a_cancelled_manual_child_gives_its_drain_the_whole_timeout_back() {
+    let two = "name = \"two\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"work\"\npool = 2\n";
+    let config = SWEEP[0].1.replace("max_runs = 1", "max_runs = 4");
+    let mut files = SWEEP.to_vec();
+    files[0].1 = &config;
+    files.push(("shop/formulas/two.toml", two));
+    let w = world(&files);
+    let root = w.tracker.add(&[], None);
+    for _ in 0..2 {
+        w.tracker.add_in("w", &[], Some(&root));
+    }
+    w.driver.script(endless());
+    w.driver.script(endless());
+    let reply = w.start_bead("two", Some("web"), json!(root)).await.unwrap();
+    let run = reply["run"].as_str().unwrap().to_owned();
+    let start = Instant::now();
+    let kids = loop {
+        let kids: Vec<String> = w.kids(&run).into_iter().map(|k| k.0).collect();
+        if kids.len() == 2 && kids.iter().all(|k| w.driver.token(k, 1).is_some()) {
+            break kids;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "the children never started");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let drain_state = format!("{run}:state");
+    assert_eq!(w.control(&kids[0], 1, true).await, "accepted");
+    assert_eq!(w.deadline_at(&drain_state), None);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(w.deadline_at(&drain_state), None);
+
+    let cancel = Msg::Cancel {
+        run: kids[0].clone(),
+        reason: "enough".into(),
+    };
+    w.core.send(None, cancel).await.unwrap();
+    assert_eq!(w.run_view(&kids[0])["state"], "cancelled");
+    assert_eq!(w.run_view(&run)["state"], "running");
+    let now = w.clock.now_ms();
+    assert_eq!(w.deadline_at(&drain_state), Some(now + 24 * 3_600_000));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_command_of_another_attempt_or_of_an_ended_run_changes_nothing() {
     let w = world(&[]);
