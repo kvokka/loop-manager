@@ -5,9 +5,19 @@
 //! `ACP_AGENT_COMMAND` (when set) as an `execute` tool call run by `sh -c` in the session's `cwd`, then `idle` with
 //! `end_turn`. `session/cancel` kills the command's process group and ends the turn with `cancelled`.
 //!
-//! `acp-agent --v1` serves only protocol version 1: it answers any `initialize` with `protocolVersion: 1`.
+//! The command sees the session's system prompt and config options in `ACP_AGENT_SYSTEM_PROMPT`, `ACP_AGENT_MODEL`
+//! and `ACP_AGENT_EFFORT`. A session lives as long as the process: `session/resume` answers `-32002`.
+//!
+//! Flags, combined at will:
+//! - `--system-prompt`: advertises `session.systemPrompt`;
+//! - `--options`: offers the config options `model` (`a`, `b`) and `effort` (`low`, `high`), of the categories
+//!   `model` and `thought_level`;
+//! - `--background`: after the command, a turn leaves `sleep 600` running as a background terminal that advertises
+//!   `cancel`; `terminal/cancel` kills it, then the session goes idle without background;
+//! - `--unsupported`: answers `initialize` with `-32022`;
+//! - `--v1`: serves only protocol version 1, answering any `initialize` with `protocolVersion: 1`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::{ExitCode, Stdio as ProcessStdio};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -27,6 +37,10 @@ struct Turn {
 
 struct Session {
     cwd: schema::AbsolutePath,
+    /// What the command sees of the session: its system prompt and config options.
+    env: HashMap<&'static str, String>,
+    /// The background terminals running, by id.
+    terminals: HashMap<String, Group>,
     turns: mpsc::UnboundedSender<Turn>,
     /// Bumped by `session/cancel` and `session/close`.
     epoch: watch::Sender<u64>,
@@ -37,8 +51,6 @@ struct Session {
 #[derive(Default)]
 struct State {
     sessions: HashMap<schema::SessionId, Session>,
-    /// Every `idempotencyKey` of this process with the message it was answered with.
-    keys: HashMap<schema::IdempotencyKey, schema::MessageId>,
     next_id: u64,
 }
 
@@ -53,11 +65,121 @@ impl State {
 struct Script {
     state: Arc<Mutex<State>>,
     command: Option<Arc<str>>,
+    flags: Arc<HashSet<String>>,
 }
+
+/// The config options of `--options`: id, category, values.
+const OPTIONS: [(&str, &str, [&str; 2]); 2] = [
+    ("model", "model", ["a", "b"]),
+    ("effort", "thought_level", ["low", "high"]),
+];
 
 impl Script {
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn flag(&self, name: &str) -> bool {
+        self.flags.contains(name)
+    }
+
+    fn initialize(&self, responder: Responder<schema::InitializeResponse>) -> Result<()> {
+        if self.flag("--unsupported") {
+            let error =
+                schema::Error::unsupported_protocol_version(ProtocolVersion::V2, &[ProtocolVersion::from(3_u16)]);
+            return responder.respond_with_error(error.into());
+        }
+        let mut session = serde_json::json!({});
+        if self.flag("--system-prompt") {
+            session["systemPrompt"] = serde_json::json!({});
+        }
+        let session: schema::SessionCapabilities = serde_json::from_value(session).expect("session capabilities");
+        responder.respond(
+            schema::InitializeResponse::new(
+                ProtocolVersion::V2,
+                schema::Implementation::new(NAME, env!("CARGO_PKG_VERSION")),
+            )
+            .capabilities(schema::AgentCapabilities::new().session(session)),
+        )
+    }
+
+    /// The config options of the session as `--options` offers them, with their current values.
+    fn options(env: &HashMap<&'static str, String>) -> Vec<schema::SessionConfigOption> {
+        OPTIONS
+            .iter()
+            .map(|(id, category, values)| {
+                let current = env
+                    .get(&*format!("ACP_AGENT_{}", id.to_uppercase()))
+                    .map_or(values[0], String::as_str);
+                serde_json::from_value(serde_json::json!({
+                    "configId": id, "name": id, "category": category, "type": "select", "currentValue": current,
+                    "options": values.map(|v| serde_json::json!({ "value": v, "name": v })),
+                }))
+                .expect("a config option")
+            })
+            .collect()
+    }
+
+    fn set_option(
+        &self,
+        request: &schema::SetSessionConfigOptionRequest,
+        responder: Responder<schema::SetSessionConfigOptionResponse>,
+    ) -> Result<()> {
+        let mut state = self.state();
+        let value = serde_json::to_value(&request.value).unwrap_or_default();
+        let value = value["value"]
+            .as_str()
+            .or(value.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let id = request.config_id.to_string();
+        let known = OPTIONS
+            .iter()
+            .find(|(o, _, values)| *o == id && values.contains(&value.as_str()));
+        let (Some((id, _, _)), Some(session), true) = (
+            known,
+            state.sessions.get_mut(&request.session_id),
+            self.flag("--options"),
+        ) else {
+            return responder.respond_with_error(schema::Error::invalid_params().into());
+        };
+        session.env.insert(
+            if *id == "model" {
+                "ACP_AGENT_MODEL"
+            } else {
+                "ACP_AGENT_EFFORT"
+            },
+            value,
+        );
+        responder.respond(schema::SetSessionConfigOptionResponse::new(Self::options(&session.env)))
+    }
+
+    /// Kills the background terminal, tells its exit, then the session's idle without it.
+    fn cancel_terminal(
+        &self,
+        request: &schema::CancelTerminalRequest,
+        responder: Responder<schema::CancelTerminalResponse>,
+        connection: &ConnectionTo<Client>,
+    ) -> Result<()> {
+        let id = request.terminal_id.to_string();
+        let killed = (self.state().sessions.get_mut(&request.session_id)).and_then(|s| s.terminals.remove(&id));
+        let Some(group) = killed else {
+            return responder.respond_with_error(schema::Error::invalid_params().into());
+        };
+        drop(group);
+        responder.respond(schema::CancelTerminalResponse::new())?;
+        let send = |update| {
+            connection.send_notification(schema::UpdateSessionNotification::new(
+                request.session_id.clone(),
+                update,
+            ))
+        };
+        send(schema::SessionUpdate::TerminalUpdate(
+            schema::TerminalUpdate::new(id).exit_status(schema::TerminalExitStatus::new()),
+        ))?;
+        send(schema::SessionUpdate::StateUpdate(schema::StateUpdate::Idle(
+            schema::IdleStateUpdate::new(),
+        )))
     }
 
     fn new_session(
@@ -69,11 +191,25 @@ impl Script {
         let (turns, queue) = mpsc::unbounded_channel();
         let (epoch, epoch_rx) = watch::channel(0);
         let (done, worker_done) = oneshot::channel();
+        let mut env = HashMap::new();
+        if let Some(prompt) = &request.system_prompt {
+            let text = prompt.content.iter().filter_map(|block| match block {
+                schema::ContentBlock::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            });
+            env.insert("ACP_AGENT_SYSTEM_PROMPT", text.collect::<Vec<_>>().join("\n"));
+        }
+        let options = match self.flag("--options") {
+            true => Self::options(&env),
+            false => Vec::new(),
+        };
         let session_id = {
             let mut state = self.state();
             let session_id = schema::SessionId::new(state.next_id("session"));
             let session = Session {
                 cwd: request.cwd,
+                env,
+                terminals: HashMap::new(),
                 turns,
                 epoch,
                 worker_done,
@@ -90,14 +226,11 @@ impl Script {
             connection.spawn(worker.run(queue, done))?;
             session_id
         };
-        responder.respond(schema::NewSessionResponse::new(session_id))
+        responder.respond(schema::NewSessionResponse::new(session_id).config_options(options))
     }
 
     fn prompt(&self, request: schema::PromptRequest, responder: Responder<schema::PromptResponse>) -> Result<()> {
         let mut state = self.state();
-        if let Some(message_id) = request.idempotency_key.as_ref().and_then(|key| state.keys.get(key)) {
-            return responder.respond(schema::PromptResponse::new(message_id.clone()));
-        }
         let message_id = schema::MessageId::new(state.next_id("message"));
         let Some(session) = state.sessions.get(&request.session_id) else {
             return responder.respond_with_error(schema::Error::session_not_found(request.session_id).into());
@@ -110,9 +243,6 @@ impl Script {
         responder.respond(schema::PromptResponse::new(message_id.clone()))?;
         // The worker lives as long as the session, so the send fails only while the connection shuts down.
         let _ = session.turns.send(turn);
-        if let Some(key) = request.idempotency_key {
-            state.keys.insert(key, message_id);
-        }
         Ok(())
     }
 
@@ -127,15 +257,6 @@ impl Script {
         let session = self.state().sessions.remove(session_id)?;
         session.epoch.send_modify(|epoch| *epoch += 1);
         Some(session.worker_done)
-    }
-
-    fn list(&self, cwd: Option<&schema::AbsolutePath>) -> Vec<schema::SessionInfo> {
-        self.state()
-            .sessions
-            .iter()
-            .filter(|(_, session)| cwd.is_none_or(|cwd| *cwd == session.cwd))
-            .map(|(id, session)| schema::SessionInfo::new(id.clone(), session.cwd.clone()))
-            .collect()
     }
 }
 
@@ -186,12 +307,43 @@ impl Worker {
         if let Some(command) = self.script.command.clone() {
             self.run_command(&command, turn.epoch).await?;
         }
-        let stop_reason = if self.cancelled(turn) {
-            schema::StopReason::Cancelled
-        } else {
-            schema::StopReason::EndTurn
-        };
-        self.idle(stop_reason)
+        if self.cancelled(turn) {
+            return self.idle(schema::StopReason::Cancelled);
+        }
+        if !self.script.flag("--background") {
+            return self.idle(schema::StopReason::EndTurn);
+        }
+        let id = self.background()?;
+        let background = vec![schema::BackgroundWork::Terminal(schema::BackgroundTerminal::new(id))];
+        self.send(schema::SessionUpdate::StateUpdate(schema::StateUpdate::Idle(
+            schema::IdleStateUpdate::new()
+                .stop_reason(schema::StopReason::EndTurn)
+                .background(background),
+        )))
+    }
+
+    /// Starts `sleep 600` as a background terminal that advertises `cancel`; its id.
+    fn background(&self) -> Result<String> {
+        let id = self.script.state().next_id("terminal");
+        let child = tokio::process::Command::new("sleep")
+            .arg("600")
+            .process_group(0)
+            .spawn();
+        let group = child
+            .ok()
+            .and_then(|c| rustix::process::Pid::from_raw(i32::try_from(c.id()?).ok()?))
+            .map(Group);
+        let group = group.ok_or_else(agent_client_protocol::Error::internal_error)?;
+        if let Some(session) = self.script.state().sessions.get_mut(&self.session_id) {
+            session.terminals.insert(id.clone(), group);
+        }
+        let capabilities = schema::TerminalCapabilities::new().cancel(schema::TerminalCancelCapabilities::new());
+        self.send(schema::SessionUpdate::TerminalUpdate(
+            schema::TerminalUpdate::new(id.clone())
+                .command("sleep 600".to_owned())
+                .capabilities(capabilities),
+        ))?;
+        Ok(id)
     }
 
     /// Runs the command as a tool call.
@@ -203,7 +355,11 @@ impl Worker {
                 .title(command.to_owned())
                 .status(schema::ToolCallStatus::InProgress),
         ))?;
+        let env = (self.script.state().sessions.get(&self.session_id))
+            .map(|s| s.env.clone())
+            .unwrap_or_default();
         let spawned = tokio::process::Command::new("sh")
+            .envs(env)
             .arg("-c")
             // Stderr joins stdout, so the output keeps the order it was written in.
             .arg(format!("exec 2>&1\n{command}"))
@@ -268,16 +424,11 @@ async fn serve_v2(script: Script) -> Result<()> {
         .v2()
         .name(NAME)
         .on_receive_request(
-            async |_request: schema::InitializeRequest,
-                   responder: Responder<schema::InitializeResponse>,
-                   _connection: ConnectionTo<Client>| {
-                responder.respond(
-                    schema::InitializeResponse::new(
-                        ProtocolVersion::V2,
-                        schema::Implementation::new(NAME, env!("CARGO_PKG_VERSION")),
-                    )
-                    .capabilities(schema::AgentCapabilities::new().session(schema::SessionCapabilities::new())),
-                )
+            {
+                let script = script.clone();
+                async move |_request: schema::InitializeRequest,
+                            responder: Responder<schema::InitializeResponse>,
+                            _connection: ConnectionTo<Client>| { script.initialize(responder) }
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -302,12 +453,32 @@ async fn serve_v2(script: Script) -> Result<()> {
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
+            async |request: schema::ResumeSessionRequest,
+                   responder: Responder<schema::ResumeSessionResponse>,
+                   _connection: ConnectionTo<Client>| {
+                // Sessions do not outlive the process, and a resume comes from another one.
+                responder.respond_with_error(schema::Error::session_not_found(request.session_id).into())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
             {
                 let script = script.clone();
-                async move |request: schema::ListSessionsRequest,
-                            responder: Responder<schema::ListSessionsResponse>,
+                async move |request: schema::SetSessionConfigOptionRequest,
+                            responder: Responder<schema::SetSessionConfigOptionResponse>,
                             _connection: ConnectionTo<Client>| {
-                    responder.respond(schema::ListSessionsResponse::new(script.list(request.cwd.as_ref())))
+                    script.set_option(&request, responder)
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let script = script.clone();
+                async move |request: schema::CancelTerminalRequest,
+                            responder: Responder<schema::CancelTerminalResponse>,
+                            connection: ConnectionTo<Client>| {
+                    script.cancel_terminal(&request, responder, &connection)
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -360,20 +531,22 @@ async fn serve_v1() -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    const FLAGS: [&str; 4] = ["--system-prompt", "--options", "--background", "--unsupported"];
     let served = match args.as_slice() {
-        [] => {
+        [flag] if flag == "--v1" => serve_v1().await,
+        flags if flags.iter().all(|f| FLAGS.contains(&f.as_str())) => {
             let command = std::env::var("ACP_AGENT_COMMAND")
                 .ok()
                 .filter(|command| !command.is_empty());
             serve_v2(Script {
                 command: command.map(Arc::from),
+                flags: Arc::new(flags.iter().cloned().collect()),
                 ..Script::default()
             })
             .await
         }
-        [flag] if flag == "--v1" => serve_v1().await,
         _ => {
-            eprintln!("usage: {NAME} [--v1]");
+            eprintln!("usage: {NAME} [--v1 | {}...]", FLAGS.join(" | "));
             return ExitCode::FAILURE;
         }
     };

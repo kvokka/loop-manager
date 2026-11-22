@@ -902,7 +902,9 @@ for it is not.
 - Every prompt has a delivery record `intent → sent → acked → settled` and a `PromptKey`. `intent` is written
   with the decision to send; `sent` after `send_prompt` returned; `acked` on `prompt.acked`; `settled` when the turn
   ended. No marker in the prompt text: both harnesses keep the key in the transcript natively
-  ([experiments](experiments.md)), so the transcript check finds it.
+  ([experiments](experiments.md)), so the transcript check finds it. An ACP harness of the config has no transcript
+  check: only the agent's memory of the idempotency key protects the prompt, and the delivery may repeat
+  ([adapters](adapters.md#acp-v2-harnesses)).
 - Daemon start ([invariants](invariants.md#recovery)): open the state and drain the outbox; for every recorded instance check pid + start time, kill its
   process group and sweep every process carrying its marker `LOOP_MANAGER_INSTANCE=<id>` in the environment, wait for
   the end (invariants 6, 7); every hook still queued is first killed by its `LOOP_MANAGER_INSTANCE` marker, with what it

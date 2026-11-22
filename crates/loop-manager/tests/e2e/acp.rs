@@ -84,16 +84,165 @@ async fn an_acp_agent_of_the_config_runs_a_step_through_the_finisher_and_is_gone
         env.lines().any(|l| l.starts_with("LOOP_MANAGER_ATTEMPT_TOKEN=")),
         "{env}"
     );
-    // A process per session: none of the run's outlives it.
+    gone(&run, &d).await;
+}
+
+/// A process per session: none of the run's outlives it.
+async fn gone(run: &str, d: &Daemon) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !of_run(&run, d.dir.path()).is_empty() {
+    while !of_run(run, d.dir.path()).is_empty() {
         assert!(
             Instant::now() < deadline,
             "left behind: {:?}",
-            of_run(&run, d.dir.path())
+            of_run(run, d.dir.path())
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// The `[harness.fake]` section of the fixture with `args`, whose command writes its environment to `env`, then
+/// declares the outcome.
+fn finishing(args: &str, env: &Path) -> String {
+    let command = format!("env > {}; {} finish pass --summary built", env.display(), common::EXE);
+    format!(
+        "command = \"{}\"\nargs = [{args}]\n[harness.fake.env]\nACP_AGENT_COMMAND = \"{command}\"\n",
+        agent().display()
+    )
+}
+
+/// The value of `name` in an `env` dump.
+fn var(env: &Path, name: &str) -> Option<String> {
+    let env = fs::read_to_string(env).unwrap_or_default();
+    let prefix = format!("{name}=");
+    env.lines().find_map(|l| l.strip_prefix(&prefix).map(str::to_owned))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_role_model_and_effort_reach_an_agent_that_offers_them() {
+    let out = tempfile::tempdir().unwrap();
+    let env = out.path().join("env");
+    let section = finishing("\"--system-prompt\", \"--options\"", &env);
+    let agent = "system_prompt = \"Be a builder.\"\nmodel = \"b\"\neffort = \"high\"\n";
+    let d = daemon("fake", &section, agent).await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    assert_eq!(var(&env, "ACP_AGENT_SYSTEM_PROMPT").as_deref(), Some("Be a builder."));
+    assert_eq!(var(&env, "ACP_AGENT_MODEL").as_deref(), Some("b"));
+    assert_eq!(var(&env, "ACP_AGENT_EFFORT").as_deref(), Some("high"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_role_for_an_agent_without_system_prompts_fails_the_attempt_naming_the_key() {
+    let out = tempfile::tempdir().unwrap();
+    let d = daemon(
+        "fake",
+        &finishing("", &out.path().join("env")),
+        "system_prompt = \"Be a builder.\"\n",
+    )
+    .await;
+    let failure = attempt_failure(&d).await;
+    assert_eq!(failure["kind"], "config_error", "{failure}");
+    let text = failure.to_string();
+    assert!(
+        text.contains("`system_prompt`: the agent of harness `fake` advertises no `session.systemPrompt`"),
+        "{text}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_the_agent_does_not_offer_fails_the_attempt_naming_the_key() {
+    let out = tempfile::tempdir().unwrap();
+    let d = daemon(
+        "fake",
+        &finishing("\"--options\"", &out.path().join("env")),
+        "model = \"x\"\n",
+    )
+    .await;
+    let failure = attempt_failure(&d).await;
+    assert_eq!(failure["kind"], "config_error", "{failure}");
+    assert!(failure.to_string().contains("`model` = `x`"), "{failure}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_that_supports_no_version_of_ours_fails_its_attempt_naming_the_version() {
+    let section = format!("command = \"{}\"\nargs = [\"--unsupported\"]\n", agent().display());
+    let d = daemon("fake", &section, "").await;
+    let failure = attempt_failure(&d).await;
+    assert_eq!(failure["kind"], "config_error", "{failure}");
+    let text = failure.to_string();
+    assert!(
+        text.contains("supports no ACP protocol version loop-manager speaks (2)"),
+        "{text}"
+    );
+}
+
+/// Invariant 5 through a real process: the agent killed in a turn is `harness_crash`; its session died with it, so
+/// the resume finds none (`transcript_divergence`) and a fresh session finishes the run.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_killed_in_a_turn_is_a_harness_crash_and_a_fresh_session_goes_on() {
+    let out = tempfile::tempdir().unwrap();
+    let (marker, env) = (out.path().join("killed"), out.path().join("env"));
+    let command = format!(
+        "test -e {m} || {{ touch {m}; kill -9 $$PPID; sleep 5; }}; env > {}; {} finish pass --summary built",
+        env.display(),
+        common::EXE,
+        m = marker.display()
+    );
+    let section = format!(
+        "command = \"{}\"\n[harness.fake.env]\nACP_AGENT_COMMAND = \"{command}\"\n",
+        agent().display()
+    );
+    let d = daemon("fake", &section, "").await;
+    let mut events = d.client.events(Some(1)).await.unwrap();
+    let run = d.create("build", None).await;
+    let mut kinds = Vec::new();
+    while kinds.len() < 2 {
+        let event = tokio::time::timeout(Duration::from_secs(20), events.next()).await;
+        let event = event.expect("an event in time").unwrap().expect("the stream goes on");
+        if event.event == "run.attempt_failed" {
+            let data: Value = serde_json::from_str(&event.data).unwrap();
+            kinds.push(data["data"]["failure"]["kind"].as_str().unwrap().to_owned());
+        }
+    }
+    assert_eq!(kinds, ["harness_crash", "transcript_divergence"]);
+    d.until_state(&run, "passed").await;
+    assert!(var(&env, "LOOP_MANAGER_RUN").is_some());
+    gone(&run, &d).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_cancelled_in_a_turn_leaves_no_command_of_the_agent_running() {
+    let out = tempfile::tempdir().unwrap();
+    let started = out.path().join("started");
+    let section = format!(
+        "command = \"{}\"\n[harness.fake.env]\nACP_AGENT_COMMAND = \"touch {}; sleep 600\"\n",
+        agent().display(),
+        started.display()
+    );
+    let d = daemon("fake", &section, "").await;
+    let run = d.create("build", None).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !started.exists() {
+        assert!(Instant::now() < deadline, "the command did not start");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    d.post(&format!("/v1/runs/{run}/cancel"), serde_json::json!({}), None)
+        .await
+        .unwrap();
+    d.until_state(&run, "cancelled").await;
+    // The command and its `sleep` carry the run's environment.
+    gone(&run, &d).await;
+}
+
+/// Criterion 34 on the fixture: the outcome is declared and the turn ended with a background terminal that can be
+/// cancelled, so loop-manager cancels it and the run passes without waiting for its budget.
+#[tokio::test(flavor = "multi_thread")]
+async fn background_work_that_can_be_cancelled_is_cancelled_once_the_outcome_is_declared() {
+    let out = tempfile::tempdir().unwrap();
+    let d = daemon("fake", &finishing("\"--background\"", &out.path().join("env")), "").await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    gone(&run, &d).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -164,6 +313,8 @@ async fn a_trace_holds_both_directions_with_the_token_and_the_env_secrets_redact
     );
     assert!(lines.iter().all(|l| l["ts_ms"].as_u64().is_some()), "{text}");
     assert!(text.contains("token=[redacted] secret=[redacted]"), "{text}");
+    // A short value of the env (the issue prefix `w`) is no secret: it would garble every line.
+    assert!(text.contains(r#""method":"session/new""#), "{text}");
     assert!(!text.contains(token) && !text.contains("s3cr3t-shop-key"), "{text}");
 
     // The daemon probes the same agent for `GET /v1/doctor`.

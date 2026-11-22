@@ -14,6 +14,10 @@ use std::{
 /// A trace file stops growing past this size.
 const MAX_BYTES: u64 = 256 << 20;
 
+/// A value shorter than this is no secret to the trace: it cannot be told from ordinary text, and replacing it would
+/// garble every line (a one-letter issue prefix, a flag `1`).
+const MIN_SECRET: usize = 8;
+
 /// What a redacted value reads as.
 const REDACTED: &str = "[redacted]";
 
@@ -46,10 +50,10 @@ impl Trace {
         Ok(trace)
     }
 
-    /// More values to redact from the lines written from now on; an empty one is no secret.
+    /// More values to redact from the lines written from now on; one shorter than [`MIN_SECRET`] is no secret.
     pub(crate) fn secrets(&self, more: impl IntoIterator<Item = String>) {
         let mut secrets = crate::lock(&self.secrets);
-        secrets.extend(more.into_iter().filter(|s| !s.is_empty()));
+        secrets.extend(more.into_iter().filter(|s| s.len() >= MIN_SECRET));
         secrets.sort_unstable();
         secrets.dedup();
     }

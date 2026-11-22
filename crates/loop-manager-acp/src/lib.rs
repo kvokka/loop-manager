@@ -149,8 +149,13 @@ impl Acp {
         let env = part::env(p, id, self.socket.as_deref())?;
         let trace = match &self.trace {
             Some(dir) => {
-                // The attempt token and the values the harness's and the agent's `env` resolved to.
-                let named = |k: &str| k == "LOOP_MANAGER_ATTEMPT_TOKEN" || p["env"].get(k).is_some();
+                // The attempt token, the values the harness's and the agent's `env` resolved to, and the proxies
+                // of `HOST_NETWORK_ENV`, which may carry a login in their URL.
+                let named = |k: &str| {
+                    k == "LOOP_MANAGER_ATTEMPT_TOKEN"
+                        || p["env"].get(k).is_some()
+                        || loop_manager_contract::driver::HOST_NETWORK_ENV.contains(&k)
+                };
                 let secrets = env.iter().filter(|(k, _)| named(k)).map(|(_, v)| v.clone());
                 let opened = Trace::open(dir, id, secrets.collect());
                 Some(Arc::new(opened.map_err(|e| {
@@ -221,7 +226,7 @@ impl Acp {
     /// The instance `id`, checked to take the MCP servers of the session part `part`, its trace told their secrets.
     fn for_session(&self, id: &str, part: &Value) -> Result<Arc<Instance>, Failure> {
         let known = self.instance(id)?;
-        part::transports(&self.name, part, &known.capabilities)?;
+        part::offered(&self.name, part, &known.capabilities)?;
         if let Some(trace) = &known.trace {
             trace.secrets(trace::mcp_secrets(part));
         }
@@ -244,7 +249,7 @@ impl Acp {
                     self.name
                 )));
             };
-            let set = json!({ "sessionId": session_id, "configId": option["id"], "value": wanted });
+            let set = json!({ "sessionId": session_id, "configId": option["configId"], "type": "id", "value": wanted });
             let set: schema::SetSessionConfigOptionRequest =
                 serde_json::from_value(set).map_err(|e| child::config_error(format!("`{key}`: {e}")))?;
             request_within(known.conn.send_request(set).block_task())
@@ -404,7 +409,10 @@ async fn initialize(
             command.display()
         ))),
         Ok(InitializeOutcome::LowerVersion(mismatch)) => Err(version(mismatch.selected().as_u16())),
-        Ok(_) => Err(version(0)),
+        Ok(_) => Err(child::config_error(format!(
+            "harness `{harness}`: `{}` gave an `initialize` outcome loop-manager does not know",
+            command.display()
+        ))),
         Err(failure) if failure.raw.starts_with("-32022") => Err(child::config_error(format!(
             "harness `{harness}`: `{}` supports no ACP protocol version loop-manager speaks (2): {}",
             command.display(),
@@ -618,10 +626,38 @@ impl Driver for Acp {
         })
     }
 
-    /// ACP v2 lets the client stop no single piece of background work of a session: the work ends by itself, or the
-    /// run waits for its background budget (docs/design/adapters.md).
-    fn stop_background<'a>(&'a self, _instance: &'a InstanceHandle, _session: &'a SessionRef) -> BoxFuture<'a, ()> {
-        Box::pin(async {})
+    /// `terminal/cancel` and `tool_call/cancel` for the background work of the last `idle` that advertises
+    /// `capabilities.cancel`, best effort: the rest ends by itself or waits for its budget (docs/design/adapters.md).
+    fn stop_background<'a>(&'a self, instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let Ok(known) = self.instance(&instance.id) else { return };
+            let work = lock(&known.shared).turn.to_cancel();
+            let session = &session.0["session_id"];
+            for work in work {
+                let sent = match work {
+                    session::Work::Terminal(id) => {
+                        let request = json!({ "sessionId": session, "terminalId": id });
+                        let Ok(request) = serde_json::from_value::<schema::CancelTerminalRequest>(request) else {
+                            continue;
+                        };
+                        request_within(known.conn.send_request(request).block_task())
+                            .await
+                            .map(drop)
+                    }
+                    session::Work::ToolCall(id) => {
+                        let request = json!({ "sessionId": session, "toolCallId": id });
+                        let Ok(request) = serde_json::from_value::<schema::CancelToolCallRequest>(request) else {
+                            continue;
+                        };
+                        request_within(known.conn.send_request(request).block_task())
+                            .await
+                            .map(drop)
+                    }
+                };
+                // The work may have ended first: the agent then answers `-32602`, and nothing is left to stop.
+                drop(sent);
+            }
+        })
     }
 
     fn close_session<'a>(&'a self, instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()> {
@@ -656,3 +692,6 @@ impl Driver for Acp {
         None
     }
 }
+
+#[cfg(test)]
+mod tests;

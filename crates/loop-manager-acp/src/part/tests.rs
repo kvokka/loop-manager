@@ -110,14 +110,23 @@ fn an_mcp_server_of_a_transport_the_agent_did_not_advertise_is_refused_by_name()
         { "type": "http", "name": "mail", "url": "http://127.0.0.1:1/mcp", "headers": [] },
     ] });
     let both = json!({ "session": { "mcp": { "stdio": {}, "http": {} } } });
-    assert!(transports("fake", &part, &both).is_ok());
-    let error = transports("fake", &part, &json!({ "session": { "mcp": { "stdio": {} } } })).unwrap_err();
+    assert!(offered("fake", &part, &both).is_ok());
+    let error = offered("fake", &part, &json!({ "session": { "mcp": { "stdio": {} } } })).unwrap_err();
     assert_eq!(error.kind, loop_manager_contract::driver::FailureKind::ConfigError);
     assert_eq!(
         error.raw,
         "MCP server `mail`: the agent of harness `fake` advertises no `http` MCP transport"
     );
-    let error = transports("fake", &part, &json!({ "session": {} })).unwrap_err();
+    let error = offered("fake", &part, &json!({ "session": {} })).unwrap_err();
     assert!(error.raw.starts_with("MCP server `probe`"), "{}", error.raw);
-    assert!(transports("fake", &json!({ "mcpServers": [] }), &json!({ "session": {} })).is_ok());
+    assert!(offered("fake", &json!({ "mcpServers": [] }), &json!({ "session": {} })).is_ok());
+}
+
+#[test]
+fn the_account_follows_the_names_and_references_of_the_env_not_its_literals() {
+    let of = |env: Value| account("fake", &json!({ "command": "/bin/agent", "env": env }));
+    let base = of(json!({ "KEY": "${SHOP_KEY}", "FLAG": "1" }));
+    assert_eq!(base, of(json!({ "KEY": "${SHOP_KEY}", "FLAG": "2" })));
+    assert_ne!(base, of(json!({ "KEY": "${OTHER_KEY}", "FLAG": "1" })));
+    assert_ne!(base, of(json!({ "KEY": "${SHOP_KEY}" })));
 }

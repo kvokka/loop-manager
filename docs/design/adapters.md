@@ -70,14 +70,18 @@ with the feature `unstable_protocol_v2`.
   attempt environment; the JSON-RPC lines go over its stdin and stdout.
 - **Version 2 or nothing.** `start_instance` sends `initialize` with `protocolVersion: 2` and waits for the answer. An
   agent that settles on another version, answers `-32022` or offers no `capabilities.session` fails the attempt with
-  `config_error`: "harness `x`: `<command>` negotiated ACP protocol version 1; loop-manager requires version 2".
+  `config_error`: "harness `x`: `<command>` negotiated ACP protocol version 1; loop-manager requires version 2"; for
+  `-32022`, "… supports no ACP protocol version loop-manager speaks (2)" with the versions the agent named.
 - **What the config sets.** `start_session` is `session/new` with the workdir as `cwd`, the agent's MCP servers
   (stdio and HTTP, service placeholders verbatim) and the system prompt as `systemPrompt` in `append` mode. A `model`
-  and an `effort` go through `session/set_config_option` to the option of category `model` and `thought_level` the
-  agent offers in its answer; an agent with no such option fails the attempt with `config_error` naming the key. The
-  instance keeps the `capabilities` of the agent's `initialize` answer: before `session/new` or `session/resume` is
-  sent, an MCP server of a transport absent from `capabilities.session.mcp` (`stdio`, `http`) fails the attempt with
-  `config_error` naming the server and the transport. The driver has no mechanism for `hooks`, `skills`,
+  and an `effort` go through `session/set_config_option` (`type: "id"`) to the option of category `model` and
+  `thought_level` the agent offers in its `session/new` answer; an agent with no such option fails the attempt with
+  `config_error` naming the key, and a value the agent refuses with `config_error` naming the key and the value. The
+  instance keeps the `capabilities` of the agent's `initialize` answer, and the driver sends nothing they do not
+  allow: before `session/new` or `session/resume` is sent, a system prompt (the agent's `system_prompt` and the
+  prompt fragments of its addons) for an agent without `capabilities.session.systemPrompt` fails the attempt with
+  `config_error` naming `system_prompt`, and an MCP server of a transport absent from `capabilities.session.mcp`
+  (`stdio`, `http`) with `config_error` naming the server and the transport. The driver has no mechanism for `hooks`, `skills`,
   `subagents`, a `native` block or `inherit_host = false`: `loop_manager_acp::unsupported` refuses them by key, as
   a load error that names the agent, the key and the harness ([config](config.md#harness-and-model)), and again at
   an attempt's start.
@@ -93,12 +97,23 @@ with the feature `unstable_protocol_v2`.
   The exit of the process in an open turn is `harness_crash`.
 - **Permissions.** loop-manager answers a `session/request_permission` with the agent's `reject_once` option, else
   `cancelled`, and reports it as `permission_denied`: no person answers a run's request (decision 116).
-- **What ACP does not give.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. ACP v2 lets
-  a client stop no single piece of background work, so `stop_background` does nothing and the run waits for its
-  background budget. `resume_session` is `session/resume`; an agent with no such session or method fails it with
-  `transcript_divergence`. `transcript` answers `Present { delivered: false }`: a resumed attempt sends its prompt
-  again with the same idempotency key, which an agent that keeps its keys takes once. There is no transcript file
-  for `chat_log` and no live tap.
+- **Stopping work.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. When an attempt ends,
+  the core's `stop` effect (these two) and the `stop_instance` of its instance run on separate queues; with a process
+  per session the agent may get the EOF on its stdin, then the group's `SIGTERM`, before or instead of
+  `session/cancel`. `stop_background` cancels the background work of the session's last `idle` that the agent made
+  cancellable: `terminal/cancel` for a listed terminal whose last `terminal_update` advertises `capabilities.cancel`
+  and has no `exitStatus`, `tool_call/cancel` for a listed tool call whose last `tool_call_update` advertises it and
+  is not final. A subagent, other work, or work without the capability is left to end by itself or to its
+  background budget; an error answer (the work ended first) is ignored.
+- **What ACP does not give.** `resume_session` is `session/resume`; an agent with no such session (`-32002`) or no
+  such method (`-32601`) fails it with `transcript_divergence`, and the core goes on with a fresh session. Whether the
+  agent holds a prompt it does not tell: `transcript` answers `Present { delivered: false }`, so a resumed attempt
+  sends its prompt again with the same idempotency key. Only the agent's memory of that key keeps the prompt from
+  being taken twice, and an agent whose process died with the daemon has none: the delivery may repeat. There is no
+  transcript file for `chat_log` and no live tap.
+- **The account.** `account` is a hash of the `command`, the names of the harness's and the agent's `env` and the
+  `${NAME}` references among their values: a literal value (a flag, a path, a key written inline) changes no
+  account gate.
 - **The `doctor` probe.** `Acp::probe` spawns the agent as for a session (the clean base of `base_env`, the harness's
   `env` resolved, its own process group) with no attempt, sends `initialize` with `protocolVersion: 2`, waits for the
   answer up to 10 s, closes the agent's stdin and stops its process group. `loop-manager doctor` prints it as one
@@ -110,17 +125,24 @@ with the feature `unstable_protocol_v2`.
   is appended to `<state>/trace/<instance id>.jsonl` as `{"ts_ms", "dir": "send" | "recv", "msg"}`, `msg` the line
   as JSON, or as a string when it does not parse. The directory is made with mode 0700, the file 0600; a file stops
   growing at 256 MiB. Before a line is written, these values are replaced by `[redacted]` wherever they occur in a
-  string of it: the attempt token, the values the harness's and the agent's `env` resolved to, and the values of the
-  `env` and `headers` of the session's MCP servers (service tokens arrive there). Prompt text, the agent's messages
-  and tool output are not redacted beyond those values: a secret a tool prints in another form is written as it is.
+  string of it: the attempt token, the values the harness's and the agent's `env` resolved to, the values of the
+  daemon's `HOST_NETWORK_ENV` (a proxy URL may carry a login), and the values of the `env` and `headers` of the
+  session's MCP servers (service tokens arrive there). A value shorter than 8 characters is not redacted: it cannot be
+  told from ordinary text (a one-letter issue prefix, a flag `1`). Prompt text, the agent's messages and tool output
+  are not redacted beyond those values: a secret a tool prints in another form is written as it is.
   `trace` is no part of the process part, so turning it on changes no fingerprint; loop-manager does not remove trace
   files.
 
 The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the
-prompt, runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, keeps the idempotency keys of its process, and
-with `--v1` speaks only protocol version 1. `crates/loop-manager/tests/e2e/acp.rs` runs a formula on it through the
-finisher and checks the v1 refusal, the MCP transport check and the redacted trace;
-`crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates.
+prompt and runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, which sees the session's system prompt and
+config options in its environment; its sessions die with its process. Flags make it advertise `systemPrompt`
+(`--system-prompt`), offer `model` and `effort` options (`--options`), leave a cancellable background terminal after a
+turn (`--background`), answer `initialize` with `-32022` (`--unsupported`) or speak only protocol version 1 (`--v1`).
+`crates/loop-manager/tests/e2e/acp.rs` runs formulas on it: through the finisher, with the role, model and effort,
+with a background terminal cancelled, killed in a turn (`harness_crash`, then the resume finds no session), cancelled
+in a turn; and checks the version refusals, the capability checks and the redacted trace.
+`crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates, `src/tests.rs` the driver's calls
+against an agent in the test's process.
 
 ## What the core expects of a driver
 

@@ -1,8 +1,9 @@
 //! What the session updates of an ACP v2 agent mean to the core (docs/design/adapters.md, "ACP v2 harnesses"): the
 //! state of the one session of an instance, turned into normalized events.
 
+use agent_client_protocol::schema::MaybeUndefined;
 use agent_client_protocol::v2::schema::{
-    self, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop, ToolCallStatus,
+    self, BackgroundWork, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop, ToolCallStatus,
 };
 use loop_manager_contract::driver::{Failure, FailureKind, Normalized, PromptKey, SessionState, Source, StopReason};
 use serde_json::Value;
@@ -22,6 +23,26 @@ pub(crate) struct Turn {
     /// The tool calls of the session not yet finished.
     tools: HashSet<String>,
     last_activity: Option<Instant>,
+    /// The terminals and tool calls of the session that advertise `capabilities.cancel` now.
+    cancellable: HashSet<Work>,
+    /// The background work of the session's last `idle`.
+    background: Vec<Work>,
+}
+
+/// A piece of a session's work the client can cancel by its id: `terminal/cancel` or `tool_call/cancel`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Work {
+    Terminal(String),
+    ToolCall(String),
+}
+
+/// Whether an update says its subject can be cancelled: `None` when it says nothing about it.
+fn cancel<T>(capabilities: &MaybeUndefined<T>, cancel: impl Fn(&T) -> bool) -> Option<bool> {
+    match capabilities {
+        MaybeUndefined::Undefined => None,
+        MaybeUndefined::Null => Some(false),
+        MaybeUndefined::Value(c) => Some(cancel(c)),
+    }
 }
 
 impl Turn {
@@ -66,15 +87,51 @@ impl Turn {
             SessionUpdate::StateUpdate(StateUpdate::Idle(idle)) => self.idle(idle),
             SessionUpdate::ToolCallUpdate(call) => {
                 let id = call.tool_call_id.to_string();
+                let finished = matches!(
+                    call.status,
+                    MaybeUndefined::Value(
+                        ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Cancelled
+                    )
+                );
                 match call.status.clone().take() {
-                    Some(ToolCallStatus::Pending | ToolCallStatus::InProgress) => drop(self.tools.insert(id)),
+                    Some(ToolCallStatus::Pending | ToolCallStatus::InProgress) => drop(self.tools.insert(id.clone())),
                     Some(_) => drop(self.tools.remove(&id)),
                     None => {}
                 }
+                let can = match finished {
+                    true => Some(false),
+                    false => cancel(&call.capabilities, |c| c.cancel.is_some()),
+                };
+                self.can_cancel(Work::ToolCall(id), can);
+                self.activity(now)
+            }
+            SessionUpdate::TerminalUpdate(terminal) => {
+                let can = match terminal.exit_status {
+                    MaybeUndefined::Value(_) => Some(false),
+                    _ => cancel(&terminal.capabilities, |c| c.cancel.is_some()),
+                };
+                self.can_cancel(Work::Terminal(terminal.terminal_id.to_string()), can);
                 self.activity(now)
             }
             _ => self.activity(now),
         }
+    }
+
+    fn can_cancel(&mut self, work: Work, can: Option<bool>) {
+        match can {
+            Some(true) => drop(self.cancellable.insert(work)),
+            Some(false) => drop(self.cancellable.remove(&work)),
+            None => {}
+        }
+    }
+
+    /// The background work of the last `idle` that can be cancelled now: what `stop_background` cancels; a subagent
+    /// or other work is left to end by itself.
+    pub(crate) fn to_cancel(&self) -> Vec<Work> {
+        (self.background.iter())
+            .filter(|w| self.cancellable.contains(*w))
+            .cloned()
+            .collect()
     }
 
     /// At most one `activity` a second (docs/design/contracts.md 4.3).
@@ -111,7 +168,15 @@ impl Turn {
             };
             out.push(Normalized::TurnEnded { stop_reason });
         }
-        let background = idle.background.as_ref().is_some_and(|b| !b.is_empty());
+        let listed = idle.background.iter().flatten();
+        self.background = (listed.clone())
+            .filter_map(|w| match w {
+                BackgroundWork::Terminal(t) => Some(Work::Terminal(t.terminal_id.to_string())),
+                BackgroundWork::ToolCall(c) => Some(Work::ToolCall(c.tool_call_id.to_string())),
+                _ => None,
+            })
+            .collect();
+        let background = listed.count() > 0;
         out.push(Normalized::State {
             state: SessionState::Idle,
             background,

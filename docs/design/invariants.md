@@ -88,7 +88,9 @@ resumes what the drain cut.
 
 Prompt delivery is "at least once with an idempotent effect": the per-attempt record `intent → sent → acked →
 settled` and the prompt key the harness keeps in its transcript (contracts 6.4). Harness protocols give no
-idempotency of their own.
+idempotency of their own. An ACP harness of the config has no transcript loop-manager checks: only the agent's memory
+of the idempotency key protects the prompt, and the delivery may repeat
+([adapters](adapters.md#acp-v2-harnesses)).
 
 Measured on the owner's host (2026-11-13, loop-manager 0.1.0; criterion 8, 20 kills mid-step): after a `kill -9` the
 daemon answers again within 0.13 s, far under the 30 s bound; every run reaches its end exactly once, every trigger

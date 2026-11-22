@@ -282,7 +282,8 @@ An ACP harness has no mechanism for `hooks`, an enabled skill, `subagents`, a `n
 too, reported by `config check`, `doctor` and the daemon's start, naming the agent, the key and the harness:
 `agent `shop/web@shop.dev`: `hooks`: the ACP harness `my-agent` has no mechanism for it`. What depends on the agent's
 own answers is checked when an attempt starts, as a `config_error` of the attempt naming the key: a `model` or
-`effort` with no such session option, an MCP server of a transport the agent does not advertise
+`effort` with no such session option or a value the agent refuses, a `system_prompt` (or an addon's prompt fragment)
+for an agent that does not advertise `session.systemPrompt`, an MCP server of a transport the agent does not advertise
 ([adapters](adapters.md#acp-v2-harnesses)).
 
 `model` is a full name, passed to the harness as it is, or a short name of the adapter's table, expanded to the

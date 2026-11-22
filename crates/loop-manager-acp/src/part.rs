@@ -92,9 +92,15 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan) -> Result<Va
     }))
 }
 
-/// The MCP servers of the session part `part` of a transport the agent did not advertise in
-/// `capabilities.session.mcp` of its `initialize` answer (`capabilities`), refused before `session/new`.
-pub(crate) fn transports(harness: &str, part: &Value, capabilities: &Value) -> Result<(), Failure> {
+/// What the session part `part` asks of the agent that its `initialize` answer (`capabilities`) did not advertise,
+/// refused before `session/new`: a system prompt without `session.systemPrompt`, an MCP server of a transport not in
+/// `session.mcp`.
+pub(crate) fn offered(harness: &str, part: &Value, capabilities: &Value) -> Result<(), Failure> {
+    if !part["systemPrompt"].is_null() && capabilities["session"]["systemPrompt"].is_null() {
+        return Err(config_error(format!(
+            "`system_prompt`: the agent of harness `{harness}` advertises no `session.systemPrompt`"
+        )));
+    }
     let servers = part["mcpServers"].as_array().into_iter().flatten();
     for server in servers {
         let transport = server["type"].as_str().unwrap_or_default();
@@ -135,10 +141,15 @@ pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(Str
     Ok(env)
 }
 
-/// The account the gates use: a hash of the command and of the environment as written, so it says where a key comes
-/// from, never what it is (docs/design/contracts.md 7).
+/// The account the gates use: a hash of the command, the names of the environment and the `${NAME}` references among
+/// its values, so it says where a key comes from, never what it is, and a literal value (a flag, a path) leaves it
+/// alone (docs/design/contracts.md 7).
 pub(crate) fn account(harness: &str, p: &Value) -> String {
-    let source = json!({ "command": p["command"], "env": p["env"] });
+    let env = p["env"].as_object().into_iter().flatten().map(|(k, v)| {
+        let reference = v.as_str().filter(|v| v.starts_with("${"));
+        (k.clone(), json!(reference))
+    });
+    let source = json!({ "command": p["command"], "env": env.collect::<Map<_, _>>() });
     Fingerprint::of(harness, &ProcessPart(source)).0[..16].to_owned()
 }
 

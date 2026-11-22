@@ -184,3 +184,39 @@ fn an_exit_in_a_turn_is_a_harness_crash_then_the_instance_is_gone() {
         }]
     );
 }
+
+#[test]
+fn only_background_work_that_advertises_cancel_is_cancelled() {
+    let mut t = turn();
+    let now = Instant::now();
+    let cancel = json!({ "cancel": {} });
+    for value in [
+        json!({ "sessionUpdate": "terminal_update", "terminalId": "t1", "capabilities": cancel }),
+        json!({ "sessionUpdate": "terminal_update", "terminalId": "t2", "capabilities": {} }),
+        json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "in_progress",
+            "capabilities": cancel }),
+        json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c2", "status": "in_progress",
+            "capabilities": cancel }),
+        // A finished tool call can be cancelled no more.
+        json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c2", "status": "completed" }),
+    ] {
+        t.update(ME, &update(value), now);
+    }
+    t.update(ME, &running(), now);
+    let background = json!({ "background": [
+        { "type": "terminal", "terminalId": "t1" }, { "type": "terminal", "terminalId": "t2" },
+        { "type": "tool_call", "toolCallId": "c1" }, { "type": "tool_call", "toolCallId": "c2" },
+        { "type": "subagent", "sessionId": "s2" },
+    ] });
+    t.update(ME, &idle(background), now);
+    assert_eq!(
+        t.to_cancel(),
+        [Work::Terminal("t1".into()), Work::ToolCall("c1".into())]
+    );
+    // A terminal that exited is no more to cancel; an idle without background leaves nothing.
+    let exited = json!({ "sessionUpdate": "terminal_update", "terminalId": "t1", "exitStatus": { "exitCode": 0 } });
+    t.update(ME, &update(exited), now);
+    assert_eq!(t.to_cancel(), [Work::ToolCall("c1".into())]);
+    t.update(ME, &idle(json!({})), now);
+    assert!(t.to_cancel().is_empty());
+}
