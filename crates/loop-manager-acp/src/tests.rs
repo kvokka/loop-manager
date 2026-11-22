@@ -50,6 +50,7 @@ async fn connected() -> (Acp, InstanceHandle, mpsc::UnboundedReceiver<String>) {
         shared,
         close: Mutex::new(Some(close_tx)),
         capabilities: Value::Null,
+        agent: Value::Null,
         trace: None,
     };
     lock(&driver.instances).insert("i1".into(), Arc::new(instance));
