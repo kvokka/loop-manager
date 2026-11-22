@@ -223,8 +223,9 @@ async fn clients_replay_a_running_run_follow_it_live_and_leave_it_running_when_t
     let run = d.create("build", None).await;
     let mut first = Acp::start(&d, &[]).await;
     // The run may not have written a record yet: what the replay lacks follows live, up to the hanging tool's output.
+    // Live updates can already be queued behind the replay's state when the answer arrives.
     let replayed = first.resume(&run, true).await.unwrap();
-    assert_eq!(state(replayed.last().unwrap()), "running", "{replayed:#?}");
+    assert!(replayed.iter().any(|u| state(u) == "running"), "{replayed:#?}");
     if !replayed.iter().any(printed) {
         first.until(printed).await;
     }
