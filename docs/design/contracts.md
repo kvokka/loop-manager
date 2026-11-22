@@ -373,7 +373,10 @@ never retries a turn, parks or decides an outcome (adapter duties in 4.4–4.6 a
 semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fails with a typed failure (4.4).
 `send_prompt` returns once the request is written: the harness holds a prompt sent while a turn is in flight, and
 inserts it into that turn when `prompts_in_turn` is true, else after the turn ends; the insertion is `prompt.acked`, a
-drop `prompt.dropped` (4.3); `cancel_turn` carries the operator's Stop as well (6.1). A permission request of a session
+drop `prompt.dropped` (4.3). `resume_session` with `replay` asks the harness for the whole history of the session and
+gives back its user messages (`Replay`, 4.2); without it the replay is empty. `retains_prompts` tells that the harness
+keeps the user messages of a session across its processes, so a complete replay without a message tells it was never
+inserted; `cancel_turn` carries the operator's Stop as well (6.1). A permission request of a session
 waits for `answer_permission`, given by the core's policy or by the operator of a manual run. The interface has no
 model change inside a live session; a human joins a live session only through the core, whose `send_prompt` carries
 an operator's instruction as any prompt (6.1, [frontends](../api/frontends.md#humans-and-runs)).
@@ -392,9 +395,10 @@ trait Driver: Send + Sync {
 
     // session
     fn start_session(&self, instance: &InstanceHandle, session: &SessionPart) -> BoxFuture<Result<SessionRef, Failure>>;
-    fn resume_session(&self, instance: &InstanceHandle, session: &SessionRef, part: &SessionPart) -> BoxFuture<Result<(), Failure>>;
+    fn resume_session(&self, instance: &InstanceHandle, session: &SessionRef, part: &SessionPart, replay: bool) -> BoxFuture<Result<Replay, Failure>>; // replay: the history's user messages
     fn send_prompt(&self, instance: &InstanceHandle, session: &SessionRef, text: &str, key: PromptKey) -> BoxFuture<Result<(), Failure>>; // returns once written
     fn prompts_in_turn(&self) -> bool;                        // the harness may insert a prompt into a turn in flight; default false
+    fn retains_prompts(&self) -> bool;                        // the harness keeps a session's user messages across its processes; default false
     fn answer_permission(&self, instance: &InstanceHandle, request: &str, option: Option<&str>) -> BoxFuture<()>; // None declines
     fn cancel_turn(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<Result<(), Failure>>;
     fn stop_background(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<()>; // commands left after the turn; session stays
@@ -418,6 +422,7 @@ trait Driver: Send + Sync {
 | `InstanceHandle` | `{ id, pid, start_time, pgid }`; `start_time` is the kernel start time of `pid` (`/proc/<pid>/stat`), pid + start time identify the process ([event model](event-model.md#state)) |
 | `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. an ACP harness (claude and codex among them): `{session_id, cwd, home?}`. `home` is the agent's own config directory, which holds the session's transcript, and a resume takes it again: of an isolated claude session the process's `CLAUDE_CONFIG_DIR`; of a codex session with a home of its own (an isolated one, or one that inherits the host and has skills) the process's `CODEX_HOME`, which holds the thread's rollout; without it the session runs in the host's config. codex's `session_id` is the id of its thread |
 | `PromptKey` | UUID v5 of `"loop-manager:prompt:<run>/<attempt n>/<prompt n>"` in the URL namespace; the idempotency key of one prompt (see 6.4) |
+| `Replay` | `{ complete: bool, messages: [Replayed { id, text }] }`: what a `resume_session` with `replay` gave of the session's user messages, oldest first. `complete`: the harness ended the replay it was asked for (`replay_complete` of ACP); `id` is the harness's id of the message, the `message_id` of the `prompt.acked` that inserted it; `text` joins the text blocks of the message, any other block is U+FFFC. Without `replay`, or when the harness could not replay, nothing is complete |
 | `Transcript` | `Missing` or `Present { delivered: bool }` — whether the session exists and whether the prompt with `key` is in it; answered or not is not told apart: a resumed session never has a turn in flight (the old process is always stopped before the resume), so a delivered prompt is reconciled either way |
 | `Health` | `Ok`, `Degraded { text }` (the instance stays `ready` and keeps its sessions; `instance.degraded`, 8), `Dead` |
 
@@ -433,7 +438,7 @@ the stop reason of a turn and a permission request reach the policy and the obse
 
 | Event | Fields | Core use |
 |---|---|---|
-| `prompt.acked` | `key` | the harness inserted the prompt: delivery `sent → acked`; ends `starting` |
+| `prompt.acked` | `key`, `message_id` | the harness inserted the prompt: delivery `sent → acked`; ends `starting`. `message_id` is the harness's id of the message the prompt became, or null when it names none; the core keeps the first one named with the prompt's delivery record. It may come twice for one key, first without the id (the turn the prompt started), then with it (the answer); the second only adds the id |
 | `prompt.dropped` | `key` | the harness dropped the prompt before it inserted it (a `session/cancel` took it): delivery `withdrawn` (6.4), the prompt is never delivered |
 | `turn.started` | — | watchdog: first event seen |
 | `turn.ended` | `stop_reason: completed \| cancelled \| failed` | candidate end of the attempt's work; `failed` follows a `failure` event; `stop_reason` goes to `run.turn_ended_without_outcome` |

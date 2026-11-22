@@ -194,7 +194,7 @@ impl RunHandler {
             Self::usage(tx, &row, attempt, [*input_tokens, *output_tokens], rate_limit.as_ref())?;
         }
         match event {
-            Normalized::PromptAcked { key } if row.state == "starting" => {
+            Normalized::PromptAcked { key, .. } if row.state == "starting" => {
                 if super::prompts::first(tx, &row.id, attempt)? != Some(key.0.to_string()) {
                     return Ok(());
                 }
@@ -257,11 +257,14 @@ impl RunHandler {
         }
     }
 
-    /// The record of the prompt `event` tells of: `acked` (an operator's starts a turn of the operator's), or
-    /// `withdrawn` by the harness.
+    /// The record of the prompt `event` tells of: `acked` (an operator's starts a turn of the operator's) with the
+    /// message it became when the harness names it, or `withdrawn` by the harness.
     fn delivered(&mut self, tx: &mut Tx<'_>, row: &Row, event: &Normalized) -> Result<(), Error> {
         match event {
-            Normalized::PromptAcked { key } => {
+            Normalized::PromptAcked { key, message_id } => {
+                if let Some(message_id) = message_id {
+                    super::prompts::named(tx, &row.id, row.attempt, *key, message_id)?;
+                }
                 let moved = super::prompts::advance(tx, &row.id, row.attempt, *key, "acked")?;
                 if moved && row.state == "running" && super::prompts::by_operator(tx, &row.id, row.attempt, *key)? {
                     self.operator_turn(tx, row)?;

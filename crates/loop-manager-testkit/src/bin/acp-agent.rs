@@ -6,7 +6,9 @@
 //! `tool_call_content_chunk`s as it comes, then `idle` with `end_turn`. `session/cancel` kills the command's process group and ends the turn with `cancelled`.
 //!
 //! The command sees the session's system prompt and config options in `ACP_AGENT_SYSTEM_PROMPT`, `ACP_AGENT_MODEL`
-//! and `ACP_AGENT_EFFORT`. A session lives as long as the process: `session/resume` answers `-32002`.
+//! and `ACP_AGENT_EFFORT`. A session lives as long as the process, unless `--store` keeps it: `session/resume` of a
+//! session it does not keep answers `-32002`. Ids of sessions and messages carry the process id, so a later process
+//! never takes one again.
 //!
 //! Flags, combined at will:
 //! - `--system-prompt`: advertises `session.systemPrompt`;
@@ -18,9 +20,21 @@
 //!   (`reject_once`); the command runs only when `allow` is selected, and a `session/cancel` takes the request back;
 //! - `--subagent`: after the echo, a child session `<session>-sub` reports an `agent_message_chunk` `Sub: <prompt>`;
 //! - `--unsupported`: answers `initialize` with `-32022`;
+//! - `--store <dir>`: the user messages of a session are kept in `<dir>/<session>.jsonl` (`{id, key, text}` a line),
+//!   each written before the answer to its prompt, and the key of each insertion is a line of `<dir>/inserted`. A
+//!   prompt with a key the session keeps is answered with the `messageId` of its message, with no turn. A resume of a
+//!   kept session opens it in this process; with `replayFrom` it first replays every message as a `user_message`, then
+//!   `replay_complete`;
+//! - `--hold-before-insert <marker>`: while `<marker>` is not there, a prompt creates it and is never answered, run or
+//!   kept: the agent did not get it;
+//! - `--hold-after-insert <marker>`: while `<marker>` is not there, a prompt is kept, then creates it and is never
+//!   answered or run: the agent inserted it and its answer is lost;
+//! - `--partial-replay`: a replay ends without `replay_complete`;
+//! - `--no-replay`: a resume with `replayFrom` answers `-32602`;
 //! - `--v1`: serves only protocol version 1, answering any `initialize` with `protocolVersion: 1`.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio as ProcessStdio};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -55,13 +69,22 @@ struct Session {
 struct State {
     sessions: HashMap<schema::SessionId, Session>,
     next_id: u64,
+    /// The answers of the prompts held by `--hold-before-insert` and `--hold-after-insert`: never sent.
+    held: Vec<Responder<schema::PromptResponse>>,
 }
 
 impl State {
     fn next_id(&mut self, kind: &str) -> String {
         self.next_id += 1;
-        format!("{kind}-{}", self.next_id)
+        format!("{kind}-{}-{}", std::process::id(), self.next_id)
     }
+}
+
+/// A user message `--store` keeps: its id, the idempotency key of its prompt and its text.
+struct Kept {
+    id: String,
+    key: Option<String>,
+    text: String,
 }
 
 #[derive(Clone, Default)]
@@ -69,6 +92,8 @@ struct Script {
     state: Arc<Mutex<State>>,
     command: Option<Arc<str>>,
     flags: Arc<HashSet<String>>,
+    /// The values of the flags that take one, by flag.
+    values: Arc<HashMap<String, PathBuf>>,
 }
 
 /// The config options of `--options`: id, category, values.
@@ -84,6 +109,43 @@ impl Script {
 
     fn flag(&self, name: &str) -> bool {
         self.flags.contains(name)
+    }
+
+    /// The file `--store` keeps the messages of session `session` in.
+    fn kept(&self, session: &schema::SessionId) -> Option<PathBuf> {
+        Some(self.values.get("--store")?.join(format!("{session}.jsonl")))
+    }
+
+    /// The messages `--store` keeps of session `session`; `None` for a session it does not keep.
+    fn messages(&self, session: &schema::SessionId) -> Option<Vec<Kept>> {
+        let text = std::fs::read_to_string(self.kept(session)?).ok()?;
+        let lines = text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok());
+        let kept = lines.map(|m| Kept {
+            id: m["id"].as_str().unwrap_or_default().to_owned(),
+            key: m["key"].as_str().map(str::to_owned),
+            text: m["text"].as_str().unwrap_or_default().to_owned(),
+        });
+        Some(kept.collect())
+    }
+
+    /// Keeps `message` in session `session` and counts the insertion of its key.
+    fn keep(&self, session: &schema::SessionId, message: &Kept) -> std::io::Result<()> {
+        let (Some(file), Some(dir)) = (self.kept(session), self.values.get("--store")) else {
+            return Ok(());
+        };
+        let line = serde_json::json!({ "id": message.id, "key": message.key, "text": message.text });
+        append(&file, &line.to_string())?;
+        append(&dir.join("inserted"), message.key.as_deref().unwrap_or_default())
+    }
+
+    /// Whether the flag `flag` holds this prompt: its marker is not there yet, and is created now.
+    fn holds(&self, flag: &str) -> bool {
+        let Some(marker) = self.values.get(flag) else {
+            return false;
+        };
+        !marker.exists() && std::fs::write(marker, "").is_ok()
     }
 
     fn initialize(&self, responder: Responder<schema::InitializeResponse>) -> Result<()> {
@@ -191,11 +253,27 @@ impl Script {
         responder: Responder<schema::NewSessionResponse>,
         connection: &ConnectionTo<Client>,
     ) -> Result<()> {
+        let session_id = schema::SessionId::new(self.state().next_id("session"));
+        if let Some(file) = self.kept(&session_id) {
+            std::fs::write(file, "").map_err(|_| agent_client_protocol::Error::internal_error())?;
+        }
+        let options = self.open(&session_id, request.cwd, request.system_prompt.as_ref(), connection)?;
+        responder.respond(schema::NewSessionResponse::new(session_id).config_options(options))
+    }
+
+    /// Opens session `session_id` in this process, its worker started; the config options it offers.
+    fn open(
+        &self,
+        session_id: &schema::SessionId,
+        cwd: schema::AbsolutePath,
+        system_prompt: Option<&schema::SystemPrompt>,
+        connection: &ConnectionTo<Client>,
+    ) -> Result<Vec<schema::SessionConfigOption>> {
         let (turns, queue) = mpsc::unbounded_channel();
         let (epoch, epoch_rx) = watch::channel(0);
         let (done, worker_done) = oneshot::channel();
         let mut env = HashMap::new();
-        if let Some(prompt) = &request.system_prompt {
+        if let Some(prompt) = system_prompt {
             let text = prompt.content.iter().filter_map(|block| match block {
                 schema::ContentBlock::Text(text) => Some(text.text.as_str()),
                 _ => None,
@@ -206,35 +284,91 @@ impl Script {
             true => Self::options(&env),
             false => Vec::new(),
         };
-        let session_id = {
-            let mut state = self.state();
-            let session_id = schema::SessionId::new(state.next_id("session"));
-            let session = Session {
-                cwd: request.cwd,
-                env,
-                terminals: HashMap::new(),
-                turns,
-                epoch,
-                worker_done,
-            };
-            let cwd = session.cwd.clone();
-            state.sessions.insert(session_id.clone(), session);
-            let worker = Worker {
-                script: self.clone(),
-                connection: connection.clone(),
-                session_id: session_id.clone(),
-                cwd,
-                epoch: epoch_rx,
-            };
-            connection.spawn(worker.run(queue, done))?;
-            session_id
+        let session = Session {
+            cwd,
+            env,
+            terminals: HashMap::new(),
+            turns,
+            epoch,
+            worker_done,
         };
-        responder.respond(schema::NewSessionResponse::new(session_id).config_options(options))
+        let cwd = session.cwd.clone();
+        self.state().sessions.insert(session_id.clone(), session);
+        let worker = Worker {
+            script: self.clone(),
+            connection: connection.clone(),
+            session_id: session_id.clone(),
+            cwd,
+            epoch: epoch_rx,
+        };
+        connection.spawn(worker.run(queue, done))?;
+        Ok(options)
+    }
+
+    /// A session `--store` keeps opens in this process; with `replayFrom` its messages are replayed first.
+    fn resume(
+        &self,
+        request: schema::ResumeSessionRequest,
+        responder: Responder<schema::ResumeSessionResponse>,
+        connection: &ConnectionTo<Client>,
+    ) -> Result<()> {
+        let Some(messages) = self.messages(&request.session_id) else {
+            return responder.respond_with_error(schema::Error::session_not_found(request.session_id).into());
+        };
+        let replay = request.replay_from.is_some();
+        if replay && self.flag("--no-replay") {
+            return responder.respond_with_error(schema::Error::invalid_params().into());
+        }
+        let session_id = request.session_id;
+        let options = self.open(&session_id, request.cwd, request.system_prompt.as_ref(), connection)?;
+        let send =
+            |update| connection.send_notification(schema::UpdateSessionNotification::new(session_id.clone(), update));
+        for message in messages.into_iter().filter(|_| replay) {
+            let content = vec![schema::ContentBlock::from(message.text)];
+            send(schema::SessionUpdate::UserMessage(
+                schema::UserMessage::new(message.id).content(content),
+            ))?;
+        }
+        if replay && !self.flag("--partial-replay") {
+            send(schema::SessionUpdate::ReplayComplete(schema::ReplayComplete::new()))?;
+        }
+        responder.respond(schema::ResumeSessionResponse::new().config_options(options))
     }
 
     fn prompt(&self, request: schema::PromptRequest, responder: Responder<schema::PromptResponse>) -> Result<()> {
-        let mut state = self.state();
-        let message_id = schema::MessageId::new(state.next_id("message"));
+        if !self.state().sessions.contains_key(&request.session_id) {
+            return responder.respond_with_error(schema::Error::session_not_found(request.session_id).into());
+        }
+        let key = (request.idempotency_key.as_ref())
+            .and_then(|key| serde_json::to_value(key).ok()?.as_str().map(str::to_owned));
+        let messages = self.messages(&request.session_id).unwrap_or_default();
+        if let Some(kept) = messages.iter().find(|m| key.is_some() && m.key == key) {
+            return responder.respond(schema::PromptResponse::new(kept.id.clone()));
+        }
+        if self.holds("--hold-before-insert") {
+            self.state().held.push(responder);
+            return Ok(());
+        }
+        let message_id = schema::MessageId::new(self.state().next_id("message"));
+        let text = (request.prompt.iter())
+            .filter_map(|block| match block {
+                schema::ContentBlock::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let kept = Kept {
+            id: message_id.to_string(),
+            key,
+            text,
+        };
+        self.keep(&request.session_id, &kept)
+            .map_err(|_| agent_client_protocol::Error::internal_error())?;
+        if self.holds("--hold-after-insert") {
+            self.state().held.push(responder);
+            return Ok(());
+        }
+        let state = self.state();
         let Some(session) = state.sessions.get(&request.session_id) else {
             return responder.respond_with_error(schema::Error::session_not_found(request.session_id).into());
         };
@@ -466,6 +600,13 @@ impl Worker {
     }
 }
 
+/// Appends `line` to `file`.
+fn append(file: &Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
+    writeln!(file, "{line}")
+}
+
 /// The process group of a running command, killed when dropped.
 struct Group(rustix::process::Pid);
 
@@ -509,11 +650,13 @@ async fn serve_v2(script: Script) -> Result<()> {
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async |request: schema::ResumeSessionRequest,
-                   responder: Responder<schema::ResumeSessionResponse>,
-                   _connection: ConnectionTo<Client>| {
-                // Sessions do not outlive the process, and a resume comes from another one.
-                responder.respond_with_error(schema::Error::session_not_found(request.session_id).into())
+            {
+                let script = script.clone();
+                async move |request: schema::ResumeSessionRequest,
+                            responder: Responder<schema::ResumeSessionResponse>,
+                            connection: ConnectionTo<Client>| {
+                    script.resume(request, responder, &connection)
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -587,30 +730,52 @@ async fn serve_v1() -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    const FLAGS: [&str; 6] = [
+    const FLAGS: [&str; 8] = [
         "--system-prompt",
         "--options",
         "--background",
         "--permission",
         "--subagent",
         "--unsupported",
+        "--partial-replay",
+        "--no-replay",
     ];
-    let served = match args.as_slice() {
-        [flag] if flag == "--v1" => serve_v1().await,
-        flags if flags.iter().all(|f| FLAGS.contains(&f.as_str())) => {
+    const VALUED: [&str; 3] = ["--store", "--hold-before-insert", "--hold-after-insert"];
+    let usage = || {
+        let valued = VALUED.map(|f| format!("{f} <path>"));
+        eprintln!(
+            "usage: {NAME} [--v1 | {} | {}...]",
+            FLAGS.join(" | "),
+            valued.join(" | ")
+        );
+        ExitCode::FAILURE
+    };
+    let (mut flags, mut values) = (HashSet::new(), HashMap::new());
+    let mut given = args.iter();
+    while let Some(flag) = given.next() {
+        match (flag.as_str(), given.clone().next()) {
+            (flag, Some(value)) if VALUED.contains(&flag) => {
+                values.insert(flag.to_owned(), PathBuf::from(value));
+                given.next();
+            }
+            (flag, _) if FLAGS.contains(&flag) => drop(flags.insert(flag.to_owned())),
+            ("--v1", _) if args.len() == 1 => drop(flags.insert("--v1".to_owned())),
+            _ => return usage(),
+        }
+    }
+    let served = match flags.contains("--v1") {
+        true => serve_v1().await,
+        false => {
             let command = std::env::var("ACP_AGENT_COMMAND")
                 .ok()
                 .filter(|command| !command.is_empty());
             serve_v2(Script {
                 command: command.map(Arc::from),
-                flags: Arc::new(flags.iter().cloned().collect()),
+                flags: Arc::new(flags),
+                values: Arc::new(values),
                 ..Script::default()
             })
             .await
-        }
-        _ => {
-            eprintln!("usage: {NAME} [--v1 | {}...]", FLAGS.join(" | "));
-            return ExitCode::FAILURE;
         }
     };
     match served {

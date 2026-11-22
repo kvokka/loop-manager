@@ -4,10 +4,11 @@
 use crate::profile::Profile;
 use agent_client_protocol::schema::MaybeUndefined;
 use agent_client_protocol::v2::schema::{
-    self, BackgroundWork, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop, ToolCallStatus,
+    self, BackgroundWork, ContentBlock, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop,
+    ToolCallStatus,
 };
 use loop_manager_contract::driver::{
-    Failure, FailureKind, Normalized, PermissionOption, PromptKey, SessionState, Source, StopReason,
+    Failure, FailureKind, Normalized, PermissionOption, PromptKey, Replay, Replayed, SessionState, Source, StopReason,
 };
 use serde_json::Value;
 use std::{
@@ -71,12 +72,14 @@ impl Turn {
         at.and_then(|at| self.pending.remove(at)).is_some()
     }
 
-    /// The agent took the prompt with `key` (its answer, or the first sign of the turn it started), once.
-    pub(crate) fn acked(&mut self, key: PromptKey) -> Vec<Normalized> {
-        match self.forget(key) {
-            true => vec![Normalized::PromptAcked { key }],
-            false => Vec::new(),
-        }
+    /// The agent answered the prompt with `key`, naming its message `message_id`: told even when the turn the prompt
+    /// started told it first, for the id.
+    pub(crate) fn acked(&mut self, key: PromptKey, message_id: String) -> Vec<Normalized> {
+        self.forget(key);
+        vec![Normalized::PromptAcked {
+            key,
+            message_id: Some(message_id),
+        }]
     }
 
     /// The agent dropped the prompt with `key` before it inserted it (`-32800`), once.
@@ -105,7 +108,8 @@ impl Turn {
                 if !self.in_turn {
                     self.in_turn = true;
                     // A turn starts with the oldest prompt the agent holds.
-                    out.extend(self.pending.pop_front().map(|key| Normalized::PromptAcked { key }));
+                    let acked = self.pending.pop_front();
+                    out.extend(acked.map(|key| Normalized::PromptAcked { key, message_id: None }));
                     out.push(Normalized::TurnStarted);
                 }
                 out.push(Normalized::State {
@@ -233,6 +237,34 @@ impl Turn {
         }
         out.push(Normalized::Exited { code, signal });
         out
+    }
+}
+
+/// Takes an update of the session a `session/resume` replays into `replay`: a `user_message` replaces the content of
+/// its message, a `user_message_chunk` appends to it, `replay_complete` ends the replay; anything else is no user
+/// message.
+pub(crate) fn replayed(replay: &mut Replay, update: &SessionUpdate) {
+    let (id, blocks, append) = match update {
+        SessionUpdate::UserMessage(message) => match &message.content {
+            MaybeUndefined::Value(blocks) => (&message.message_id, blocks.as_slice(), false),
+            MaybeUndefined::Null => (&message.message_id, &[][..], false),
+            MaybeUndefined::Undefined => (&message.message_id, &[][..], true),
+        },
+        SessionUpdate::UserMessageChunk(chunk) => (&chunk.message_id, std::slice::from_ref(&chunk.content), true),
+        SessionUpdate::ReplayComplete(_) => return replay.complete = true,
+        _ => return,
+    };
+    let text: String = (blocks.iter())
+        .map(|block| match block {
+            ContentBlock::Text(text) => text.text.as_str(),
+            _ => "\u{fffc}",
+        })
+        .collect();
+    let id = id.to_string();
+    match replay.messages.iter_mut().find(|m| m.id == id) {
+        Some(message) if append => message.text.push_str(&text),
+        Some(message) => message.text = text,
+        None => replay.messages.push(Replayed { id, text }),
     }
 }
 

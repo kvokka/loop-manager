@@ -540,13 +540,13 @@ async fn the_model_then_the_effort_then_the_mode_after_a_new_session_and_after_a
         .to_vec();
     assert_eq!(drained(&mut received), order);
     driver
-        .resume(&handle, &session, &part("bypassPermissions"))
+        .resume(&handle, &session, &part("bypassPermissions"), false)
         .await
         .unwrap();
     assert_eq!(drained(&mut received), order);
     // A session the agent no longer has: no transcript to go on with.
     let gone = SessionRef(json!({ "session_id": "gone", "cwd": "/work/rig" }));
-    let failure = driver.resume(&handle, &gone, &part("plan")).await.unwrap_err();
+    let failure = driver.resume(&handle, &gone, &part("plan"), false).await.unwrap_err();
     assert_eq!(failure.kind, FailureKind::TranscriptDivergence);
 }
 

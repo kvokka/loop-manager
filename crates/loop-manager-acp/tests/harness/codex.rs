@@ -172,7 +172,8 @@ impl Live {
         let session = match &plan {
             SessionPlan::New { .. } => driver.start_session(&instance, &split.session).await,
             SessionPlan::Resume { session, .. } => {
-                (driver.resume_session(&instance, session, &split.session).await).map(|()| session.clone())
+                let resumed = driver.resume_session(&instance, session, &split.session, false).await;
+                resumed.map(|_| session.clone())
             }
         };
         let session = match session {

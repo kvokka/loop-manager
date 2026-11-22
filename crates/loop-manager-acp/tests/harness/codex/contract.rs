@@ -190,7 +190,10 @@ async fn s12_a_silent_provider_ends_nothing_until_an_interrupt_cancels_the_turn(
     let held = PromptKey::new("r1", 1, 2);
     live.prompt(held, "And this too.").await;
     let acked = live
-        .until(Duration::from_secs(2), |e| *e == Normalized::PromptAcked { key: held })
+        .until(
+            Duration::from_secs(2),
+            |e| matches!(e, Normalized::PromptAcked { key, .. } if *key == held),
+        )
         .await;
     assert_eq!(acked, None, "{:?}", live.seen);
     live.driver.cancel_turn(&live.instance, &live.session).await.unwrap();

@@ -4,7 +4,9 @@
 use loop_manager_acp::Acp;
 use loop_manager_contract::{
     config::{EffectiveConfig, Hook, Layer, Mcp, Skill, Sourced},
-    driver::{Driver, DriverEvent, Normalized, PromptKey, SessionPlan, SessionState, StopReason, Transcript},
+    driver::{
+        Driver, DriverEvent, Normalized, PromptKey, Replay, Replayed, SessionPlan, SessionState, StopReason, Transcript,
+    },
 };
 use loop_manager_testkit::{
     anthropic::{Provider, Reply},
@@ -155,7 +157,8 @@ async fn a_reply_is_acked_and_completed() {
     let dir = tempfile::tempdir().unwrap();
     let (seen, transcript, _) = turn(vec![Reply::Text("OK".into())], dir.path(), |_| {}).await;
     let key = PromptKey::new("r1", 1, 1);
-    assert!(seen.contains(&Normalized::PromptAcked { key }), "{seen:?}");
+    let acked = |e: &Normalized| matches!(e, Normalized::PromptAcked { key: k, message_id: Some(_) } if *k == key);
+    assert!(seen.iter().any(acked), "{seen:?}");
     assert!(seen.contains(&Normalized::TurnStarted));
     assert_eq!(
         seen.last(),
@@ -354,13 +357,29 @@ async fn a_command_left_in_the_background_is_stopped_and_the_session_takes_the_n
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
 }
 
-/// Criterion 8 at the adapter: the prompt the agent answered before its process died mid-turn is delivered to the
-/// driver of the next daemon after `session/resume` in a new process; a prompt never sent is not. The prompt that
-/// reconciles, of a key of its own, starts a turn on the conversation of the first.
+/// The ids of the messages the acknowledgements in `seen` named, by key, in order.
+fn named(seen: &[Normalized]) -> Vec<(PromptKey, String)> {
+    (seen.iter())
+        .filter_map(|e| match e {
+            Normalized::PromptAcked {
+                key,
+                message_id: Some(id),
+            } => Some((*key, id.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The replay a delivery check reads: after a turn that ran a tool and a second one whose process died in its
+/// command, a resume with the replay in a new process of the next daemon gives exactly the prompts sent, by the ids
+/// their answers named and in their words, and is complete. The prompt that reconciles, of a key of its own, starts a
+/// turn on the conversation.
 #[tokio::test]
-async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume() {
+async fn a_replay_after_the_process_died_gives_the_prompts_sent_by_their_ids() {
     let dir = tempfile::tempdir().unwrap();
     let plan = vec![
+        Reply::Bash("echo ran".into()),
+        Reply::Text("Ran.".into()),
         Reply::Bash("echo $$ > sleep.pid; exec sleep 300".into()),
         Reply::Text("Reconciled.".into()),
     ];
@@ -374,11 +393,28 @@ async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume
     let (sink, mut events) = mpsc::unbounded_channel();
     let instance = first.start_instance("i1", &split.process, sink).await.unwrap();
     let session = first.start_session(&instance, &split.session).await.unwrap();
-    let sent = PromptKey::new("r1", 1, 1);
-    first.send_prompt(&instance, &session, "Run it.", sent).await.unwrap();
+    let prompts = [
+        (PromptKey::new("r1", 1, 1), "Run it."),
+        (PromptKey::new("r1", 1, 2), "Run it again."),
+    ];
+    first
+        .send_prompt(&instance, &session, prompts[0].1, prompts[0].0)
+        .await
+        .unwrap();
+    let mut seen = until(&mut events, |e| matches!(e, Normalized::TurnEnded { .. })).await;
+    first
+        .send_prompt(&instance, &session, prompts[1].1, prompts[1].0)
+        .await
+        .unwrap();
     pid_in(&workdir.join("sleep.pid")).await;
     first.stop_instance(&instance, Duration::from_secs(4)).await;
-    until(&mut events, |e| matches!(e, Normalized::Exited { .. })).await;
+    seen.extend(until(&mut events, |e| matches!(e, Normalized::Exited { .. })).await);
+    let named = named(&seen);
+    assert_eq!(
+        named.iter().map(|n| n.0).collect::<Vec<_>>(),
+        prompts.map(|p| p.0),
+        "{seen:?}"
+    );
 
     let next = driver(dir.path());
     let plan = SessionPlan::Resume {
@@ -393,21 +429,34 @@ async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume
     let split = next.split(&config, &plan).unwrap();
     let (sink, mut events) = mpsc::unbounded_channel();
     let instance = next.start_instance("i2", &split.process, sink).await.unwrap();
-    next.resume_session(&instance, &session, &split.session).await.unwrap();
+    let replay = next
+        .resume_session(&instance, &session, &split.session, true)
+        .await
+        .unwrap();
+    let sent: Vec<Replayed> = (named.iter().zip(prompts))
+        .map(|((_, id), (_, text))| Replayed {
+            id: id.clone(),
+            text: text.to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        replay,
+        Replay {
+            complete: true,
+            messages: sent
+        }
+    );
     let reconcile = PromptKey::new("r1", 2, 1);
-    for (key, delivered) in [(sent, true), (reconcile, false)] {
-        let transcript = next.transcript(&instance, &session, key).await.unwrap();
-        assert_eq!(transcript, Transcript::Present { delivered }, "{key:?}");
-    }
     next.send_prompt(&instance, &session, "Go on.", reconcile)
         .await
         .unwrap();
     let seen = until(&mut events, |e| matches!(e, Normalized::TurnEnded { .. })).await;
     assert!(seen.contains(&Normalized::TurnStarted), "{seen:?}");
     let requests = provider.requests();
-    assert_eq!(requests.len(), 2, "one request per turn");
     assert!(
-        requests[1].body["messages"].to_string().contains("Run it."),
+        requests.last().unwrap().body["messages"]
+            .to_string()
+            .contains("Run it again."),
         "the conversation goes on"
     );
     next.stop_instance(&instance, Duration::from_secs(4)).await;

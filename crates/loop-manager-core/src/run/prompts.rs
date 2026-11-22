@@ -81,6 +81,15 @@ pub(super) fn advance(tx: &mut Tx<'_>, run: &str, attempt: u32, key: PromptKey, 
     Ok(!moved.is_empty())
 }
 
+/// Names the message the prompt `key` of the attempt became, once: a second name of it changes nothing.
+pub(super) fn named(tx: &mut Tx<'_>, run: &str, attempt: u32, key: PromptKey, message_id: &str) -> Result<(), Error> {
+    tx.sql().execute(
+        "UPDATE prompts SET message_id = ?4 WHERE run = ?1 AND attempt = ?2 AND key = ?3 AND message_id IS NULL",
+        params![run, attempt, key.0.to_string(), message_id],
+    )?;
+    Ok(())
+}
+
 /// The turn ended: every `acked` prompt of the attempt is `settled`. A prompt the harness still holds (`intent`,
 /// `sent`) is not of that turn and stays.
 pub(super) fn settle(tx: &mut Tx<'_>, run: &str, attempt: u32) -> Result<(), Error> {

@@ -330,3 +330,19 @@ async fn a_prompt_whose_turn_ended_is_settled() {
     let rows = prompts(&w, &run);
     assert_eq!((rows.len(), rows[0].1, rows[0].3.as_str()), (1, 1, "settled"));
 }
+
+/// The delivery record keeps the harness's id of the message an acknowledged prompt became.
+#[tokio::test(start_paused = true)]
+async fn an_acknowledged_prompt_keeps_the_id_of_its_message() {
+    let w = world(&[]);
+    w.driver.script(hollow_turn());
+    let run = w.create().await;
+    w.states(&run).await;
+    let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
+    let named: Option<String> = db
+        .query_row("SELECT message_id FROM prompts WHERE run = ?1 AND n = 1", [&run], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(named.as_deref(), Some("m1"));
+}

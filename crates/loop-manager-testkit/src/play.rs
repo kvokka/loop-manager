@@ -52,15 +52,16 @@ impl ScriptedDriver {
                     Step::Insert => {
                         let inserted = {
                             let mut state = driver.lock();
-                            let held = session_id(&session).ok().and_then(|id| state.sessions.get_mut(&id));
-                            held.and_then(|s| {
-                                let key = s.held.pop_front()?;
-                                s.prompts.push(key);
-                                Some(key)
-                            })
+                            let id = session_id(&session).unwrap_or_default();
+                            let held = state.sessions.get_mut(&id).and_then(|s| s.held.pop_front());
+                            held.map(|(key, text)| (key, state.insert(id, Some(key), text)))
                         };
-                        if let Some(key) = inserted {
-                            driver.emit(&instance, Some(&session), Normalized::PromptAcked { key });
+                        if let Some((key, id)) = inserted {
+                            let acked = Normalized::PromptAcked {
+                                key,
+                                message_id: Some(id),
+                            };
+                            driver.emit(&instance, Some(&session), acked);
                         }
                     }
                     Step::Exit { code, signal } => {

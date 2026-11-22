@@ -19,7 +19,7 @@ use loop_manager_contract::{
     config::EffectiveConfig,
     driver::{
         Adapter, Capabilities, Driver, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized,
-        ProcessPart, PromptKey, SessionPart, SessionPlan, SessionRef, Setup, Source, Split, Transcript, child,
+        ProcessPart, PromptKey, Replay, SessionPart, SessionPlan, SessionRef, Setup, Source, Split, Transcript, child,
     },
     history::History,
     orphans,
@@ -91,6 +91,9 @@ struct Shared {
     permissions: HashMap<String, Pending>,
     /// How many permission requests the instance had: the number of the next id.
     asked: u64,
+    /// While a `session/resume` that asked for the history waits for its answer: the session's id and what the agent
+    /// replayed of it so far. No update meanwhile is work of the attempt.
+    replaying: Option<(String, Replay)>,
 }
 
 /// A permission request that waits for `answer_permission`.
@@ -113,6 +116,7 @@ impl Shared {
             started: false,
             permissions: HashMap::new(),
             asked: 0,
+            replaying: None,
         }
     }
 
@@ -379,22 +383,23 @@ impl Acp {
         Ok(())
     }
 
-    async fn resume(&self, instance: &InstanceHandle, session: &SessionRef, part: &Value) -> Result<(), Failure> {
+    /// `session/resume`, with the replay of the whole history when `replay`. A resume with the replay that fails
+    /// otherwise than for want of the session (an agent without replays, one whose replay outlasts [`REQUEST_LIMIT`]
+    /// or fails) goes once more without it, and its replay is not complete.
+    async fn resume(
+        &self,
+        instance: &InstanceHandle,
+        session: &SessionRef,
+        part: &Value,
+        replay: bool,
+    ) -> Result<Replay, Failure> {
         let known = self.for_session(&instance.id, part)?;
-        let mut params = part.clone();
-        params["sessionId"] = session.0["session_id"].clone();
-        let request: schema::ResumeSessionRequest =
-            serde_json::from_value(params).map_err(|e| child::config_error(format!("session/resume: {e}")))?;
-        let resumed = self
-            .ask(known.conn.send_request(request).block_task())
-            .await
-            .map_err(|mut failure| {
-                // The agent has no such session, or cannot resume one: there is no transcript to go on with.
-                if failure.raw.starts_with("-32002") || failure.raw.starts_with("-32601") {
-                    failure.kind = FailureKind::TranscriptDivergence;
-                }
-                failure
-            })?;
+        let (resumed, replayed) = match self.resumed(&known, session, part, replay).await {
+            Err(failure) if replay && failure.kind != FailureKind::TranscriptDivergence => {
+                self.resumed(&known, session, part, false).await?
+            }
+            answered => answered?,
+        };
         // A resumed session takes its options from its transcript: the config of this attempt goes again.
         let id = session.0["session_id"].as_str().unwrap_or_default();
         self.configure(&known, id, &resumed.config_options, part).await?;
@@ -402,7 +407,66 @@ impl Acp {
         shared.turn.session = Some(id.to_owned());
         shared.record = self.recorder(part, id);
         shared.session = Some(session.clone());
-        Ok(())
+        Ok(replayed)
+    }
+
+    /// The answer to one `session/resume` of `session` on `known` within [`REQUEST_LIMIT`], and the user messages
+    /// the agent replayed before it when the request asked for the whole history (`replay`).
+    async fn resumed(
+        &self,
+        known: &Instance,
+        session: &SessionRef,
+        part: &Value,
+        replay: bool,
+    ) -> Result<(schema::ResumeSessionResponse, Replay), Failure> {
+        let mut params = part.clone();
+        params["sessionId"] = session.0["session_id"].clone();
+        if replay {
+            params["replayFrom"] = json!({ "type": "start" });
+        }
+        let request: schema::ResumeSessionRequest =
+            serde_json::from_value(params).map_err(|e| child::config_error(format!("session/resume: {e}")))?;
+        let answer = match replay {
+            false => within(known.conn.send_request(request).block_task())
+                .await?
+                .map(|resumed| (resumed, Replay::default())),
+            true => {
+                let id = session.0["session_id"].as_str().unwrap_or_default().to_owned();
+                lock(&known.shared).replaying = Some((id, Replay::default()));
+                let (answered, answer) = oneshot::channel();
+                let shared = known.shared.clone();
+                let sent = known.conn.send_request(request);
+                let cancel = sent.cancellation_handle();
+                // Ordered with the session's updates: the replay is all the agent sent before its answer.
+                let written = sent.on_receiving_result(move |resumed| {
+                    let replayed = lock(&shared).replaying.take().map(|(_, replay)| replay);
+                    let _ = answered.send(resumed.map(|resumed| (resumed, replayed.unwrap_or_default())));
+                    std::future::ready(Ok(()))
+                });
+                let answer = match written {
+                    Ok(()) => tokio::time::timeout(REQUEST_LIMIT, answer).await,
+                    Err(e) => Ok(Ok(Err(e))),
+                };
+                match answer {
+                    Ok(Ok(answer)) => answer,
+                    // The connection ended first.
+                    Ok(Err(_)) => return Err(crashed()),
+                    Err(_) => {
+                        lock(&known.shared).replaying = None;
+                        let _ = cancel.cancel();
+                        return Err(late());
+                    }
+                }
+            }
+        };
+        answer.map_err(|e| {
+            let mut failure = self.failed(&e);
+            // The agent has no such session, or cannot resume one: there is no transcript to go on with.
+            if failure.raw.starts_with("-32002") || failure.raw.starts_with("-32601") {
+                failure.kind = FailureKind::TranscriptDivergence;
+            }
+            failure
+        })
     }
 
     /// The file of the key of the last prompt the agent of `session` answered, across restarts of the daemon:
@@ -452,7 +516,7 @@ impl Acp {
             }
             let mut shared = lock(&shared);
             let events = match answer {
-                Ok(_) => shared.turn.acked(key),
+                Ok(answer) => shared.turn.acked(key, answer.message_id.to_string()),
                 // `session/cancel` took the prompt before the agent inserted it.
                 Err(e) if e.code == ErrorCode::REQUEST_CANCELLED => shared.turn.dropped(key),
                 Err(e) => shared
@@ -507,6 +571,12 @@ async fn connect(
             async move |n: schema::UpdateSessionNotification, _: ConnectionTo<Agent>| {
                 let mut shared = lock(&updates);
                 let session = n.session_id.to_string();
+                if let Some((resumed, replay)) = &mut shared.replaying {
+                    if *resumed == session {
+                        session::replayed(replay, &n.update);
+                    }
+                    return Ok(());
+                }
                 if let Some(record) = &shared.record {
                     record.update(&session, &n.update);
                 }
@@ -628,11 +698,14 @@ async fn request_within<T>(
 async fn within<T>(
     request: impl Future<Output = Result<T, agent_client_protocol::Error>>,
 ) -> Result<Result<T, agent_client_protocol::Error>, Failure> {
-    tokio::time::timeout(REQUEST_LIMIT, request).await.map_err(|_| {
-        let mut failure = crashed();
-        failure.raw = format!("the agent did not answer within {} s", REQUEST_LIMIT.as_secs());
-        failure
-    })
+    tokio::time::timeout(REQUEST_LIMIT, request).await.map_err(|_| late())
+}
+
+/// The failure of a request the agent did not answer within [`REQUEST_LIMIT`].
+fn late() -> Failure {
+    let mut failure = crashed();
+    failure.raw = format!("the agent did not answer within {} s", REQUEST_LIMIT.as_secs());
+    failure
 }
 
 /// Kills the process group of an instance that could not start, and hands its failure back.
@@ -840,8 +913,9 @@ impl Driver for Acp {
         instance: &'a InstanceHandle,
         session: &'a SessionRef,
         part: &'a SessionPart,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
-        Box::pin(self.resume(instance, session, &part.0))
+        replay: bool,
+    ) -> BoxFuture<'a, Result<Replay, Failure>> {
+        Box::pin(self.resume(instance, session, &part.0, replay))
     }
 
     fn send_prompt<'a>(
@@ -856,6 +930,10 @@ impl Driver for Acp {
 
     fn prompts_in_turn(&self) -> bool {
         self.profile.prompts_in_turn
+    }
+
+    fn retains_prompts(&self) -> bool {
+        self.profile.retains_prompts
     }
 
     fn answer_permission<'a>(

@@ -8,8 +8,8 @@ use loop_manager_contract::{
     config::EffectiveConfig,
     driver::{
         Capabilities, Driver, DriverEvent, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized,
-        ProcessPart, PromptKey, SessionPart, SessionPlan, SessionRef, SessionState, Source, Split, StopReason,
-        Transcript,
+        ProcessPart, PromptKey, Replay, Replayed, SessionPart, SessionPlan, SessionRef, SessionState, Source, Split,
+        StopReason, Transcript,
     },
 };
 use serde_json::{Value, json};
@@ -35,7 +35,9 @@ pub use tracker::MemoryTracker;
 
 /// Plays one queued scenario per `send_prompt`, after acknowledging the prompt. With no scenario left the prompt is
 /// acknowledged and the turn never ends: a hang. A scenario without `turn.ended` is a hang too. A prompt sent while a
-/// turn is in flight is held: [`Step::Insert`] acknowledges the oldest one held, `cancel_turn` drops them all.
+/// turn is in flight is held: [`Step::Insert`] acknowledges the oldest one held, `cancel_turn` drops them all. A
+/// session keeps the messages inserted into it, which a resume with a replay gives back; a prompt sent again with a
+/// key the session holds is acknowledged at once, with no turn, as the ACP adapters do.
 #[derive(Clone)]
 pub struct ScriptedDriver {
     harness: &'static str,
@@ -59,6 +61,16 @@ struct State {
     stalled: bool,
     /// Set by [`ScriptedDriver::lose_prompts`].
     losing: bool,
+    /// Set by [`ScriptedDriver::swallow_acks`].
+    swallowing: bool,
+    /// Set by [`ScriptedDriver::partial_replays`].
+    partial: bool,
+    /// Set by [`ScriptedDriver::forgets_prompts`].
+    forgetful: bool,
+    /// How many messages were inserted into any session: the number of the next id.
+    inserted: u64,
+    /// How many times each key was inserted into a session.
+    insertions: HashMap<PromptKey, usize>,
     /// The key of every prompt sent, in order.
     keys: Vec<PromptKey>,
     /// Set by [`ScriptedDriver::stoppable_background`].
@@ -93,15 +105,43 @@ struct Instance {
 
 struct Session {
     instance: String,
-    /// Prompts in order.
-    prompts: Vec<PromptKey>,
-    /// Prompts sent during a turn and not yet inserted, oldest first.
-    held: VecDeque<PromptKey>,
+    /// The messages inserted, in order.
+    messages: Vec<Message>,
+    /// Prompts sent during a turn and not yet inserted, oldest first, with their texts.
+    held: VecDeque<(PromptKey, String)>,
     playing: Option<JoinHandle<()>>,
     /// A turn is in flight: from a prompt or a response until `turn.ended`.
     in_turn: bool,
     /// The resume of a lost transcript made this session: it is empty, whatever the core asked for.
     empty: bool,
+}
+
+/// A user message of a session: its id, the key of the prompt that inserted it (none for one loop-manager did not
+/// send) and its text.
+#[derive(Clone)]
+struct Message {
+    id: String,
+    key: Option<PromptKey>,
+    text: String,
+}
+
+impl State {
+    /// Inserts a message of `text`, of the prompt `key` if any, into session `session`: the id it takes.
+    fn insert(&mut self, session: u64, key: Option<PromptKey>, text: String) -> String {
+        self.inserted += 1;
+        let id = format!("m{}", self.inserted);
+        if let Some(key) = key {
+            *self.insertions.entry(key).or_default() += 1;
+        }
+        if let Some(s) = self.sessions.get_mut(&session) {
+            s.messages.push(Message {
+                id: id.clone(),
+                key,
+                text,
+            });
+        }
+        id
+    }
 }
 
 /// No process has this pid (it is above every `pid_max`), so nothing real is ever signalled through it.
@@ -257,7 +297,7 @@ impl Driver for ScriptedDriver {
             id,
             Session {
                 instance: instance.id.clone(),
-                prompts: Vec::new(),
+                messages: Vec::new(),
                 held: VecDeque::new(),
                 playing: None,
                 in_turn: false,
@@ -270,13 +310,15 @@ impl Driver for ScriptedDriver {
     }
 
     /// Moves a session onto `instance`; its transcript survives the old process, like a harness's does. A session
-    /// with no transcript resumes too, empty, as the worst harness would have it.
+    /// with no transcript resumes too, empty, as the worst harness would have it. A replay gives the messages of the
+    /// session, complete unless [`ScriptedDriver::partial_replays`].
     fn resume_session<'a>(
         &'a self,
         instance: &'a InstanceHandle,
         session: &'a SessionRef,
         part: &'a SessionPart,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+        replay: bool,
+    ) -> BoxFuture<'a, Result<Replay, Failure>> {
         let mut state = self.lock();
         got(&mut state, part);
         if !state.instances.get(&instance.id).is_some_and(|i| i.alive) {
@@ -288,7 +330,7 @@ impl Driver for ScriptedDriver {
         };
         let s = state.sessions.entry(id).or_insert_with(|| Session {
             instance: String::new(),
-            prompts: Vec::new(),
+            messages: Vec::new(),
             held: VecDeque::new(),
             playing: None,
             in_turn: false,
@@ -298,7 +340,18 @@ impl Driver for ScriptedDriver {
         // A new process has no turn in flight and holds nothing.
         s.in_turn = false;
         s.held.clear();
-        ready(Ok(()))
+        let messages = s.messages.iter().map(|m| Replayed {
+            id: m.id.clone(),
+            text: m.text.clone(),
+        });
+        let messages = messages.collect();
+        ready(Ok(match replay {
+            true => Replay {
+                complete: !state.partial,
+                messages,
+            },
+            false => Replay::default(),
+        }))
     }
 
     fn send_prompt<'a>(
@@ -308,29 +361,41 @@ impl Driver for ScriptedDriver {
         text: &'a str,
         key: PromptKey,
     ) -> BoxFuture<'a, Result<(), Failure>> {
-        let recorded = {
-            let mut state = self.lock();
-            state.texts.push(text.to_owned());
-            state.keys.push(key);
-            let losing = state.losing;
-            // Only a live session can drop a prompt: a dead process refuses it, as a harness's does. Whether the
-            // prompt starts a turn now.
-            Self::live_session(&mut state, instance, session).map(|s| match (losing, s.in_turn) {
-                (true, _) => false,
-                (false, true) => {
-                    s.held.push_back(key);
-                    false
-                }
-                (false, false) => {
-                    s.prompts.push(key);
-                    true
-                }
-            })
+        let mut state = self.lock();
+        state.texts.push(text.to_owned());
+        state.keys.push(key);
+        let (losing, swallowing, forgetful) = (state.losing, state.swallowing, state.forgetful);
+        // Only a live session can drop a prompt: a dead process refuses it, as a harness's does.
+        let s = match Self::live_session(&mut state, instance, session) {
+            Ok(s) => s,
+            Err(e) => return ready(Err(e)),
         };
-        match recorded {
-            Ok(true) => ready(self.play(instance, session, Normalized::PromptAcked { key })),
-            Ok(false) => ready(Ok(())),
-            Err(e) => ready(Err(e)),
+        let known = (s.messages.iter()).find(|m| !forgetful && m.key == Some(key));
+        let acked = |id: String| Normalized::PromptAcked {
+            key,
+            message_id: Some(id),
+        };
+        match (losing, known, s.in_turn) {
+            (true, ..) => ready(Ok(())),
+            (false, Some(message), _) => {
+                let ack = acked(message.id.clone());
+                drop(state);
+                self.emit(&instance.id, Some(session), ack);
+                ready(Ok(()))
+            }
+            (false, None, true) => {
+                s.held.push_back((key, text.to_owned()));
+                ready(Ok(()))
+            }
+            (false, None, false) => {
+                let id = session_id(session).unwrap_or_default();
+                let id = state.insert(id, Some(key), text.to_owned());
+                drop(state);
+                match swallowing {
+                    true => ready(Ok(())),
+                    false => ready(self.play(instance, session, acked(id))),
+                }
+            }
         }
     }
 
@@ -352,7 +417,7 @@ impl Driver for ScriptedDriver {
                 playing.abort();
             }
             // The cancel takes every prompt the harness holds: none of them is ever delivered.
-            for key in held {
+            for (key, _) in held {
                 self.emit(&instance.id, Some(session), Normalized::PromptDropped { key });
             }
             // A real harness ends only a turn that is in flight, and comes to idle; an idle session sees nothing.
@@ -372,6 +437,10 @@ impl Driver for ScriptedDriver {
 
     fn prompts_in_turn(&self) -> bool {
         self.lock().prompts_in_turn
+    }
+
+    fn retains_prompts(&self) -> bool {
+        !self.lock().forgetful
     }
 
     fn answer_permission<'a>(
@@ -428,7 +497,7 @@ impl Driver for ScriptedDriver {
         ready(Ok(match found {
             None => Transcript::Missing,
             Some(s) => Transcript::Present {
-                delivered: s.prompts.contains(&key),
+                delivered: s.messages.iter().any(|m| m.key == Some(key)),
             },
         }))
     }

@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 29;
+const VERSION: i32 = 30;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -124,7 +124,7 @@ CREATE TABLE attempts (
 CREATE INDEX attempts_instance ON attempts (instance);
 CREATE INDEX attempts_token ON attempts (token_sha256);
 -- The delivery record of every prompt of an attempt (contracts 6.4): `n` counts from 1; `source` is `lm` or
--- `operator`.
+-- `operator`; `message_id` is the harness's id of the message the prompt became (NULL: none named).
 CREATE TABLE prompts (
     run TEXT NOT NULL,
     attempt INTEGER NOT NULL,
@@ -133,6 +133,7 @@ CREATE TABLE prompts (
     text TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'lm',
     state TEXT NOT NULL CHECK (state IN ('queued', 'intent', 'sent', 'acked', 'settled', 'withdrawn')),
+    message_id TEXT,
     PRIMARY KEY (run, attempt, n)
 );
 -- The permission requests of the live attempts (contracts 4.3): `id` names one within the attempt's instance,

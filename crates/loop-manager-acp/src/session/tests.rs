@@ -36,15 +36,28 @@ fn kinds(events: &[Normalized]) -> Vec<FailureKind> {
         .collect()
 }
 
+/// The acknowledgement of `key` naming no message.
+fn acked(key: PromptKey) -> Normalized {
+    Normalized::PromptAcked { key, message_id: None }
+}
+
+/// The acknowledgement of `key` naming the message `id`.
+fn named(key: PromptKey, id: &str) -> Normalized {
+    Normalized::PromptAcked {
+        key,
+        message_id: Some(id.into()),
+    }
+}
+
 #[test]
 fn the_first_running_update_acknowledges_the_prompt_before_the_turn_starts() {
     let (mut turn, key, now) = (turn(), PromptKey::new("r", 1, 1), Instant::now());
     turn.sent(key);
     let events = turn.update(ME, &running(), now);
-    assert_eq!(events[0], Normalized::PromptAcked { key });
+    assert_eq!(events[0], acked(key));
     assert_eq!(events[1], Normalized::TurnStarted);
-    // The answer to the prompt that comes after the update acknowledges nothing a second time.
-    assert!(turn.acked(key).is_empty());
+    // The answer to the prompt that comes after the update tells it again, naming its message.
+    assert_eq!(turn.acked(key, "m1".into()), vec![named(key, "m1")]);
     assert!(
         turn.update(ME, &running(), now)
             .iter()
@@ -53,11 +66,15 @@ fn the_first_running_update_acknowledges_the_prompt_before_the_turn_starts() {
 }
 
 #[test]
-fn the_answer_acknowledges_a_prompt_no_update_did() {
-    let (mut turn, key) = (turn(), PromptKey::new("r", 1, 1));
+fn the_answer_acknowledges_a_prompt_no_update_did_and_no_turn_takes_it_again() {
+    let (mut turn, key, now) = (turn(), PromptKey::new("r", 1, 1), Instant::now());
     turn.sent(key);
-    assert_eq!(turn.acked(key), vec![Normalized::PromptAcked { key }]);
-    assert!(turn.acked(key).is_empty());
+    assert_eq!(turn.acked(key, "m1".into()), vec![named(key, "m1")]);
+    let events = turn.update(ME, &running(), now);
+    assert!(
+        events.iter().all(|e| !matches!(e, Normalized::PromptAcked { .. })),
+        "{events:?}"
+    );
 }
 
 /// Of two prompts the agent holds, the turn that starts acknowledges the older; each answer its own, once; a drop
@@ -75,13 +92,50 @@ fn a_turn_acknowledges_the_oldest_prompt_held_and_a_drop_takes_one_out() {
     }
     assert_eq!(turn.dropped(two), vec![Normalized::PromptDropped { key: two }]);
     assert!(turn.dropped(two).is_empty());
+    assert_eq!(turn.update(ME, &running(), now)[0], acked(one));
+    assert_eq!(turn.acked(three, "m3".into()), vec![named(three, "m3")]);
+    assert!(turn.pending.is_empty(), "a dropped prompt is acknowledged never");
+}
+
+/// A replay gathers the user messages by their id in the order they first came: `user_message` replaces the content
+/// (a patch without one keeps it), `user_message_chunk` appends; a block that is not text is U+FFFC. Only
+/// `replay_complete` makes it complete, and nothing else is a user message.
+#[test]
+fn a_replay_gathers_the_user_messages_by_their_id_until_replay_complete() {
+    let mut replay = Replay::default();
+    let text = |t: &str| json!({ "type": "text", "text": t });
+    let image = json!({ "type": "image", "data": "aGk=", "mimeType": "image/png" });
+    for value in [
+        json!({ "sessionUpdate": "user_message", "messageId": "m1", "content": [text("Draft.")] }),
+        json!({ "sessionUpdate": "user_message_chunk", "messageId": "m2", "content": text("Tw") }),
+        json!({ "sessionUpdate": "agent_message_chunk", "messageId": "a1", "content": text("Answer.") }),
+        json!({ "sessionUpdate": "user_message", "messageId": "m1", "content": [text("One "), image, text(".")] }),
+        json!({ "sessionUpdate": "user_message", "messageId": "m1" }),
+        json!({ "sessionUpdate": "user_message_chunk", "messageId": "m2", "content": text("o.") }),
+        json!({ "sessionUpdate": "state_update", "state": "idle" }),
+    ] {
+        replayed(&mut replay, &update(value));
+    }
+    let message = |id: &str, text: &str| Replayed {
+        id: id.into(),
+        text: text.into(),
+    };
+    let messages = vec![message("m1", "One \u{fffc}."), message("m2", "Two.")];
     assert_eq!(
-        turn.update(ME, &running(), now)[0],
-        Normalized::PromptAcked { key: one }
+        replay,
+        Replay {
+            complete: false,
+            messages: messages.clone()
+        }
     );
-    assert!(turn.acked(one).is_empty());
-    assert_eq!(turn.acked(three), vec![Normalized::PromptAcked { key: three }]);
-    assert!(turn.acked(two).is_empty(), "a dropped prompt is acknowledged never");
+    replayed(&mut replay, &update(json!({ "sessionUpdate": "replay_complete" })));
+    assert_eq!(
+        replay,
+        Replay {
+            complete: true,
+            messages
+        }
+    );
 }
 
 #[test]

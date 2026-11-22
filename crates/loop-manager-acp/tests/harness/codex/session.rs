@@ -4,7 +4,7 @@
 use super::{Live, gone, resumed, sourced};
 use loop_manager_contract::{
     config::{Hook, Mcp, Skill},
-    driver::{Driver, Normalized, PromptKey, SessionState, StopReason, Transcript},
+    driver::{Driver, Normalized, PromptKey, Replay, Replayed, SessionState, StopReason, Transcript},
 };
 use loop_manager_testkit::{
     mcp,
@@ -12,6 +12,7 @@ use loop_manager_testkit::{
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use tokio::sync::mpsc;
 
 /// The attempt environment reaches the command (the process environment and the thread's shell policy), the model
 /// of the config reaches the provider, and a skill is listed to the model from the session's own `CODEX_HOME`.
@@ -36,11 +37,9 @@ async fn a_prompt_runs_a_command_with_the_attempt_environment_and_the_turn_compl
     .await;
     assert_eq!(live.ended().await, StopReason::Completed, "{:?}", live.seen);
     let key = PromptKey::new("r1", 1, 1);
-    for event in [
-        Normalized::PromptAcked { key },
-        Normalized::TurnStarted,
-        Normalized::Activity { tool_running: true },
-    ] {
+    let acked = |e: &Normalized| matches!(e, Normalized::PromptAcked { key: k, message_id: Some(_) } if *k == key);
+    assert!(live.seen.iter().any(acked), "{:?}", live.seen);
+    for event in [Normalized::TurnStarted, Normalized::Activity { tool_running: true }] {
         assert!(live.seen.contains(&event), "{event:?} in {:?}", live.seen);
     }
     assert!(
@@ -174,34 +173,95 @@ async fn a_resumed_session_takes_the_new_attempt_token_and_model() {
     live.stop().await;
 }
 
-/// Criterion 8 at the adapter: the prompt the adapter answered before its process died mid-turn is delivered to the
-/// driver of the next daemon after the resume in a new process; a prompt never sent is not. The prompt that
-/// reconciles, of a key of its own, starts a turn on the thread (the same key again would start none: the adapter
-/// finds it in the thread's history).
+/// The ids of the messages the acknowledgements in `seen` named, by key, in order.
+fn named(seen: &[Normalized]) -> Vec<(PromptKey, String)> {
+    (seen.iter())
+        .filter_map(|e| match e {
+            Normalized::PromptAcked {
+                key,
+                message_id: Some(id),
+            } => Some((*key, id.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The replay a delivery check reads: after a turn that ran a command and a second one whose process died in its
+/// command, a resume with the replay in a new process of the next daemon gives exactly the prompts sent, by the ids
+/// their answers named and in their words, and is complete. The prompt that reconciles, of a key of its own, starts a
+/// turn on the thread.
 #[tokio::test]
-async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume() {
+async fn a_replay_after_the_process_died_gives_the_prompts_sent_by_their_ids() {
     let dir = tempfile::tempdir().unwrap();
     let plan = vec![
+        Reply::Command("echo ran".into()),
+        Reply::Text("RAN".into()),
         Reply::Command("echo $$ > sleep.pid; exec sleep 300".into()),
         Reply::Text("RECONCILED".into()),
     ];
-    let first = Live::start(plan, dir.path(), |_| {}).await;
+    let mut first = Live::start(plan, dir.path(), |_| {}).await;
+    assert_eq!(first.ended().await, StopReason::Completed, "{:?}", first.seen);
+    let prompts = [
+        (PromptKey::new("r1", 1, 1), "Do the task."),
+        (PromptKey::new("r1", 1, 2), "Do it again."),
+    ];
+    first.prompt(prompts[1].0, prompts[1].1).await;
     first.pid_in("sleep.pid").await;
+    let acked =
+        |e: &Normalized| matches!(e, Normalized::PromptAcked { key, message_id: Some(_) } if *key == prompts[1].0);
+    if !first.seen.iter().any(acked) {
+        first.until(Duration::from_secs(10), acked).await;
+    }
+    let named = named(&first.seen);
+    assert_eq!(
+        named.iter().map(|n| n.0).collect::<Vec<_>>(),
+        prompts.map(|p| p.0),
+        "{:?}",
+        first.seen
+    );
     let (provider, session, rig) = (first.provider.clone(), first.session.clone(), first.rig.clone());
     first.stop().await;
-    let plan = resumed(session, rig, 2, "two");
-    let mut live = Live::open(provider, dir.path(), plan, |_| {}).await.unwrap();
-    let (sent, reconcile) = (PromptKey::new("r1", 1, 1), PromptKey::new("r1", 2, 1));
-    for (key, delivered) in [(sent, true), (reconcile, false)] {
-        let transcript = live.driver.transcript(&live.instance, &live.session, key).await;
-        assert_eq!(transcript.unwrap(), Transcript::Present { delivered }, "{key:?}");
-    }
-    live.prompt(reconcile, "Go on.").await;
+
+    let driver = super::driver(dir.path());
+    let split = driver.split(
+        &super::config(&provider),
+        &resumed(session.clone(), rig.clone(), 2, "two"),
+    );
+    let split = split.unwrap();
+    let (sink, events) = mpsc::unbounded_channel();
+    let instance = driver.start_instance("i2", &split.process, sink).await.unwrap();
+    let replay = driver
+        .resume_session(&instance, &session, &split.session, true)
+        .await
+        .unwrap();
+    let sent: Vec<Replayed> = (named.iter().zip(prompts))
+        .map(|((_, id), (_, text))| Replayed {
+            id: id.clone(),
+            text: text.to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        replay,
+        Replay {
+            complete: true,
+            messages: sent
+        }
+    );
+    let mut live = Live {
+        provider,
+        driver,
+        instance,
+        session,
+        events,
+        seen: Vec::new(),
+        rig,
+    };
+    live.prompt(PromptKey::new("r1", 2, 1), "Go on.").await;
     assert_eq!(live.ended().await, StopReason::Completed, "{:?}", live.seen);
     assert!(live.seen.contains(&Normalized::TurnStarted), "{:?}", live.seen);
-    let requests = live.requests(2).await;
+    let requests = live.requests(4).await;
     assert!(
-        requests[1]["input"].to_string().contains("sleep.pid"),
+        requests.last().unwrap()["input"].to_string().contains("sleep.pid"),
         "the thread goes on"
     );
     live.stop().await;

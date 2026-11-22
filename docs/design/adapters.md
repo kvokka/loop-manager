@@ -152,9 +152,17 @@ that agent's [profile](#profiles).
 - **What ACP does not give.** `resume_session` is `session/resume` with the same session part, then the same config
   options as after `session/new`: an agent may take them from its transcript, and the config of the new attempt
   wins. An agent with no such session (`-32002`) or no such method (`-32601`) fails it with
-  `transcript_divergence`, and the core goes on with a fresh session. Whether the agent holds a prompt ACP does not
-  tell: no update gives the idempotency key back, and a replay names a message only by the `messageId` of the
-  answer to `session/prompt`. So the answer is the record: when the agent answers a prompt, the driver writes its key
+  `transcript_divergence`, and the core goes on with a fresh session. With `replay` the request carries
+  `replayFrom: {type: "start"}`, and until its answer no update is work of the attempt: none is written to the history
+  or told to the core. Of the session's own updates the driver gathers the user messages by their `messageId` in the
+  order they first came (`user_message` replaces a message's content, `user_message_chunk` appends to it), and
+  `replay_complete` makes the replay complete. A resume with the replay that fails otherwise than for want of the
+  session (`-32602` of an agent without replays, no answer within the 60 s of a request, an error reading the history)
+  goes once more without it, and its replay is not complete. Of the profiled agents, claude and codex keep the user
+  messages (`retains_prompts`); an agent known by its config alone does not vouch for it. The answer to
+  `session/prompt` names the message (`messageId`), and the driver tells it with `prompt.acked`: also when the turn
+  the prompt started told the acknowledgement first, without the id. Whether the agent holds a prompt ACP does not
+  tell otherwise: no update gives the idempotency key back. The answer is the record: when the agent answers a prompt, the driver writes its key
   to `<state>/acp/<harness>/answered/<session id in hex>` (the key of the last prompt answered in the session;
   `close_session` removes the file), and `transcript` answers `Present { delivered }`, delivered when the key asked
   about is the one in that file. A delivered prompt is reconciled with a prompt of a new key, which starts a turn; an
@@ -186,19 +194,25 @@ that agent's [profile](#profiles).
   trace file not written for `[history] keep_days` (default 30; 0 keeps them forever;
   [event model](event-model.md#history)).
 
-The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the
-prompt and runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, which sees the session's system prompt and
-config options in its environment; its sessions die with its process. Flags make it advertise `systemPrompt`
-(`--system-prompt`), offer `model` and `effort` options (`--options`), leave a cancellable background terminal after a
-turn (`--background`), ask a permission before the command and run it only when `allow` is selected (`--permission`),
-answer `initialize` with `-32022` (`--unsupported`) or speak only protocol version 1 (`--v1`).
+The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the prompt
+and runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, which sees the session's system prompt and config
+options in its environment; its sessions die with its process unless `--store` keeps them. Flags make it advertise
+`systemPrompt` (`--system-prompt`), offer `model` and `effort` options (`--options`), leave a cancellable background
+terminal after a turn (`--background`), ask a permission before the command and run it only when `allow` is selected
+(`--permission`), answer `initialize` with `-32022` (`--unsupported`) or speak only protocol version 1 (`--v1`). With
+`--store <dir>` its sessions outlive its process: the user messages of a session are kept in `<dir>`, each before the
+answer to its prompt, a resume of a kept session replays them, and a prompt with a key kept is answered at once with no
+turn; the key of each insertion is a line of `<dir>/inserted`. `--hold-before-insert <marker>` and `--hold-after-insert
+<marker>` hold the first prompt, never answered, until the marker is there: before the agent kept it, or after.
+`--partial-replay` ends a replay without `replay_complete`, `--no-replay` refuses one with `-32602`.
+`crates/loop-manager/tests/e2e/acp_agent.rs` checks those flags under the driver.
 `crates/loop-manager/tests/e2e/acp.rs` runs formulas on it: through the finisher, with the role, model and effort,
 with a background terminal cancelled, killed in a turn (`harness_crash`, then the resume finds no session), cancelled
 in a turn; and checks the version refusals, the capability checks and the redacted trace.
 `crates/loop-manager/tests/e2e/manual.rs` runs it under an operator: a request declined under loop-manager, one the
 operator allows, and a Stop that cancels the turn while the agent's process stays.
-`crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates, `src/tests.rs` the driver's calls
-against an agent in the test's process.
+`crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates and of a replay, `src/tests.rs` the
+driver's calls against an agent in the test's process, the replay among them.
 
 ### Profiles
 

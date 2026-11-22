@@ -70,6 +70,37 @@ impl ScriptedDriver {
         self.lock().losing = losing;
     }
 
+    /// Every later prompt the session takes is inserted, but its acknowledgement never comes and no scenario plays:
+    /// the harness's answer was lost.
+    pub fn swallow_acks(&self, swallowing: bool) {
+        self.lock().swallowing = swallowing;
+    }
+
+    /// Every later replay ends without `replay_complete`.
+    pub fn partial_replays(&self, partial: bool) {
+        self.lock().partial = partial;
+    }
+
+    /// From now on the harness vouches for no message it holds (`Driver::retains_prompts` is false), and a prompt
+    /// sent again with its key is inserted again, as a harness that keeps no keys would.
+    pub fn forgets_prompts(&self) {
+        self.lock().forgetful = true;
+    }
+
+    /// A user message of `text` that loop-manager did not send joins the transcript of `session`, as the attempts
+    /// table stores it.
+    pub fn foreign_message(&self, session: &Value, text: &str) {
+        let mut state = self.lock();
+        if let Some(id) = session["session"].as_u64().filter(|id| state.sessions.contains_key(id)) {
+            state.insert(id, None, text.to_owned());
+        }
+    }
+
+    /// How many times the prompt `key` was inserted into a session so far.
+    pub fn insertions(&self, key: PromptKey) -> usize {
+        self.lock().insertions.get(&key).copied().unwrap_or_default()
+    }
+
     /// What sessions leave in the background from now on are commands the harness can stop; by default it is work
     /// that is never stopped, as a subagent.
     pub fn stoppable_background(&self) {
@@ -115,13 +146,14 @@ impl ScriptedDriver {
     }
 
     /// The driver of a daemon started after this one died: no process of it is known, the transcripts of its
-    /// sessions survive (as a harness keeps them on disk), and so do the prompts and keys sent so far.
+    /// sessions survive (as a harness keeps them on disk), and so do the prompts and keys sent so far and the count
+    /// of insertions.
     pub fn after_crash(&self) -> Self {
         let old = self.lock();
         let sessions = old.sessions.iter().map(|(id, s)| {
             let session = Session {
                 instance: String::new(),
-                prompts: s.prompts.clone(),
+                messages: s.messages.clone(),
                 held: std::collections::VecDeque::new(),
                 playing: None,
                 in_turn: false,
@@ -134,6 +166,8 @@ impl ScriptedDriver {
             started: old.started,
             texts: old.texts.clone(),
             keys: old.keys.clone(),
+            inserted: old.inserted,
+            insertions: old.insertions.clone(),
             ..State::default()
         };
         Self {

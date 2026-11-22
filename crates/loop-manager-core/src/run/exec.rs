@@ -246,7 +246,7 @@ impl RunExecutor {
             Value::Null => driver.start_session(&handle, &part).await?,
             value => {
                 let session = SessionRef(value);
-                driver.resume_session(&handle, &session, &part).await?;
+                driver.resume_session(&handle, &session, &part, false).await?;
                 // The prompt the daemon died under is checked, else the new one (it only shows the session is there).
                 let retry = &p["retry"];
                 let check = if retry.is_null() { key } else { self::key(retry) };

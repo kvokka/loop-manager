@@ -90,7 +90,9 @@ kind.
 runs (its marker file), the model is offered a skill as `loop-manager:<name>` and the tool `mcp__<server>__<tool>` of
 an MCP server; the main thread is told the one subagent type of the list and no built-in one; an isolated session
 reads the rig's `CLAUDE.md`, not the host's; `stop_background` stops a background command, asks the model nothing and
-the session takes the next prompt.
+the session takes the next prompt; after a turn that ran a tool and a second one whose process died in its command, a
+resume with the replay in a new process gives exactly the prompts sent, by the ids their answers named and in their
+words, complete, and a prompt of a new key goes on with the conversation.
 
 `crates/loop-manager/tests/e2e/claude.rs` adds the daemon side: the finisher passes a prompt run, `kill -9` in a command
 is typed within a second and resumed with the bead's claim held (criteria 9 and 16), and a finisher called with a
@@ -137,7 +139,10 @@ namespace `mcp__<server>`; an isolated session reads the rig's `AGENTS.md`, not 
 key of its own and a provider that asks for an OpenAI login, the adapter logs codex in and codex writes `auth.json`,
 mode 0600, into the session's own `CODEX_HOME`; a resume runs in a new process on the thread of that home, its
 commands see the new attempt's token and the changed `model` of the config reaches the provider; `stop_background`
-stops a background command, asks the model nothing and the session takes the next prompt.
+stops a background command, asks the model nothing and the session takes the next prompt; after a turn that ran a
+command and a second one whose process died in its command, a resume with the replay in a new process gives exactly
+the prompts sent, by the ids their answers named and in their words, complete, and a prompt of a new key goes on with
+the thread.
 `codex/subagents.rs`: a spawn of a target's type runs a child with the role's instructions, model and skills, in
 multi-agent v1 and v2, and a resume writes the role files of its targets. `codex/models.rs`: every short name of the
 `codex` adapter expands to a model the option `model` of `session/new` offers.

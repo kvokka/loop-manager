@@ -108,6 +108,24 @@ impl PromptKey {
     }
 }
 
+/// What a `session/resume` replayed of the session's user messages.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Replay {
+    /// The agent ended the replay it was asked for with `replay_complete`.
+    pub complete: bool,
+    /// The user messages of the session, oldest first.
+    pub messages: Vec<Replayed>,
+}
+
+/// One user message of a replay.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Replayed {
+    /// The harness's id of the message: the `messageId` of the answer to the prompt that inserted it.
+    pub id: String,
+    /// The text blocks of the message joined; any other block is U+FFFC.
+    pub text: String,
+}
+
 /// Whether a session's transcript exists and holds the prompt with a given key. Whether the prompt was answered
 /// does not matter: a resumed session never has a turn in flight, so a delivered prompt is reconciled either way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,8 +197,11 @@ pub struct RateLimit {
 /// A normalized harness event (contracts 4.3): an input message of the core, not a journal event.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Normalized {
+    /// The harness inserted the prompt `key`; `message_id` is its id of the message, when it names one. It may come
+    /// twice for one key: first without the id (the turn the prompt started), then with it (the answer).
     PromptAcked {
         key: PromptKey,
+        message_id: Option<String>,
     },
     TurnStarted,
     TurnEnded {
@@ -269,12 +290,15 @@ pub trait Driver: Send + Sync {
         instance: &'a InstanceHandle,
         session: &'a SessionPart,
     ) -> BoxFuture<'a, Result<SessionRef, Failure>>;
+    /// `replay`: asks the agent for the whole history of the session and gives back its user messages; else
+    /// `Replay::default()`.
     fn resume_session<'a>(
         &'a self,
         instance: &'a InstanceHandle,
         session: &'a SessionRef,
         part: &'a SessionPart,
-    ) -> BoxFuture<'a, Result<(), Failure>>;
+        replay: bool,
+    ) -> BoxFuture<'a, Result<Replay, Failure>>;
     /// Returns once the request is written; the insertion is told by `PromptAcked`, a drop by `PromptDropped`, any
     /// other error of the request by a `Failure` event. An error here is one of writing it.
     fn send_prompt<'a>(
@@ -287,6 +311,11 @@ pub trait Driver: Send + Sync {
     /// Whether the harness may insert a prompt into a turn in flight; else a prompt sent during a turn waits for the
     /// turn's end.
     fn prompts_in_turn(&self) -> bool {
+        false
+    }
+    /// The harness keeps the user messages of a session across its processes, so a complete replay without a message
+    /// tells it was never inserted.
+    fn retains_prompts(&self) -> bool {
         false
     }
     /// Answers the permission request `request` of `instance`: `Some(option)` selects that option, `None` declines

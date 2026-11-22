@@ -38,6 +38,14 @@ fn key(n: u32) -> PromptKey {
     PromptKey::new("run-1", 1, n)
 }
 
+/// The acknowledgement of prompt `n`, naming the message `id`.
+fn acked(n: u32, id: &str) -> Normalized {
+    Normalized::PromptAcked {
+        key: key(n),
+        message_id: Some(id.into()),
+    }
+}
+
 fn ended(stop_reason: StopReason) -> Step {
     Step::Emit(Normalized::TurnEnded { stop_reason })
 }
@@ -52,6 +60,28 @@ impl Setup {
             .send_prompt(&self.instance, &self.session, "go", key(n))
             .await
             .unwrap();
+    }
+
+    /// Prompt `n` of `text`.
+    async fn say(&self, n: u32, text: &str) {
+        self.driver
+            .send_prompt(&self.instance, &self.session, text, key(n))
+            .await
+            .unwrap();
+    }
+
+    /// The process of the session is stopped and the session resumes on a new instance, asking for the replay when
+    /// `replay`: what it replayed.
+    async fn resumed(&mut self, replay: bool) -> Replay {
+        self.driver.stop_instance(&self.instance, Duration::ZERO).await;
+        let (sink, events) = mpsc::unbounded_channel();
+        let id = format!("{}+", self.instance.id);
+        let process = ProcessPart(Value::Null);
+        self.instance = self.driver.start_instance(&id, &process, sink).await.unwrap();
+        self.events = events;
+        let part = SessionPart(Value::Null);
+        let resumed = self.driver.resume_session(&self.instance, &self.session, &part, replay);
+        resumed.await.unwrap()
     }
 
     async fn transcript(&self, n: u32) -> Transcript {
@@ -74,7 +104,7 @@ async fn a_delayed_turn_ends_without_an_outcome_after_its_delay() {
     let start = Instant::now();
     s.prompt(1).await;
     assert_eq!(s.transcript(1).await, Transcript::Present { delivered: true });
-    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(1) }));
+    assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
     assert_eq!(next(&mut s.events).await, Some(Normalized::TurnStarted));
     let end = next(&mut s.events).await;
     assert_eq!(start.elapsed(), Duration::from_secs(90));
@@ -138,7 +168,7 @@ async fn a_hang_sends_nothing_after_the_ack_until_cancelled() {
     assert_eq!(next(&mut s.events).await, Some(idle));
     // With no scenario queued, the next prompt hangs right after the ack.
     s.prompt(2).await;
-    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(2) }));
+    assert_eq!(next(&mut s.events).await, Some(acked(2, "m2")));
     assert_eq!(next(&mut s.events).await, None);
 }
 
@@ -198,7 +228,7 @@ async fn the_process_dies_mid_turn_and_later_calls_fail() {
         .await
         .unwrap();
     s.driver
-        .resume_session(&instance, &s.session, &SessionPart(Value::Null))
+        .resume_session(&instance, &s.session, &SessionPart(Value::Null), false)
         .await
         .unwrap();
     assert_eq!(
@@ -211,7 +241,7 @@ async fn the_process_dies_mid_turn_and_later_calls_fail() {
         .await
         .unwrap();
     let first = events.recv().await.unwrap();
-    assert_eq!((first.seq, first.event), (1, Normalized::PromptAcked { key: key(2) }));
+    assert_eq!((first.seq, first.event), (1, acked(2, "m2")));
 }
 
 #[tokio::test(start_paused = true)]
@@ -262,7 +292,7 @@ async fn unknown_sessions_have_no_transcript_and_closed_ones_resume() {
     assert_eq!(transcript, Transcript::Missing);
     // A harness may resume what it does not know as an empty session: only the transcript tells.
     driver
-        .resume_session(&s.instance, &unknown, &SessionPart(Value::Null))
+        .resume_session(&s.instance, &unknown, &SessionPart(Value::Null), false)
         .await
         .unwrap();
     let transcript = driver.transcript(&s.instance, &unknown, key(1)).await.unwrap();
@@ -276,7 +306,10 @@ async fn unknown_sessions_have_no_transcript_and_closed_ones_resume() {
         "a closed session keeps its transcript"
     );
     let part = SessionPart(Value::Null);
-    s.driver.resume_session(&s.instance, &s.session, &part).await.unwrap();
+    s.driver
+        .resume_session(&s.instance, &s.session, &part, false)
+        .await
+        .unwrap();
 }
 
 #[test]
@@ -324,12 +357,12 @@ async fn a_prompt_sent_in_a_turn_is_held_until_inserted_or_dropped_by_the_cancel
     let go = Arc::new(tokio::sync::Notify::new());
     s.driver.script(vec![Step::Await(go.clone()), Step::Insert]);
     s.prompt(1).await;
-    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(1) }));
+    assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
     s.prompt(2).await;
     s.prompt(3).await;
     assert_eq!(s.transcript(2).await, Transcript::Present { delivered: false });
     go.notify_one();
-    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(2) }));
+    assert_eq!(next(&mut s.events).await, Some(acked(2, "m2")));
     assert_eq!(s.transcript(2).await, Transcript::Present { delivered: true });
     s.driver.cancel_turn(&s.instance, &s.session).await.unwrap();
     assert_eq!(
@@ -354,4 +387,101 @@ async fn the_answers_to_permission_requests_are_kept_and_prompts_in_turn_is_a_kn
     assert!(!s.driver.prompts_in_turn());
     s.driver.inserts_in_turn();
     assert!(s.driver.prompts_in_turn());
+}
+
+fn message(id: &str, text: &str) -> Replayed {
+    Replayed {
+        id: id.into(),
+        text: text.into(),
+    }
+}
+
+/// A resume with a replay gives the messages the session took, by the ids their acknowledgements named; one without
+/// gives nothing. A prompt sent again with a key the session holds is acknowledged at once by the same id, with no
+/// turn and no second insertion; the count of insertions outlives the daemon.
+#[tokio::test(start_paused = true)]
+async fn a_replay_gives_the_messages_inserted_and_a_known_key_is_acknowledged_at_once() {
+    let mut s = setup().await;
+    s.driver.script(vec![ended(StopReason::Completed)]);
+    s.say(1, "One.").await;
+    assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
+    next(&mut s.events).await;
+    assert_eq!(s.resumed(false).await, Replay::default());
+    let replay = s.resumed(true).await;
+    let messages = vec![message("m1", "One.")];
+    assert_eq!(
+        replay,
+        Replay {
+            complete: true,
+            messages
+        }
+    );
+    s.driver.script(vec![Step::Emit(Normalized::TurnStarted)]);
+    s.say(1, "One.").await;
+    assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
+    assert_eq!(next(&mut s.events).await, None, "no turn");
+    assert_eq!(s.driver.insertions(key(1)), 1);
+    assert_eq!(s.driver.after_crash().insertions(key(1)), 1);
+}
+
+/// A prompt the harness never got is in no replay; one whose acknowledgement was swallowed is, though nothing told
+/// it and no scenario played; a partial replay is not complete.
+#[tokio::test(start_paused = true)]
+async fn a_lost_prompt_is_in_no_replay_a_swallowed_one_is_and_a_partial_replay_is_not_complete() {
+    let mut s = setup().await;
+    s.driver.lose_prompts(true);
+    s.say(1, "Lost.").await;
+    s.driver.lose_prompts(false);
+    s.driver.swallow_acks(true);
+    s.driver.script(vec![Step::Emit(Normalized::TurnStarted)]);
+    s.say(2, "Swallowed.").await;
+    assert_eq!(next(&mut s.events).await, None, "nothing is told");
+    assert_eq!((s.driver.insertions(key(1)), s.driver.insertions(key(2))), (0, 1));
+    let replay = s.resumed(true).await;
+    let messages = vec![message("m1", "Swallowed.")];
+    assert_eq!(
+        replay,
+        Replay {
+            complete: true,
+            messages: messages.clone()
+        }
+    );
+    s.driver.partial_replays(true);
+    assert_eq!(
+        s.resumed(true).await,
+        Replay {
+            complete: false,
+            messages
+        }
+    );
+}
+
+/// A harness that forgets prompts vouches for none and inserts a prompt sent again with its key a second time; a
+/// message loop-manager did not send joins the transcript, and the replay.
+#[tokio::test(start_paused = true)]
+async fn a_forgetful_harness_inserts_a_key_again_and_a_foreign_message_is_replayed() {
+    let mut s = setup().await;
+    assert!(s.driver.retains_prompts());
+    s.driver.forgets_prompts();
+    assert!(!s.driver.retains_prompts());
+    for id in ["m1", "m2"] {
+        s.driver.script(vec![ended(StopReason::Completed)]);
+        s.say(1, "One.").await;
+        assert_eq!(next(&mut s.events).await, Some(acked(1, id)));
+        next(&mut s.events).await;
+    }
+    assert_eq!(s.driver.insertions(key(1)), 2);
+    s.driver.foreign_message(&s.session.0, "Interrupted.");
+    let messages = vec![
+        message("m1", "One."),
+        message("m2", "One."),
+        message("m3", "Interrupted."),
+    ];
+    assert_eq!(
+        s.resumed(true).await,
+        Replay {
+            complete: true,
+            messages
+        }
+    );
 }
