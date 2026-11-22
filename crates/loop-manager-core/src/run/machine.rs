@@ -194,6 +194,7 @@ impl RunHandler {
             );
         };
         let token_sha256 = super::token_sha256(&token);
+        let workdir = self.session_dir(&row, &config);
         let plan = self.session_plan(&row, &config, token, resume.clone());
         let (config, services) = Self::bind_services(tx, &row, config, &self.config)?;
         let split = driver.split(&config, &plan);
@@ -214,8 +215,8 @@ impl RunHandler {
             params![row.id, row.attempt],
         )?;
         tx.sql().execute(
-            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step, round, workdir) \
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, round, ?8 FROM runs WHERE id = ?1",
             // The kind that happens: a resume with no session to resume is a new session.
             params![
                 row.id,
@@ -224,7 +225,8 @@ impl RunHandler {
                 config.harness,
                 tx.now_ms(),
                 token_sha256,
-                row.step
+                row.step,
+                workdir.to_string_lossy()
             ],
         )?;
         row.set_state(tx, "starting", None)?;

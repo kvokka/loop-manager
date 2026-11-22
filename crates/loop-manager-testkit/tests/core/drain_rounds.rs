@@ -4,7 +4,7 @@
 use crate::common;
 
 use common::{beads::slow_turn, drain::SWEEP, world};
-use loop_manager_core::run::Verdict;
+use loop_manager_core::run::{Reader, Verdict};
 use serde_json::json;
 use std::{collections::BTreeSet, time::Duration};
 
@@ -53,7 +53,7 @@ async fn a_round_back_to_the_drain_gives_a_failed_bead_another_run() {
     let second = w.settle_nth(run, 2, &[], &[], &mut done).await;
     assert_eq!(second["data"], json!({ "closed": [bad], "failed": [], "refused": {} }));
     let kids: Vec<String> = w.kids(run).into_iter().map(|k| k.1).collect();
-    assert_eq!(kids, [bad.clone(), good, bad.clone()]);
+    assert_eq!(kids, [bad.clone(), good.clone(), bad.clone()]);
     for _ in 0..60 {
         if w.driver.token(run, 4).is_some() {
             break;
@@ -62,6 +62,13 @@ async fn a_round_back_to_the_drain_gives_a_failed_bead_another_run() {
     }
     w.end_attempt(run, 4, Verdict::Pass).await;
     w.until(Some(run), "run.passed", 0).await;
+    // Each child keeps the round of the drain that gave it its bead.
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let (runs, _) = reader.work("shop").unwrap();
+    let children = runs.iter().filter(|r| r.parent_run.as_deref() == Some(run));
+    let given: Vec<_> = children.map(|r| (r.bead.clone().unwrap(), r.parent_round)).collect();
+    assert_eq!(given, [(bad.clone(), Some(1)), (good, Some(1)), (bad, Some(2))]);
+    assert_eq!(runs[0].parent_round, None);
 }
 
 #[tokio::test(start_paused = true)]

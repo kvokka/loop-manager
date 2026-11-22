@@ -155,8 +155,8 @@ impl RunHandler {
             params![row.id, row.attempt],
         )?;
         tx.sql().execute(
-            "INSERT INTO attempts (run, n, kind, harness, started_ms, step) \
-             VALUES (?1, ?2, 'new_session', ?3, ?4, ?5)",
+            "INSERT INTO attempts (run, n, kind, harness, started_ms, step, round) \
+             SELECT ?1, ?2, 'new_session', ?3, ?4, ?5, round FROM runs WHERE id = ?1",
             params![row.id, row.attempt, harness, tx.now_ms(), row.step],
         )?;
         row.set_state(tx, "running", None)

@@ -16,6 +16,41 @@ pub struct AttemptSession {
     pub session: SessionRef,
 }
 
+/// A run of a project as the task view reads it (docs/api/acp.md).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkRun {
+    pub id: String,
+    pub rig: String,
+    pub formula: String,
+    pub bead: Option<String>,
+    /// The title and the parent of `bead` as the tracker last gave them to the run.
+    pub bead_title: Option<String>,
+    pub bead_parent: Option<String>,
+    pub parent_run: Option<String>,
+    /// The parent's round when the run was created.
+    pub parent_round: Option<u32>,
+    /// The run's current round.
+    pub round: u32,
+    /// Not terminal.
+    pub live: bool,
+    pub created_ms: i64,
+}
+
+/// An attempt that has a session, with the keys of the prompts it was given, oldest first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkAttempt {
+    pub run: String,
+    pub n: u32,
+    pub round: u32,
+    pub step: String,
+    pub harness: String,
+    pub session: SessionRef,
+    pub workdir: Option<String>,
+    pub started_ms: i64,
+    pub ended_ms: Option<i64>,
+    pub prompts: Vec<String>,
+}
+
 /// Which runs `Reader::runs` lists.
 #[derive(Default)]
 pub struct RunFilter {
@@ -49,7 +84,7 @@ impl Reader {
         };
         let (waiting_for, reason, outcome, round): (Option<String>, Option<String>, Option<String>, u32) = conn
             .query_row(
-                "SELECT waiting_for, reason, outcome, round FROM runs \
+                "SELECT waiting_for, reason, outcome, runs.round FROM runs \
              LEFT JOIN attempts ON attempts.run = runs.id AND attempts.n = runs.attempt WHERE id = ?1",
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
@@ -162,6 +197,58 @@ impl Reader {
             })
         })?;
         Ok((rows.collect::<Result<_, _>>()?, terminal))
+    }
+
+    /// Every run of `project` and every attempt of theirs with a session, both oldest first.
+    pub fn work(&self, project: &str) -> Result<(Vec<WorkRun>, Vec<WorkAttempt>), Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, rig, formula, bead, json_extract(bead_data, '$.title'), json_extract(bead_data, '$.epic'), \
+             parent_run, parent_round, round, state NOT IN ('passed','failed','cancelled'), created_ms \
+             FROM runs WHERE project = ?1 ORDER BY n",
+        )?;
+        let runs = stmt
+            .query_map([project], |r| {
+                Ok(WorkRun {
+                    id: r.get(0)?,
+                    rig: r.get(1)?,
+                    formula: r.get(2)?,
+                    bead: r.get(3)?,
+                    bead_title: r.get(4)?,
+                    bead_parent: r.get(5)?,
+                    parent_run: r.get(6)?,
+                    parent_round: r.get(7)?,
+                    round: r.get(8)?,
+                    live: r.get(9)?,
+                    created_ms: r.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = conn.prepare(
+            "SELECT a.run, a.n, a.round, a.step, a.harness, a.session, a.workdir, a.started_ms, a.ended_ms, \
+             (SELECT json_group_array(key) FROM (SELECT key FROM prompts p WHERE p.run = a.run AND p.attempt = a.n \
+             ORDER BY p.n)) \
+             FROM attempts a JOIN runs ON runs.id = a.run \
+             WHERE runs.project = ?1 AND a.session IS NOT NULL ORDER BY runs.n, a.n",
+        )?;
+        let attempts = stmt
+            .query_map([project], |r| {
+                let prompts: Value = r.get(9)?;
+                Ok(WorkAttempt {
+                    run: r.get(0)?,
+                    n: r.get(1)?,
+                    round: r.get(2)?,
+                    step: r.get(3)?,
+                    harness: r.get(4)?,
+                    session: SessionRef(r.get(5)?),
+                    workdir: r.get(6)?,
+                    started_ms: r.get(7)?,
+                    ended_ms: r.get(8)?,
+                    prompts: serde_json::from_value(prompts).unwrap_or_default(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((runs, attempts))
     }
 
     /// The last `seq` the outbox assigned, journaled or not; 0 before the first event.

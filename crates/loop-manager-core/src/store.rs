@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 25;
+const VERSION: i32 = 26;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -41,7 +41,8 @@ INSERT INTO consumers (name, seq) VALUES ('journal', 0);
 -- docs/design/config.md; `bead` and `bead_data` are its bead as the tracker last gave it; `step` and `step_kind` are
 -- the step of the formula it is at (a drain step has no agent, and its state is read in SQL); `as_agent` is the
 -- agent the `agent:` label of its bead names for its ai steps; `round`, `remarks` and `back_from` (a JSON array of
--- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before.
+-- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before;
+-- `parent_round` is the `round` of `parent_run` when the run was created.
 CREATE TABLE runs (
     n INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -79,14 +80,16 @@ CREATE TABLE runs (
     remarks TEXT,
     step_attempt INTEGER NOT NULL DEFAULT 1,
     step_remarks TEXT,
-    back_from TEXT
+    back_from TEXT,
+    parent_round INTEGER
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);
 -- The finisher (contracts 6.3): the attempt token by its SHA-256, the declared `outcome` and the number of `prompts`
 -- the attempt sent (remarks = prompts - 1). `waited`: its failure parked the run on an account gate, so it is
 -- outside the attempts ceiling (invariant 16). The tokens it used (contracts 4.3) and the step it ran. `skipped`:
--- the step was skipped by its `if` since, so its outcome is no longer the step's.
+-- the step was skipped by its `if` since, so its outcome is no longer the step's. `round` is the run's round at the
+-- start and `workdir` the directory of its session (none for a step with no session).
 CREATE TABLE attempts (
     run TEXT NOT NULL,
     n INTEGER NOT NULL,
@@ -110,6 +113,8 @@ CREATE TABLE attempts (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     step TEXT NOT NULL DEFAULT '1',
     skipped INTEGER NOT NULL DEFAULT 0,
+    round INTEGER NOT NULL,
+    workdir TEXT,
     PRIMARY KEY (run, n)
 );
 CREATE INDEX attempts_instance ON attempts (instance);
