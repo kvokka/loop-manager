@@ -19,7 +19,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/acp-clients.md](guide/acp-clients.md) | watching and taking over runs from an ACP client (T3 Code, Zed, JetBrains), locally or over ssh |
 | [api/frontends.md](api/frontends.md) | the HTTP API, the CLI and `loop-manager acp`; what a human sees and does with a run |
 | [api/mcp.md](api/mcp.md), [api/openapi.json](api/openapi.json) | the MCP server; the OpenAPI document |
-| [../demos/README.md](../demos/README.md) | two live examples |
+| [../demos/README.md](../demos/README.md) | four live examples |
 | [../devloop/README.md](../devloop/README.md) | the pack that develops loop-manager with loop-manager |
 
 ## How it works inside
@@ -31,7 +31,8 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [design/invariants.md](design/invariants.md) | the invariants of the core, recovery, known limits |
 | [design/contracts.md](design/contracts.md) | events, the filter and template language, hooks, the driver and tracker interfaces, run states, gates, the registry, the default policy |
 | [design/adapters.md](design/adapters.md) | harness adapters: what the core expects, adding a harness, the contract suite |
-| [harness-updates.md](harness-updates.md) | updating claude or codex, the contract scenarios |
+| [harness-updates.md](harness-updates.md) | updating the ACP adapters of claude and codex and the `agent-client-protocol` crate, the contract scenarios |
+| [design/move-to-acp.md](design/move-to-acp.md) | the owner's brief of ACP v2 harnesses, outside ACP clients and operator takeover |
 | [design/tracker-br.md](design/tracker-br.md) | the br tracker: beads and runs, rig prefixes, the limits of br |
 | [design/experiments.md](design/experiments.md) | what was measured on the real harnesses, and what was not |
 

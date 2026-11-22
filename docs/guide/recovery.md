@@ -21,13 +21,15 @@ codex plugin marketplace add kvokka/loop-manager && codex plugin add loop-manage
 ```sh
 loop-manager run list --state failed               # newest first; --project, --limit, --parent <run>, --awaiting narrow it
 loop-manager run show <run>                        # TOON by default, --json for scripts
+loop-manager run watch <run> --history             # what its sessions said and did, step by step and attempt by attempt
 ```
 
 `loop-manager run show` gives the run's `class` (`agent`, `check`, `hollow_done`, `infrastructure`) and `reason`, the
 `bead` it worked on, its `workdir`, and its `attempts`: for each one the `kind` (`new_session` or `resume`), the
 `failure_kind` ([failure kinds](../design/contracts.md#44-failure-kinds)) and the `session`, the harness's own
 reference (claude and codex `{session_id, cwd, home?}`). With it you can read or open
-the conversation with the harness's own tools. `loop-manager run list --state failed` gives the same view for
+the conversation with the harness's own tools; the run's history has the messages, tool calls and output of every
+attempt without them, and an [ACP client](acp-clients.md) shows it as a session. `loop-manager run list --state failed` gives the same view for
 every run in the list. A run of a formula with children (a `drain` or `formula` step) lists them with
 `loop-manager run list --parent <run>`.
 

@@ -1,10 +1,11 @@
 # What the demo needs besides loop-manager; mise is a convenience, any install of these tools does.
 [tools]
-codex = "0"
+"npm:@agentclientprotocol/codex-acp" = "2.9.0"          # the `codex` harness
+codex = "0"                           # `codex login`
 "github:Dicklesworthstone/beads_rust" = "0.7.6"
 jq = "1.8.2"
 rumdl = "0.3.4"                       # the format check
-node = "26.12.0"                      # for agent-browser
+node = "26.12.0"                      # for the ACP adapter and agent-browser
 "npm:agent-browser" = "0.39.0"        # the qa agent's browser; `agent-browser install` fetches Chrome once
 python = "3.15.0"                     # for a backend the coders may write in Python
 

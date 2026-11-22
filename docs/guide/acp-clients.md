@@ -22,6 +22,16 @@ on a disputed delivery with commands; any other prompt is an instruction to the 
   working directory (the project whose directory, root or rig holds it), else it shows every project. A client on
   another machine has a working directory of its own, so it names the project.
 
+The command finds its daemon as every `loop-manager` command does: `--socket`, else `LOOP_MANAGER_SOCKET`, else
+`$XDG_RUNTIME_DIR/loop-manager/loop-manager.sock`, else `loop-manager.sock` in the state directory
+(`$XDG_STATE_HOME/loop-manager`, `~/.local/state/loop-manager`). Over ssh these are the variables of the remote
+non-interactive shell, which may differ from the daemon's: `XDG_RUNTIME_DIR` comes with a systemd login session, and
+ssh passes no variable of the client's unless the server accepts it. So a remote command that must reach one daemon
+names its socket in the command itself: `ssh -T <host> loop-manager --socket <path> acp`, or
+`ssh -T <host> env LOOP_MANAGER_SOCKET=<path> loop-manager acp`. `loop-manager status` (`ssh <host> loop-manager
+status`, with the same `--socket`) shows which daemon a command reaches. A daemon that does not answer fails each
+request of the client with `-32603`; `initialize` is answered all the same.
+
 The client lists the sessions (`session/list`), then opens one (`session/resume`): a session is one run, across its
 steps and attempts. Asking for a new session gives an error that says how runs are started.
 
@@ -129,9 +139,10 @@ checked by them.
 Settings → Providers → Add provider → Local ACP command:
 
 - Command: `loop-manager`; Arguments, one per line: `acp` (and `--project`, `<name>` if wanted).
-- Over ssh — Command: `ssh`; Arguments, one per line: `-T`, `<host>`, `loop-manager`, `acp`.
+- Over ssh — Command: `ssh`; Arguments, one per line: `-T`, `<host>`, `loop-manager`, `acp`, `--project`,
+  `<name>`. To reach one daemon there, put `--socket`, `<path>` between `loop-manager` and `acp`.
 
-## Zed and JetBrains
+## Zed, JetBrains and other ACP clients
 
 Zed takes a custom agent in `agent_servers` of its `settings.json`:
 
@@ -149,7 +160,9 @@ Zed takes a custom agent in `agent_servers` of its `settings.json`:
 ```
 
 JetBrains IDEs read the same `agent_servers` object, without `type`, from `~/.jetbrains/acp.json`. Over ssh the
-command is `ssh` and the arguments are `["-T", "<host>", "loop-manager", "acp", "--project", "<name>"]`.
+command is `ssh` and the arguments are `["-T", "<host>", "loop-manager", "acp", "--project", "<name>"]`, or, for one
+daemon of that host, `["-T", "<host>", "loop-manager", "--socket", "<path>", "acp", "--project", "<name>"]`. Any other
+ACP v2 client takes the same command and arguments; `env` of the local form may carry `LOOP_MANAGER_SOCKET`.
 
 A client that speaks only version 1 of the protocol gets the error `-32022` at `initialize`: `loop-manager acp`
 serves version 2 only.

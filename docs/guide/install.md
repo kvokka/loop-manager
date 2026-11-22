@@ -135,13 +135,26 @@ provider with one, and `codex sandbox`, a warning naming the agents that run wit
 gets one line, `<name> acp`: the agent is started, asked `initialize` and stopped, with no session and no tokens
 spent; the line names the agent and its version, the negotiated protocol and the capabilities it advertised
 (`acp-agent 0.0.1, ACP protocol 2; capabilities: session.mcp (stdio, http)`), or is an `error` saying why the agent
-cannot serve a run ([adapters](../design/adapters.md#acp-v2-harnesses)). Without `--config` it asks
+cannot serve a run: an agent that speaks only version 1 of the protocol gets "`<command>` negotiated ACP protocol
+version 1; loop-manager requires version 2", or, when it refuses version 2 outright, "… supports no ACP protocol version
+loop-manager speaks (2)" ([adapters](../design/adapters.md#acp-v2-harnesses)). A setting an agent's harness has no
+mechanism for is a `config` error of `doctor`, as of `loop-manager config check`, naming the agent, the key and the
+harness: an ACP harness of the config refuses `hooks`, skills, `subagents`, a `native` block and
+`inherit_host = false`, claude the mode `dontAsk`, codex an approval policy or sandbox no permission mode stands for
+and the keys the mode sets ([config: permissions](../design/config.md#permissions),
+[harness and model](../design/config.md#harness-and-model)). Without `--config` it asks
 the running daemon (`GET /v1/doctor`), which makes the checks from inside its process, with its environment, `PATH`
 and config file; with no daemon it fails and says so. With `--config <file>` it needs no daemon and checks that file
 from the shell it runs in. Both modes print the findings in TOON by default and exit non-zero when a check has
 level `error`. Warnings (an unsupported or untested version, no login file) do not fail the command.
 `loop-manager doctor --json` prints the API's array of findings. The API returns HTTP 200 even when a finding has
 level `error`.
+
+To see what an adapter and loop-manager say to each other, set `trace = true` in its `[harness.<name>]`: every
+JSON-RPC line of each of its processes goes to `<state>/trace/<instance id>.jsonl` (mode 0600, at most 256 MiB a file,
+removed after `[history] keep_days`). The values loop-manager knows for secrets (the attempt token, the resolved `env`
+values, the logins it passes, the tokens of MCP servers) are written as `[redacted]`; prompts, the agent's messages
+and tool output are written as they are, so treat a trace as private ([adapters](../design/adapters.md#acp-v2-harnesses)).
 
 ## Directories
 

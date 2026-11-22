@@ -15,7 +15,8 @@ that starts a formula on every matching event or tick of a schedule.
 2. **Events, not ticks.** No unit of work waits for a polling timer: the delay from a cause to the reaction depends
    on no interval. Safety timers (the orphan sweep, an instance health check, resync) exist and advance nothing in
    normal work.
-3. **Native harness protocols, no tmux.** A terminal screen is never a control channel.
+3. **A protocol, no tmux.** Every harness is driven over the Agent Client Protocol, version 2; a terminal screen is
+   never a control channel.
 4. **Less code is better.** Only what a described result needs is written: no stubs, no extension points, no fields
    or flags for later. What is deferred is absent from the code altogether.
 
@@ -68,10 +69,10 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id", and a [history](design/event-model.md#history) of each run's steps, attempts, prompts and outcomes |
 | opencode | The next release, after a spike ([experiments](design/experiments.md)) |
 | pi and other harnesses | Not planned |
-| A human joining a live session, handover of control | An operator takes a run over and hands it back (`run takeover`, `run continue`); the run's orchestration stands meanwhile ([contracts 6.1](design/contracts.md#61-states)). Instructions to the session from a client are not supported |
-| An ACP hub "up" for editors | Not planned |
-| A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
-| A web interface, a dashboard | The task board is `bv`; observation is the CLI and the event stream |
+| A human working in the harness's own interface on a run | An operator takes a run over, instructs its agent, stops its turn, answers its permission requests and hands it back (`run takeover`, `run say`, `run stop`, `run permit`, `run continue`, or an [ACP client](guide/acp-clients.md)); the run's orchestration stands meanwhile ([contracts 6.1](design/contracts.md#61-states)) |
+| An ACP hub "up" for editors | Not planned: `loop-manager acp` shows an ACP client the runs that exist and starts none ([ACP clients](guide/acp-clients.md)) |
+| A human answering a permission request of a run loop-manager holds | The harness decides from the config, and the policy declines what it asks ([config](design/config.md#permissions)); an operator answers the requests of a run taken over |
+| A web interface, a dashboard | The task board is `bv`; observation is the CLI, the event stream, a run's history and ACP clients |
 | Alerting a human about a failure | Only the event journal and the logs; a notice addon is on the [roadmap](roadmap.md) |
 | Windows, several machines, several users | A local daemon of one user |
 | Checks on macOS and on x86_64 | The full suite runs on Linux arm64; release builds run `--version` on each supported platform |

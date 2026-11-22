@@ -424,9 +424,10 @@ sender, `health`, the stop ladder `stop`, `watch` (a panic of the reader task be
 
 ## Contract suite
 
-Every adapter crate has `crates/loop-manager-<name>/tests/harness/contract.rs`, the module `contract` of its one
-integration test binary, and every profile its own module of the test binary `harness` of `crates/loop-manager-acp`
-(claude `contract.rs`, codex `codex/contract.rs`): the fifteen scenarios of [harness updates](../harness-updates.md) on
+Every profile has its own module of the test binary `harness` of `crates/loop-manager-acp` (claude `contract.rs`,
+codex `codex/contract.rs`), and an adapter crate of a harness with a protocol of its own would have
+`crates/loop-manager-<name>/tests/harness/contract.rs`, the module `contract` of its one integration test binary: the
+fifteen scenarios of [harness updates](../harness-updates.md) on
 the real binary against a fake provider of `crates/loop-manager-testkit` (`anthropic` or `openai`; a harness on either
 API needs no new fake). They check the events the adapter sends, not the fake. A harness update is accepted when the
 suite passes on it (harness updates, steps).
@@ -445,8 +446,8 @@ Made for the two harnesses there are; none is changed before a harness needs it.
   the daemon died; one that gives no complete replay leaves every such delivery to the operator's choice, and one
   that does not vouch for keeping the user messages leaves it so until its replay shows a message it named.
 - Hooks of `EffectiveConfig` are in the Claude dialect (`event`, `matcher`, `command`, `timeout`). codex takes the same
-  form in its config; a harness without command hooks can only refuse an agent that has any, as a `config_error` at the
-  start of a run.
+  form in its config; a harness without command hooks can only refuse an agent that has any: an ACP harness known by
+  its config alone does so at load and again at an attempt's start (`config_error`).
 - `EffectiveConfig.targets` (the subagents a session may call) is delivered as the harness's own subagent
   definitions: claude takes them in `agents` of `_meta.claudeCode.options`, codex as agent roles
   (`agents` of its config, a generated role file per target).

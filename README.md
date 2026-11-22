@@ -34,13 +34,18 @@ Building from source and the release archives by hand: [Installing loop-manager]
 
 ## Running the daemon
 
-`loop-manager daemon` runs in the foreground. It finds the `claude`, `codex` and `br` binaries through mise (`mise which
-<name>`) when mise has them, since a daemon under systemd or launchd has no mise shims on its `PATH`, and otherwise
-on its `PATH`; a harness may name its binary in the config instead (`[harness.claude] binary = "/path/to/claude"`).
-mise is a convenience, not a requirement: install these binaries any way you like.
+`loop-manager daemon` runs in the foreground. It drives claude and codex through their ACP adapters,
+`claude-agent-acp` and `codex-acp`, and any other ACP v2 agent the config names by `command`, each a child process.
+It finds the adapters and `br` through mise (`mise which <name>`) when mise has them, since a daemon under systemd or
+launchd has no mise shims on its `PATH`, and otherwise on its `PATH`; a harness may name its adapter in the config
+instead (`[harness.claude] command = "/path/to/claude-agent-acp"`). mise is a convenience, not a requirement: install
+these binaries any way you like.
+
+An ACP client (T3 Code, Zed, JetBrains) can watch the daemon's runs, take one over, instruct its agent and hand it
+back through `loop-manager acp`, locally or over ssh: [ACP clients](docs/guide/acp-clients.md).
 
 - `loop-manager doctor` checks what the daemon needs: the config, each harness binary with its source, version and
-  login, br and its license, the mode of the state and socket directories, the state and its outbox. It asks the running
+  login, the ACP handshake of each adapter, br and its license, the mode of the state and socket directories, the state and its outbox. It asks the running
   daemon; before the first start, `loop-manager doctor --config <file>` checks a file with no daemon. It exits non-zero
   on an error; warnings (an unsupported or untested version, no login file) do not fail it.
 - Packs and addons from git, at a tag, a commit or (a pack only) the latest revision, are downloaded by `loop-manager`

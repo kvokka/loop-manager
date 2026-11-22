@@ -14,8 +14,8 @@ How the parts of loop-manager fit together and where each lives. The terms are i
 │  exec hooks of addons · bead ownership · recovery and resync             │
 └──────┬─────────────────────┬─────────────────────┬───────────────────────┘
        │ driver interface    │ tracker interface   │ events → JSONL journal
-  harness adapters       br adapter            addons (exec hooks, services)
-  claude │ codex
+  ACP driver             br adapter            addons (exec hooks, services)
+  claude │ codex │ config
 ```
 
 ## Boundaries

@@ -41,6 +41,21 @@ every 2–8 days (observed on 2026-11-10, codex 0.166.0).
    `crates/loop-manager-acp/src/profile/claude.rs` or `codex.rs`, which is `Adapter.minimum` and
    `capabilities().min_version`; below it the daemon and `loop-manager doctor` warn).
 
+## Updating the ACP crate
+
+The Rust SDK of the protocol, `agent-client-protocol`, is pinned to an exact version (`=5.5.1`) with the feature
+`unstable_protocol_v2` in three crates, which move together: `loop-manager-acp` (the driver, also with
+`unstable_end_turn_token_usage`), `loop-manager` (`loop-manager acp` and its tests' client) and
+`loop-manager-testkit` (the `acp-agent` fixture). Version 2 of the protocol is behind that feature, so a release of
+the crate may change its shapes without a major version.
+
+1. Change the pin in the three `Cargo.toml` files and run `cargo update -p agent-client-protocol`.
+2. Build, then run the driver's tests, the profile suites of both harnesses and the daemon's tests on the fixture:
+   `cargo nextest run -p loop-manager-acp -p loop-manager-testkit` and
+   `cargo nextest run -p loop-manager -E 'test(/^(acp|acp_agent|acp_client|delivery|history|manual|doctor)::/)'`.
+3. A shape the crate renamed is fixed in the driver, in `loop-manager acp` and in the fixture; a change of what goes
+   over the wire is also checked against both adapters by the profile suites, and noted in the log below.
+
 ## How the suite is built
 
 - Every harness adapter has the same 15 scenarios: 429 then success; endless 429; quota with a reset time; quota in

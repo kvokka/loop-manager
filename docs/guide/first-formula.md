@@ -114,7 +114,8 @@ and the refusal ends the turn. More in [config](../design/config.md#permissions)
 ```sh
 loop-manager config reload
 loop-manager run start hello summarize --input file=README.md
-loop-manager run watch run_2                   # its events and the session's messages live; ends with the run
+loop-manager run watch run_2                   # its events live; ends with the run
+loop-manager run watch run_2 --history         # its session's messages and tool calls, from the first
 loop-manager run show run_2
 ```
 

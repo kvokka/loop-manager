@@ -165,7 +165,9 @@ pub enum Command {
         #[arg(long)]
         key: Option<String>,
     },
-    /// Serve the daemon's runs to an ACP v2 client on stdin and stdout: list them, replay and follow their history.
+    /// Serve the daemon's runs to an ACP v2 client on stdin and stdout: list them, replay and follow their history,
+    /// take one over, instruct it, stop it, answer its permission requests, choose on a disputed delivery and hand it
+    /// back.
     Acp {
         /// The project whose runs `session/list` gives (default: the one holding the client's `cwd`, else all).
         #[arg(long)]
