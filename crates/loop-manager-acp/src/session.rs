@@ -23,7 +23,8 @@ pub(crate) struct Turn {
     in_turn: bool,
     /// The tool calls of the session not yet finished.
     tools: HashSet<String>,
-    last_activity: Option<Instant>,
+    /// When activity was last told, and whether a tool ran then.
+    last_activity: Option<(Instant, bool)>,
     /// The terminals and tool calls of the session that advertise `capabilities.cancel` now.
     cancellable: HashSet<Work>,
     /// The background work of the session's last `idle`.
@@ -152,16 +153,16 @@ impl Turn {
 
     /// At most one `activity` a second (docs/design/contracts.md 4.3).
     fn activity(&mut self, now: Instant) -> Vec<Normalized> {
+        // A tool starting or ending is told at once; the same news is told once a second.
+        let tool_running = !self.tools.is_empty();
         if self
             .last_activity
-            .is_some_and(|t| now.duration_since(t) < Duration::from_secs(1))
+            .is_some_and(|(t, running)| running == tool_running && now.duration_since(t) < Duration::from_secs(1))
         {
             return Vec::new();
         }
-        self.last_activity = Some(now);
-        vec![Normalized::Activity {
-            tool_running: !self.tools.is_empty(),
-        }]
+        self.last_activity = Some((now, tool_running));
+        vec![Normalized::Activity { tool_running }]
     }
 
     fn idle(&mut self, idle: &IdleStateUpdate) -> Vec<Normalized> {
@@ -259,10 +260,15 @@ pub(crate) fn classify(code: i32, message: &str, data: Option<&Value>) -> Failur
 /// (decision 116).
 pub(crate) fn denied(request: &schema::RequestPermissionRequest) -> Normalized {
     let subject = serde_json::to_value(&request.subject).unwrap_or_default();
+    // A tool call's details are under `toolCall`.
+    let call = match subject["toolCall"].is_null() {
+        true => &subject,
+        false => &subject["toolCall"],
+    };
     Normalized::PermissionDenied {
         tool: request.title.clone(),
-        tool_use_id: subject["toolCallId"].as_str().map(str::to_owned),
-        input: subject["rawInput"].clone(),
+        tool_use_id: call["toolCallId"].as_str().map(str::to_owned),
+        input: call["rawInput"].clone(),
         reason: Some("loop-manager answers no permission request of a run".into()),
     }
 }

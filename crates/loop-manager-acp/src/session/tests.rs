@@ -143,12 +143,15 @@ fn usage_of_a_turn_goes_as_an_increment() {
 }
 
 #[test]
-fn activity_is_coalesced_to_one_a_second_and_tells_a_running_tool() {
+fn activity_is_coalesced_to_one_a_second_and_tells_a_running_tool_at_once() {
     let (mut turn, now) = (turn(), Instant::now());
     let call = |status: &str| {
         update(json!({ "sessionUpdate": "tool_call_update", "toolCallId": "c1", "title": "sleep", "status": status }))
     };
     let activity = |tool_running| vec![Normalized::Activity { tool_running }];
+    let text = update(json!({ "sessionUpdate": "agent_message_chunk", "messageId": "m1",
+        "content": { "type": "text", "text": "Running it." } }));
+    assert_eq!(turn.update(ME, &text, now), activity(false));
     assert_eq!(turn.update(ME, &call("in_progress"), now), activity(true));
     assert!(turn.update(ME, &call("in_progress"), now).is_empty());
     let later = now + Duration::from_secs(1);
