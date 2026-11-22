@@ -40,7 +40,7 @@ These are checked by the build, not kept by agreement.
 
 | Crate | What it is | Read |
 |---|---|---|
-| `loop-manager-contract` | the contracts of the core: config assembly, the driver and tracker interfaces, the event envelope, templates and schedules, the registry of child processes. The adapters, `loop-manager-br`, `loop-manager-addons` and the test doubles depend on it, not on the engine | [contracts](design/contracts.md), [config](design/config.md) |
+| `loop-manager-contract` | the contracts of the core: config assembly, the driver and tracker interfaces, the event envelope, the run history writer, templates and schedules, the registry of child processes. The adapters, `loop-manager-br`, `loop-manager-addons` and the test doubles depend on it, not on the engine | [contracts](design/contracts.md), [config](design/config.md) |
 | `loop-manager-core` | the engine, the single writer of the runtime state: runs, attempts, triggers, deadlines, gates, the instance registry, hook execution, recovery. It re-exports the modules of `loop-manager-contract` | [event model](design/event-model.md), [invariants](design/invariants.md) |
 | `loop-manager-claude` | the claude adapter: one `claude -p` process per session, stream-json | [adapters](design/adapters.md), [contracts 4.6](design/contracts.md#46-harness-specifics-the-contract-relies-on) |
 | `loop-manager-codex` | the codex adapter: one `codex app-server` per fingerprint over stdio, a thread per session | the same |

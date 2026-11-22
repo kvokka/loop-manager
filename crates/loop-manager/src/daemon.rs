@@ -7,6 +7,7 @@ use loop_manager_core::{
     Clock, CoreHandle, Journal,
     config::Config,
     driver::Driver,
+    history::History,
     open,
     run::{self, ExecHooks, Msg, Reader},
     tracker::Tracker,
@@ -27,7 +28,8 @@ use std::{
 use tokio::{
     net::{TcpListener, UnixListener, UnixStream},
     signal::unix::{SignalKind, signal},
-    sync::mpsc,
+    sync::{mpsc, watch},
+    task::JoinHandle,
 };
 
 /// Where the daemon keeps its files (XDG base directories).
@@ -97,6 +99,9 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     let journal = Journal::new(&journal_dir);
     let mut written = journal.subscribe();
     let journal_health = journal.health();
+    // The protocol traces of the ACP harnesses go by age with the histories (docs/design/adapters.md).
+    let aged = vec![paths.state.join("trace")];
+    let history = History::open(&paths.state.join("history"), config.history.max_run_bytes, aged);
     let listener = bind(&paths.socket).await?;
     let tcp = bind_tcp(&mut config, &paths.state).await?;
     // Descendants of instances that left their group are re-parented here and reaped (invariant 7).
@@ -131,6 +136,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
             bundled: Some(loop_manager_addons::run),
         }),
         journal,
+        history.clone(),
     );
     let watchers = watch_trackers(core.clone(), beads).await;
     let token = config.api_token.clone();
@@ -139,6 +145,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         reader: Reader::open(&db).map_err(|e| format!("{}: {e}", db.display()))?,
         journal: Journal::new(&journal_dir),
         written: written.clone(),
+        history: history.clone(),
         journal_health,
         stop: tokio::sync::watch::channel(None).0,
         stopping: std::sync::OnceLock::new(),
@@ -173,6 +180,24 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     // `daemon.stopping` goes to the journal before the exit; a drain emitted it when it began, so this repeat only
     // reads its `seq`. The writer is then left as a crash leaves it: the state is crash-safe.
     let reason = served.as_ref().map_or("signal", |r| r);
+    stop_core(&core, task, &mut written, &history, reason).await;
+    // Then what the daemon started goes with it, as the next start would end it.
+    drop(watchers);
+    loop_manager_core::orphans::kill_descendants();
+    served
+        .map(|reason| reason == "restart")
+        .map_err(|e| format!("serving the API: {e}"))
+}
+
+/// Stops the core: `daemon.stopping` goes to the journal, then the writer is left as a crash leaves it, and what it
+/// committed reaches the history files.
+async fn stop_core(
+    core: &CoreHandle<Msg>,
+    task: JoinHandle<Result<(), loop_manager_core::Error>>,
+    written: &mut watch::Receiver<i64>,
+    history: &History,
+    reason: &str,
+) {
     let stopping = Msg::Stopping {
         reason: reason.to_owned(),
     };
@@ -181,15 +206,11 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         let flushed = written.wait_for(|w| *w >= seq);
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), flushed).await;
     }
-    // The core goes first, so no effect records the end of a process killed below, and none is cancelled under the
-    // writer as the runtime shuts down. Then what the daemon started goes with it, as the next start would end it.
+    // The core goes first, so no effect records the end of a process killed after, and none is cancelled under the
+    // writer as the runtime shuts down.
     task.abort();
     let _ = task.await;
-    drop(watchers);
-    loop_manager_core::orphans::kill_descendants();
-    served
-        .map(|reason| reason == "restart")
-        .map_err(|e| format!("serving the API: {e}"))
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), history.flush()).await;
 }
 
 async fn bind_tcp(config: &mut Config, state: &Path) -> Result<Option<TcpListener>, String> {

@@ -34,6 +34,15 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   that falls behind the tap's buffer (256 messages) gets `lagged` with `{"missed": n}` and goes on. The stream ends
   once it has read past the run's terminal event, and when the client leaves. A later attempt's session is picked up
   as it starts.
+- **History of a run** (`GET /v1/runs/{id}/history?from=<n>`): the records of the run's
+  [history](../design/event-model.md#history) as SSE, `id` the record's `n`, `event` its `kind`, `data` the record.
+  It sends every record from `from` (default 1; without `from`, the one after `Last-Event-ID`), then one `caught_up`
+  event with `{"n"}`, the last `n` sent (`from - 1` when none was), then each record as it is written. The stream
+  ends after the run's terminal `run` record, so a run already over gives its records and ends with no `caught_up`;
+  a reader whose `from` is past that record gets nothing and the stream ends. The cursor survives the client leaving,
+  a harness exit, new attempts and a daemon restart: reconnecting with `from` = the last `n` seen + 1 gives the rest
+  with no hole and no repeat. A failed read of the file ends the stream with `history_error` and its `message`. An
+  unknown run is 404 `not_found`.
 - `GET /v1/runs/{id}/live?chat=true` streams the conversation from the beginning of the current attempt’s session.
   Each `chat` event carries a JSON object with a `type` of `user` or `assistant` (with `text`), `tool_call`
   (with `name` and `input`), or `tool_result` (with `output`). Calls and results carry the matching `id` when supplied
@@ -47,7 +56,7 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
 formulas, packs, addons (list), config check, explain and reload; runs
-(start, list, state, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
+(start, list, state, live view, history, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
 account); events; daemon status, drain and planned restart.
 
@@ -79,6 +88,9 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   TOON documents. Journal events include their `seq`, `type` and `data`. Events outside the journal (such as
   `harness` and `lagged`) have `event` and `data` fields. With `--json`, each line contains the original SSE data as
   a JSON value. A watch exits 0 when the run's stream ends. Use `loop-manager run wait` for the outcome.
+- `loop-manager run watch <run> --history [--from <n>]` prints the records of the run's history from record `n`
+  (default 1), the `caught_up` event (as `event` and `data`) once it has printed what is written, then each record as
+  it comes, until the run's `run` record.
 - `loop-manager run watch <run> --chat` shows the conversation as readable turns, including tool input and output.
   Connecting during a tool call shows the call and follows its result. Connecting after the last AI attempt ends
   replays its chat if it is still the current attempt. With `--json`, each entry is one JSON line.

@@ -130,8 +130,9 @@ with the feature `unstable_protocol_v2`.
   session's MCP servers (service tokens arrive there). A value shorter than 8 characters is not redacted: it cannot be
   told from ordinary text (a one-letter issue prefix, a flag `1`). Prompt text, the agent's messages and tool output
   are not redacted beyond those values: a secret a tool prints in another form is written as it is.
-  `trace` is no part of the process part, so turning it on changes no fingerprint; loop-manager does not remove trace
-  files.
+  `trace` is no part of the process part, so turning it on changes no fingerprint. The periodic resync removes a
+  trace file not written for `[history] keep_days` (default 30; 0 keeps them forever;
+  [event model](event-model.md#history)).
 
 The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the
 prompt and runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, which sees the session's system prompt and

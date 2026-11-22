@@ -30,6 +30,7 @@ mod exec_env;
 mod finisher;
 mod formula_step;
 mod gates;
+mod history;
 mod hooks;
 mod instances;
 mod manual_recovery;

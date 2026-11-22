@@ -3,6 +3,7 @@
 //! commit.
 
 use crate::{BoxFuture, clock::Clock, effects, journal::Journal};
+use loop_manager_contract::history::Record;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::{
@@ -71,6 +72,8 @@ pub struct Tx<'a> {
     now_ms: i64,
     /// The envelopes of the events emitted so far, for [`Handler::emitted`].
     events: Vec<Value>,
+    /// The history records of the transaction, for [`Handler::committed`].
+    records: Vec<Record>,
 }
 
 impl Tx<'_> {
@@ -127,10 +130,34 @@ impl Tx<'_> {
         Ok(())
     }
 
+    /// Keeps a history record of `run` at `attempt` and `step` for after commit: one of a transaction rolled back is
+    /// never written (docs/design/event-model.md, "History").
+    pub(crate) fn record(&mut self, run: &str, attempt: u32, step: &str, kind: &'static str, data: Value) {
+        let data = match data {
+            Value::Object(data) => data,
+            _ => serde_json::Map::new(),
+        };
+        self.records.push(Record {
+            run: run.to_owned(),
+            ts_ms: self.now_ms,
+            attempt,
+            step: step.to_owned(),
+            kind,
+            data,
+        });
+    }
+
+    /// Commits the transaction and hands its history records to the handler.
+    fn commit<H: Handler>(self, handler: &mut H) -> Result<(), Error> {
+        self.tx.commit()?;
+        handler.committed(self.records);
+        Ok(())
+    }
+
     /// Runs `f` as one unit of the transaction: when it fails, what it wrote and emitted is undone and the rest of
     /// the transaction stays.
     pub(crate) fn unit<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, Error>) -> Result<T, Error> {
-        let emitted = self.events.len();
+        let (emitted, recorded) = (self.events.len(), self.records.len());
         self.tx.execute_batch("SAVEPOINT unit")?;
         let result = f(self);
         match result {
@@ -138,6 +165,7 @@ impl Tx<'_> {
             Err(_) => {
                 self.tx.execute_batch("ROLLBACK TO unit; RELEASE unit")?;
                 self.events.truncate(emitted);
+                self.records.truncate(recorded);
             }
         }
         result
@@ -160,6 +188,8 @@ pub trait Handler: Send + 'static {
     fn started(&mut self, _tx: &mut Tx<'_>) -> Result<(), Error> {
         Ok(())
     }
+    /// Takes the history records of a transaction once it has committed.
+    fn committed(&mut self, _records: Vec<Record>) {}
 }
 
 /// Runs committed effects. `true` means done; `false` retries the effect with backoff.
@@ -239,10 +269,11 @@ async fn run<H: Handler, E: Executor>(
             tx: conn.transaction()?,
             now_ms: clock.now_ms(),
             events: Vec::new(),
+            records: Vec::new(),
         };
         handler.started(&mut tx)?;
         settle(&mut tx, &mut handler)?;
-        tx.tx.commit()?;
+        tx.commit(&mut handler)?;
     }
     // The effects in flight die with the writer, as they would with the daemon process.
     let mut running = JoinSet::new();
@@ -323,6 +354,7 @@ fn process<H: Handler>(
         tx,
         now_ms,
         events: Vec::new(),
+        records: Vec::new(),
     };
     let reply = handler.handle(&mut tx, msg)?;
     settle(&mut tx, handler)?;
@@ -337,7 +369,7 @@ fn process<H: Handler>(
             params![key, reply.to_string(), now_ms, request],
         )?;
     }
-    tx.tx.commit()?;
+    tx.commit(handler)?;
     Ok(reply)
 }
 
@@ -359,10 +391,11 @@ fn fire_deadlines<H: Handler>(conn: &mut Connection, handler: &mut H, now_ms: i6
             tx,
             now_ms,
             events: Vec::new(),
+            records: Vec::new(),
         };
         let fired = handler.deadline(&mut tx, &id).and_then(|()| settle(&mut tx, handler));
         match fired {
-            Ok(()) => tx.tx.commit()?,
+            Ok(()) => tx.commit(handler)?,
             // Its effects are rolled back and it fires again later: a dropped deadline would leave a run with no exit
             // or a schedule silent until the next start (invariant 14).
             Err(e) => {

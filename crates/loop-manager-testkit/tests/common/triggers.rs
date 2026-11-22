@@ -3,7 +3,9 @@
 
 use super::{FILES, Lost};
 use loop_manager_core::{
-    Clock, CoreHandle, Error, Journal, config, open,
+    Clock, CoreHandle, Error, Journal, config,
+    history::History,
+    open,
     run::{self, Msg},
 };
 use loop_manager_testkit::ScriptedDriver;
@@ -71,6 +73,7 @@ pub(crate) fn daemon(dir: &Path, start_ms: i64) -> (CoreHandle<Msg>, JoinHandle<
         Default::default(),
         Arc::new(Lost),
         Journal::new(&dir.join("journal")),
+        History::open(&dir.join("history"), 64 << 20, Vec::new()),
     )
 }
 

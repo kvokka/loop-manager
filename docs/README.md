@@ -26,7 +26,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | Document | What is in it |
 |---|---|
 | [architecture.md](architecture.md) | the parts, the boundaries, the crates, the life of a run |
-| [design/event-model.md](design/event-model.md) | the single writer, the state, the journal, deadlines, resync |
+| [design/event-model.md](design/event-model.md) | the single writer, the state, the journal, the run history, deadlines, resync |
 | [design/invariants.md](design/invariants.md) | the invariants of the core, recovery, known limits |
 | [design/contracts.md](design/contracts.md) | events, the filter and template language, hooks, the driver and tracker interfaces, run states, gates, the registry, the default policy |
 | [design/adapters.md](design/adapters.md) | harness adapters: what the core expects, adding a harness, the contract suite |

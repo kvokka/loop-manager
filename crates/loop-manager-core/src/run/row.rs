@@ -122,6 +122,11 @@ impl Row {
         })
     }
 
+    /// A history record of the run at its attempt and step, written after commit (docs/design/event-model.md).
+    pub(super) fn record(&self, tx: &mut Tx<'_>, kind: &'static str, data: Value) {
+        tx.record(&self.id, self.attempt, &self.step, kind, data);
+    }
+
     pub(super) fn set_state(&mut self, tx: &mut Tx<'_>, to: &str, reason: Option<&str>) -> Result<(), Error> {
         tx.sql()
             .execute("UPDATE runs SET state = ?2 WHERE id = ?1", params![self.id, to])?;

@@ -28,8 +28,8 @@ error in every file.
   sessions on its fingerprint (a changed MCP restarts only the instances it is part of). It emits `config.reloaded`
   with the generation (1 at daemon start), then goes through the queue again: a run waiting for a limit the reload
   lifts starts at once. A change of the set of harnesses, a harness `binary` or any adapter setting
-  such as `max_sessions` (a harness `model` is fine), or of which projects have a `.beads` tracker is refused: drivers
-  and trackers are made at daemon start.
+  such as `max_sessions` (a harness `model` is fine), of which projects have a `.beads` tracker, or of
+  `[history] max_run_bytes` is refused: drivers, trackers and the history writer are made at daemon start.
 
 ## Settings (any layer)
 
@@ -390,6 +390,10 @@ start_timeout = "120s"              # the bead claim, then the ack of the first 
 queue_timeout = "168h"              # a run not started
 park_timeout = "168h"               # a parked run on a gate without `until`
 
+[history]                           # the run histories (event-model.md "History"); every key optional
+max_run_bytes = 67108864            # a run's history past this many bytes keeps only its boundaries (default 64 MiB)
+keep_days = 30                      # days an ended run's history and a protocol trace are kept (default 30; 0: forever)
+
 [inputs]                            # a value for the input of that name of any formula that declares it (see "Formula")
 focus = "security"
 
@@ -403,6 +407,10 @@ env = { GH_TOKEN = "${LOOP_MANAGER_GH_TOKEN}" }  # merged by key under the proje
 
 Each `[watchdog]` value is a duration with one unit (`ms`, `s`, `m`, `h`) from 1 ms to 8760 h; an unknown key is an
 error. A reload applies to the deadlines set from then on: a deadline already set keeps its time.
+
+`[history] max_run_bytes` is a whole number of bytes, at least 1; a reload cannot change it (the history writer is made
+at daemon start). `keep_days` is a whole number of days; a reload applies it from the next resync. An unknown key is an
+error.
 
 The file need not live in `~/.config/loop-manager`: `loop-manager daemon` takes another one with `--config <file>`, and
 so do `loop-manager doctor` and `loop-manager config check|explain`, which then check that file with no daemon instead

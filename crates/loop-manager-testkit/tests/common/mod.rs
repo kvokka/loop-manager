@@ -4,6 +4,7 @@
 use loop_manager_core::{
     BoxFuture, Clock, CoreHandle, Error, Journal, config,
     driver::{Normalized, SessionState, StopReason},
+    history::History,
     open,
     run::{self, Create, Decision, HookRunner, Msg},
 };
@@ -57,6 +58,8 @@ pub(crate) struct World {
     /// The tracker of project `shop`; it outlives restarts, as a tracker database would.
     pub(crate) tracker: MemoryTracker,
     pub(crate) journal: PathBuf,
+    /// The run histories; one writer outlives restarts, so the records of two daemons never interleave.
+    pub(crate) history: History,
     /// The managed clock of every daemon of the world: a restart does not turn time back.
     pub(crate) clock: Clock,
     hooks: Arc<dyn HookRunner>,
@@ -139,12 +142,22 @@ pub(crate) fn world_waiting(
     }
     let tracker = MemoryTracker::new();
     let clock = Clock::managed(0);
-    let (core, task) = core_on(dir.path(), clock, hooks.clone(), &driver, &tracker, service_wait);
+    let history = History::open(&dir.path().join("history"), 64 << 20, Vec::new());
+    let (core, task) = core_on(
+        dir.path(),
+        clock,
+        hooks.clone(),
+        &driver,
+        &tracker,
+        service_wait,
+        &history,
+    );
     World {
         core,
         driver,
         tracker,
         journal: dir.path().join("journal"),
+        history,
         clock,
         hooks,
         service_wait,
@@ -160,6 +173,7 @@ fn core_on(
     driver: &ScriptedDriver,
     tracker: &MemoryTracker,
     service_wait: Duration,
+    history: &History,
 ) -> (CoreHandle<Msg>, JoinHandle<Result<(), Error>>) {
     let mut config = config::load(&dir.join("config.toml")).unwrap();
     // `env <command>` runs the command itself: the HTTP probe stands in for a stdio server behind the bridge.
@@ -188,6 +202,7 @@ fn core_on(
         .into(),
         hooks,
         Journal::new(&dir.join("journal")),
+        history.clone(),
     )
 }
 
@@ -222,6 +237,7 @@ impl World {
             &self.driver,
             &self.tracker,
             self.service_wait,
+            &self.history,
         );
     }
 

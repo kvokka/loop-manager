@@ -1746,6 +1746,95 @@
         }
       }
     },
+    "/v1/runs/{id}/history": {
+      "get": {
+        "summary": "The history of a run as SSE: `id` is the record's `n`, `event` its `kind`, `data` the record. Every record from\n`from` comes first, then `event: caught_up` with `{\"n\"}`, the last `n` sent (`from - 1` when none was), then each\nrecord as it is written. The stream ends after the run's `run` record.",
+        "operationId": "history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "The first `n` to send; absent: the one after `Last-Event-ID`, else 1.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the path or query is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage` or `journal`: the daemon could not read its state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{id}/live": {
       "get": {
         "summary": "The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current\nsession as `event: harness` with no `id`; `event: lagged` with `{\"missed\": n}` when the reader fell behind the\nsession. With `chat=true`, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.",

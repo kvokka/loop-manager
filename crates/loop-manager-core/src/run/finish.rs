@@ -58,6 +58,7 @@ impl RunHandler {
             "UPDATE attempts SET outcome = ?3 WHERE run = ?1 AND n = ?2",
             params![run, n, json!(outcome).to_string()],
         )?;
+        row.record(tx, "outcome", json!(outcome));
         Self::stop_background(tx, &row)?;
         answer("accepted")
     }
@@ -255,6 +256,7 @@ impl RunHandler {
         row.step_attempt = if again.is_some() { row.step_attempt + 1 } else { 1 };
         let left = std::mem::replace(&mut row.agent, agent);
         (row.step, row.step_kind) = (next.name, next.kind.name().to_owned());
+        self.step_entered(tx, &row)?;
         let frees = left != row.agent && self.config.max_runs(&row.project, &left).is_some();
         if ran {
             row.set_state(tx, "preparing", None)?;

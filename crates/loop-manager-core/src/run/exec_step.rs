@@ -159,6 +159,8 @@ impl RunHandler {
              VALUES (?1, ?2, 'new_session', ?3, ?4, ?5)",
             params![row.id, row.attempt, harness, tx.now_ms(), row.step],
         )?;
+        let data = json!({ "attempt_kind": "new_session", "harness": harness, "session": null });
+        row.record(tx, "attempt", data);
         row.set_state(tx, "running", None)
     }
 
@@ -168,6 +170,7 @@ impl RunHandler {
             "UPDATE attempts SET outcome = ?3 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, json!(outcome).to_string()],
         )?;
+        row.record(tx, "outcome", json!(outcome));
         tx.clear_deadline(&row.deadline("state"))?;
         row.set_state(tx, "finishing", None)?;
         let data = json!({ "run": row.view(), "outcome": outcome, "remarks": 0 });

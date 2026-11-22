@@ -3,29 +3,72 @@
 
 use crate::{Error, Tx, driver::PromptKey};
 use rusqlite::{OptionalExtension, params};
+use serde_json::{Value, json};
 
 /// The rank of a state in the order of delivery, in SQL.
 const RANK: &str = "CASE {} WHEN 'intent' THEN 0 WHEN 'sent' THEN 1 WHEN 'acked' THEN 2 ELSE 3 END";
 
-/// Records the decision to send prompt `n` of the attempt; a decision taken again (after a crash) replaces it.
-pub(super) fn intent(tx: &Tx<'_>, run: &str, attempt: u32, n: u32, key: PromptKey, text: &str) -> Result<(), Error> {
+/// Records the decision to send prompt `n` of the attempt; a decision taken again (after a crash) replaces it. The
+/// history gets the record `prompt` (docs/design/event-model.md, "History").
+pub(super) fn intent(
+    tx: &mut Tx<'_>,
+    run: &str,
+    attempt: u32,
+    n: u32,
+    key: PromptKey,
+    text: &str,
+) -> Result<(), Error> {
+    let key = key.0.to_string();
     tx.sql().execute(
         "INSERT INTO prompts (run, attempt, n, key, text, state) VALUES (?1, ?2, ?3, ?4, ?5, 'intent') \
          ON CONFLICT (run, attempt, n) DO UPDATE SET key = ?4, text = ?5, state = 'intent'",
-        params![run, attempt, n, key.0.to_string(), text],
+        params![run, attempt, n, key, text],
     )?;
-    Ok(())
+    record(
+        tx,
+        run,
+        attempt,
+        "prompt",
+        json!({ "key": key, "source": "lm", "text": text }),
+    )
 }
 
-/// Moves the prompt `key` of the attempt (`None`: every prompt of it) on to `state`.
-pub(super) fn advance(tx: &Tx<'_>, run: &str, attempt: u32, key: Option<PromptKey>, state: &str) -> Result<(), Error> {
+/// Moves the prompt `key` of the attempt (`None`: every prompt of it) on to `state`; each prompt that moves gets the
+/// history record `prompt_state`.
+pub(super) fn advance(
+    tx: &mut Tx<'_>,
+    run: &str,
+    attempt: u32,
+    key: Option<PromptKey>,
+    state: &str,
+) -> Result<(), Error> {
     let sql = format!(
-        "UPDATE prompts SET state = ?4 WHERE run = ?1 AND attempt = ?2 AND (?3 IS NULL OR key = ?3) AND {} < {}",
+        "UPDATE prompts SET state = ?4 WHERE run = ?1 AND attempt = ?2 AND (?3 IS NULL OR key = ?3) AND {} < {} \
+         RETURNING key",
         RANK.replace("{}", "state"),
         RANK.replace("{}", "?4")
     );
-    tx.sql()
-        .execute(&sql, params![run, attempt, key.map(|k| k.0.to_string()), state])?;
+    let moved: Vec<String> = {
+        let mut stmt = tx.sql().prepare(&sql)?;
+        let rows = stmt.query_map(params![run, attempt, key.map(|k| k.0.to_string()), state], |r| r.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for key in moved {
+        record(tx, run, attempt, "prompt_state", json!({ "key": key, "state": state }))?;
+    }
+    Ok(())
+}
+
+/// A history record of `attempt` of `run`, at the step of that attempt.
+fn record(tx: &mut Tx<'_>, run: &str, attempt: u32, kind: &'static str, data: Value) -> Result<(), Error> {
+    let step: Option<String> = (tx.sql())
+        .query_row(
+            "SELECT step FROM attempts WHERE run = ?1 AND n = ?2",
+            params![run, attempt],
+            |r| r.get(0),
+        )
+        .optional()?;
+    tx.record(run, attempt, &step.unwrap_or_default(), kind, data);
     Ok(())
 }
 

@@ -65,7 +65,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | An arbitrary step graph inside a formula: branches, nested steps, parallel branches | A formula is a linear list of steps with a bounded return to an earlier step; a step may be skipped by its `if`. A planner agent splits the work: it files beads, and a `drain` step gives them to executors |
 | Agents that live permanently | A session per run |
 | Mail and nudges between agents | A separate addon, later |
-| Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id" |
+| Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id", and a [history](design/event-model.md#history) of each run's steps, attempts, prompts and outcomes |
 | opencode | The next release, after a spike ([experiments](design/experiments.md)) |
 | pi and other harnesses | Not planned |
 | ACP for claude and codex | Their native protocols; a harness the build has no adapter for is an ACP v2 agent named in the config ([adapters](design/adapters.md#acp-v2-harnesses)) |

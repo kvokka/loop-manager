@@ -202,6 +202,16 @@ pub(super) struct OrchestratorFile {
     pub inputs: Map<String, Value>,
     #[serde(default)]
     pub exec: super::env::ExecFile,
+    #[serde(default)]
+    pub history: HistoryFile,
+}
+
+/// `[history]`: the limits of the run histories (docs/design/config.md).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HistoryFile {
+    pub max_run_bytes: Option<std::num::NonZeroU64>,
+    pub keep_days: Option<u32>,
 }
 
 /// A harness agents may choose and its defaults (docs/design/config.md).

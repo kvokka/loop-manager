@@ -51,8 +51,11 @@ pub enum RunCommand {
     Watch {
         id: String,
         /// Show messages, tool calls and results from the beginning of the current session, then follow live.
-        #[arg(long, conflicts_with = "from")]
+        #[arg(long, conflicts_with_all = ["from", "history"])]
         chat: bool,
+        /// Print the records of the run's history from record `--from` (default 1), then follow them to the run's end.
+        #[arg(long)]
+        history: bool,
         #[arg(long)]
         from: Option<i64>,
     },
@@ -204,9 +207,10 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
         RunCommand::Watch { id, chat: true, .. } => {
             return super::chat::follow(client.stream(&run_path(&id, "/live?chat=true")).await?, json).await;
         }
-        RunCommand::Watch { id, from, .. } => {
+        RunCommand::Watch { id, from, history, .. } => {
             let query = from.map(|f| format!("?from={f}")).unwrap_or_default();
-            follow(client.stream(&run_path(&id, &format!("/live{query}"))).await?, json).await?;
+            let stream = if history { "/history" } else { "/live" };
+            follow(client.stream(&run_path(&id, &format!("{stream}{query}"))).await?, json).await?;
         }
         RunCommand::Wait { ids, timeout } => return super::wait::wait(client, json, ids, timeout).await,
         RunCommand::Cancel {

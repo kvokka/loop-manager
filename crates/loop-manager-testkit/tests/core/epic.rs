@@ -94,6 +94,7 @@ async fn an_epic_of_fifteen_beads_each_blocked_by_the_last_runs_to_its_end() {
         [("shop".to_owned(), Arc::new(tracker.clone()) as Arc<dyn Tracker>)].into(),
         Arc::new(ExecHooks::default()),
         Journal::new(&journal),
+        loop_manager_core::history::History::open(&dir.path().join("history"), 64 << 20, Vec::new()),
     );
 
     let of = |all: &[Value], kind: &str| all.iter().filter(|e| e["type"] == kind).cloned().collect::<Vec<_>>();

@@ -22,6 +22,7 @@ mod doctor_version;
 mod exec_env;
 mod git_cache;
 mod guides;
+mod history;
 mod lessons;
 mod mcp;
 mod replies;

@@ -6,6 +6,7 @@ pub(crate) mod config;
 mod daemon;
 mod events;
 mod gates;
+mod history;
 mod instances;
 mod live;
 pub mod mcp;
@@ -43,6 +44,8 @@ pub struct Api {
     pub journal: Journal,
     /// The last `seq` the daemon's journal wrote (`Journal::subscribe`).
     pub written: watch::Receiver<i64>,
+    /// The run histories, read by `GET /v1/runs/{id}/history`.
+    pub history: loop_manager_core::history::History,
     /// How the journal writes go (`Journal::health`).
     pub journal_health: watch::Receiver<loop_manager_core::JournalHealth>,
     /// The daemon's own facts for `GET /v1/daemon`.
@@ -93,6 +96,7 @@ fn router() -> OpenApiRouter<Arc<Api>> {
         .routes(routes!(runs::create, runs::list))
         .routes(routes!(runs::get))
         .routes(routes!(live::live))
+        .routes(routes!(history::history))
         .routes(routes!(runs::cancel))
         .routes(routes!(runs::resolve))
         .routes(routes!(runs::finish))

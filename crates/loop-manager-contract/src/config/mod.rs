@@ -72,6 +72,16 @@ pub struct Config {
     pub service_wait: Duration,
     /// Runtime prefix for service commands. The Linux daemon supplies its parent-death launcher.
     pub service_prefix: Vec<String>,
+    pub history: HistoryLimits,
+}
+
+/// `[history]` of the orchestrator file (docs/design/event-model.md, "History").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryLimits {
+    /// The bytes of a run's history past which only its boundary records are written; fixed at daemon start.
+    pub max_run_bytes: u64,
+    /// The days the history of an ended run, and a protocol trace, are kept; 0: forever.
+    pub keep_days: u32,
 }
 
 /// The thresholds of `[watchdog]` in the orchestrator file, in milliseconds (contracts 6.1).

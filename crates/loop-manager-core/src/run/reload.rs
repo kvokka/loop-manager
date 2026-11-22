@@ -31,6 +31,12 @@ impl RunHandler {
         if config.api_tcp != self.config.api_tcp {
             return Err(super::rejected("restart the daemon to change `api_tcp`"));
         }
+        // The history writer is made at start with it.
+        if config.history.max_run_bytes != self.config.history.max_run_bytes {
+            return Err(super::rejected(
+                "restart the daemon to change `[history] max_run_bytes`",
+            ));
+        }
         let untracked = config
             .projects
             .iter()

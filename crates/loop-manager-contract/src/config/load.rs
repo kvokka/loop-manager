@@ -109,6 +109,10 @@ impl Loader {
             service_prefix: Vec::new(),
             addon_data: None,
             service_wait: std::time::Duration::from_secs(30),
+            history: super::HistoryLimits {
+                max_run_bytes: raw.history.max_run_bytes.map_or(64 << 20, std::num::NonZeroU64::get),
+                keep_days: raw.history.keep_days.unwrap_or(30),
+            },
         };
         super::subagents::check(&mut self, &config);
         // A harness of the build the steps run on gets its defaults, none without its section.

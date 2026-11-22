@@ -36,12 +36,25 @@ impl RunHandler {
         )?;
         row.set_state(tx, "preparing", None)?;
         row.emit(tx, "run.started", json!({ "run": row.view() }))?;
+        self.step_entered(tx, &row)?;
         match (row.bead.clone(), self.task_text(&row)) {
             // The prompt may show the bead: it renders once the claim returned it.
             (Some(bead), _) if row.bead_data.is_none() => self.claim(tx, &row, &bead),
             (None, Some(text)) => self.create_root(tx, row, &text),
             _ => self.render_and_prepare(tx, row),
         }
+    }
+
+    /// The history record `step`: the run is at the start of its step (docs/design/event-model.md, "History").
+    pub(super) fn step_entered(&self, tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
+        let round: u32 = (tx.sql()).query_row("SELECT round FROM runs WHERE id = ?1", [&row.id], |r| r.get(0))?;
+        let project = self.config.projects.iter().find(|p| p.name == row.project);
+        let formula = project.and_then(|p| p.formula(&row.formula).ok()).map(|(_, f)| f);
+        let index = formula.and_then(|f| f.steps.iter().position(|s| s.name == row.step));
+        let data = json!({ "index": index, "step_kind": row.step_kind, "round": round,
+            "step_attempt": row.step_attempt });
+        row.record(tx, "step", data);
+        Ok(())
     }
 
     /// Applies the `run.preparing` modifications of the hooks (contracts 3.2), then starts the first attempt.
@@ -213,20 +226,24 @@ impl RunHandler {
             "UPDATE runs SET attempt = ?2, next = NULL WHERE id = ?1",
             params![row.id, row.attempt],
         )?;
+        // The kind that happens: a resume with no session to resume is a new session.
+        let happens = if resume.is_some() { "resume" } else { "new_session" };
         tx.sql().execute(
             "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            // The kind that happens: a resume with no session to resume is a new session.
             params![
                 row.id,
                 row.attempt,
-                if resume.is_some() { "resume" } else { "new_session" },
+                happens,
                 config.harness,
                 tx.now_ms(),
                 token_sha256,
                 row.step
             ],
         )?;
+        let session = resume.as_ref().map(|s| &s.0);
+        let data = json!({ "attempt_kind": happens, "harness": config.harness, "session": session });
+        row.record(tx, "attempt", data);
         row.set_state(tx, "starting", None)?;
         let split = match split {
             Ok(split) => split,
@@ -369,6 +386,7 @@ impl RunHandler {
             "UPDATE attempts SET ended_ms = ?3, failure = ?4 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, tx.now_ms(), failure.map(Value::to_string)],
         )?;
+        row.record(tx, "attempt_end", json!({ "failure": failure }));
         if let Some(handle) = handle {
             let session: Value = session.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let handle: Value = serde_json::from_str(&handle).unwrap_or_default();
@@ -402,6 +420,7 @@ impl RunHandler {
         )?;
         row.class = class.map(str::to_owned);
         row.set_state(tx, state, Some(reason))?;
+        row.record(tx, "run", json!({ "state": state, "class": class, "reason": reason }));
         if state == "failed" {
             self.end_child(tx, &row)?;
         }

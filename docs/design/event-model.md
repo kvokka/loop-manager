@@ -47,7 +47,8 @@ all of them share.
 - No status files, PID files or lock files. One daemon per state directory: the daemon holds an exclusive `flock`
   on the state directory itself (`crates/loop-manager/src/daemon.rs`, `lock`); the OS drops it with the process, so a
   crash leaves nothing stale. Whether a process is alive is read from the process table: pid plus its kernel start time.
-- The state directory and `journal/` are 0700, the database and journal files 0600, whatever the umask.
+- The state directory, `journal/` and `history/` are 0700, the database, journal and history files 0600, whatever
+  the umask.
 
 ## Journal
 
@@ -61,8 +62,51 @@ all of them share.
   of `GET /v1/events`), and the consumer recovers by reading the state over the API.
 - Only orchestration-level events enter it ([contracts.md 1.3](contracts.md#13-payloads)). The core neither stores
   the content of a conversation (model messages, tool calls) nor passes it through its state: the live view relays
-  the adapter's stream directly (`GET /v1/runs/{id}/live`, [frontends](../api/frontends.md)), and the history is
-  the harness transcript, reached by the session reference.
+  the adapter's stream directly (`GET /v1/runs/{id}/live`, [frontends](../api/frontends.md)), and the conversation
+  is the harness transcript, reached by the session reference. The work of one run, step by step, is in its
+  [history](#history).
+
+## History
+
+- Every run has a working history from its first step: `$XDG_STATE_HOME/loop-manager/history/<run>.jsonl`, append
+  only, one record per line (`crates/loop-manager-contract/src/history.rs`). It is not in SQLite and not in the
+  journal: it is read per run, from a cursor, and lives as long as `[history] keep_days` says, not as long as the
+  journal's rotation.
+- A record is `{"n", "ts_ms", "attempt", "step", "kind", ...}`: `n` counts the records of the run from 1 with no
+  gap and is the cursor a reader resumes from; `attempt` is the run's attempt number when the record was made (0
+  before the first) and `step` the name of its step; the other fields are those of the `kind`. A reader takes a kind
+  it does not know as one more record.
+- One task writes every history file (`History`), fed through a channel, so all the writers of a run share one order.
+  The core gives it the records of a transaction after the transaction commits (`Tx::record`, then
+  `Handler::committed`): the single writer never waits for the disk, and a record of a transaction rolled back is
+  never written. A crash between a commit and the write of its records loses those records; `n` stays gapless. The
+  lines are not synced one by one. At its first record of a run the task reads the run's file: `n` goes on from its
+  last line, and a torn last line (a write cut short) is cut off. A stopping daemon waits up to 5 s for the queued
+  records to be written.
+- The kinds the core writes, each next to the state change it records:
+
+  | `kind` | When | Fields |
+  |---|---|---|
+  | `step` | the run enters a step (its first, the next, a step a check sends it back to, a repeat) | `index` (the step's place in the formula, from 0), `step_kind`, `round`, `step_attempt` |
+  | `attempt` | an attempt starts | `attempt_kind` (`new_session`, `resume`), `harness` (`exec`, `drain`, `formula` and `await` for those steps), `session` (the session it resumes, else `null`) |
+  | `attempt_end` | an attempt ends | `failure` (contracts 1.3), `null` when it did not fail |
+  | `prompt` | the core decides to send a prompt ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager), `text` |
+  | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`) |
+  | `outcome` | the finisher's outcome is accepted, or a step without a session (exec, drain, formula, await) has its outcome | `result`, `summary`, `data` |
+  | `run` | the run is terminal | `state`, `class`, `reason` |
+  | `truncated` | the run went over `[history] max_run_bytes` | `max_run_bytes` |
+
+- A record whose line would be over 64 KiB is cut to it: the longest strings in it are shortened (at a character
+  boundary) until it fits, and it gets `truncated: true`. A run whose file would grow over `[history] max_run_bytes`
+  (default 64 MiB) gets one `truncated` record, and from then on only its boundary records (`step`, `attempt`,
+  `attempt_end`, `run`) are written. A writer that reads the file again after a restart finds the `truncated` record
+  and goes on the same way.
+- `GET /v1/runs/{id}/history` streams the records ([frontends](../api/frontends.md)). The run's `run` record is its
+  last: a reader stops there.
+- Retention: the periodic resync (below) removes the history files of ended runs (whose last record is `run`) not
+  written for `[history] keep_days` (default 30; 0 keeps them forever), and the files under `<state>/trace/` (the
+  [protocol traces](adapters.md) of ACP harnesses) older than that by their modification time. The task that writes
+  the histories removes them, so the single writer never waits for it.
 
 ## Effects
 
@@ -97,10 +141,11 @@ Resync is not a tick: it advances nothing in normal operation and only catches l
 - At daemon start, after recovery (`run/recover.rs`): every recorded instance is checked by pid + start time
   and stopped, the trackers are read again, and the process table is checked for markers (below).
 - Every 5 minutes (deadline `daemon:resync`, a constant): the trackers are read again whatever their watchers say
-  (`sync_trackers`), and the driver is asked for the health of every instance record not `stopping` that has a
-  process (`check_instances`; pid + start time for claude and codex). The check is one effect per daemon: while
-  one still waits in the queue (backoff, a slow health call), a newer one is dropped with its newer list of
-  records; the next resync catches what that list would have, and a stale list is harmless (see below).
+  (`sync_trackers`), the driver is asked for the health of every instance record not `stopping` that has a
+  process (`check_instances`; pid + start time for claude and codex), and the old [history](#history) and trace
+  files go. The check is one effect per daemon: while one still waits in the queue (backoff, a slow health call), a
+  newer one is dropped with its newer list of records; the next resync catches what that list would have, and a
+  stale list is harmless (see below).
 - A process found dead whose record still holds that process and is not `stopping` is taken as its lost exit: the
   instance fails as `harness_crash` and so do the attempts on it. A gone process is not ambiguous, so this is a
   normal transition, not `resync.diverged`. A record that changed since the check is left alone.

@@ -34,6 +34,7 @@ use crate::{
     clock::Clock,
     config::Config,
     driver::{Driver, Failure, Normalized},
+    history::{History, Record},
     journal::Journal,
     tracker::Tracker,
     writer::{self, CoreHandle, Error, Handler, Tx},
@@ -57,7 +58,11 @@ pub use read::{AttemptSession, Reader, RunFilter};
 type Drivers = Arc<BTreeMap<String, Arc<dyn Driver>>>;
 
 /// Starts the writer with the run machine on `conn` (opened by `store::open`), one driver per harness and the
-/// trackers of the projects that have one, by project name.
+/// trackers of the projects that have one, by project name. The run records go to `history` after each commit.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each part of the core comes from the daemon that starts it"
+)]
 pub fn start(
     conn: Connection,
     clock: Clock,
@@ -66,6 +71,7 @@ pub fn start(
     trackers: BTreeMap<String, Arc<dyn Tracker>>,
     hooks: Arc<dyn HookRunner>,
     journal: Journal,
+    history: History,
 ) -> (CoreHandle<Msg>, JoinHandle<Result<(), Error>>) {
     let drivers: Drivers = Arc::new(drivers.into_iter().map(|d| (d.harness().to_owned(), d)).collect());
     let trackers = Arc::new(trackers);
@@ -95,6 +101,7 @@ pub fn start(
             stopping: None,
             drivers,
             trackers,
+            history,
         },
         executor,
         journal,
@@ -126,6 +133,7 @@ struct RunHandler {
     stopping: Option<(i64, String)>,
     drivers: Drivers,
     trackers: beads::Trackers,
+    history: History,
 }
 
 impl Handler for RunHandler {
@@ -209,6 +217,12 @@ impl Handler for RunHandler {
         self.match_triggers(tx, events)
     }
 
+    fn committed(&mut self, records: Vec<Record>) {
+        for record in records {
+            self.history.append(record);
+        }
+    }
+
     fn started(&mut self, tx: &mut Tx<'_>) -> Result<(), Error> {
         self.recover(tx)?;
         // The resync at the start (docs/design/invariants.md): what the last daemon left behind is checked at once.
@@ -231,6 +245,11 @@ impl RunHandler {
     fn resync(&mut self, tx: &mut Tx<'_>) -> Result<(), Error> {
         self.sync_trackers(tx, None, "resync")?;
         Self::check_instances(tx)?;
+        // The history writer removes the files in its own task: the writer never waits for the disk.
+        if let Some(days) = std::num::NonZeroU32::new(self.config.history.keep_days) {
+            self.history
+                .prune(std::time::Duration::from_secs(u64::from(days.get()) * 86_400));
+        }
         tx.set_deadline(RESYNC, tx.now_ms() + RESYNC_MS)
     }
 }

@@ -7,6 +7,7 @@ pub mod config;
 pub mod cron;
 pub mod driver;
 mod event;
+pub mod history;
 pub mod orphans;
 pub mod template;
 pub mod toon;
