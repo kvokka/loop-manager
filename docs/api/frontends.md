@@ -168,6 +168,9 @@ tokens in every session, so an agent names it in its own config
 - Integration tests on the real daemon: `crates/loop-manager/tests/e2e/api.rs`, `cli.rs`, `mcp.rs`; the live view and
   `run watch` on the real claude (`crates/loop-manager/tests/e2e/claude.rs`); the `lagged` path on a real broadcast
   channel (`api/live.rs`).
+- The task operations and `task list|show|watch`: `crates/loop-manager/tests/e2e/tasks.rs`. `loop-manager acp` as an
+  editor drives it, on the real claude and codex on the fake providers: `crates/loop-manager/tests/e2e/acp.rs` and
+  `acp/` (rounds and repeated runs, resumed, replaced and continued sessions, a lost transcript, a codex thread).
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.
 

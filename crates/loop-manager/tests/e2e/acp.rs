@@ -247,6 +247,9 @@ async fn task(provider: &Provider) -> (Daemon, String, String, String) {
     (d, epic, bead, run)
 }
 
+/// "Discovery, nested replay and live updates" of an active run, "a direct child-bead launch", "a beadless run",
+/// "snapshot vs reopen", "viewing must not start, resume, prompt, cancel or modify LM work" and "continued execution
+/// after a viewer disconnects"; a resume cut short by another, and a close, are answered.
 #[tokio::test(flavor = "multi_thread")]
 async fn acp_replays_a_task_follows_its_tool_reads_only_and_survives_the_client() {
     let finish = format!("{} finish pass --summary built", common::EXE);
