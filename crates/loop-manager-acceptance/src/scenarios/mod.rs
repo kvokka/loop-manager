@@ -27,12 +27,21 @@ mod c29_repeat;
 mod c30_drain;
 mod c31_formula;
 mod c34_background;
+mod c36_config_harness;
+mod c37_acp_client;
+mod c38_manual;
+mod c39_delivery;
 
 use crate::{
-    Launch, Scenario,
+    Env, Launch, Scenario,
     daemon::{Daemon, write},
 };
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Kept apart from the marker text, so the marker check of CI does not take the template for a marker.
 pub(crate) const MARK: &str = "MEASURE";
@@ -230,6 +239,36 @@ pub(crate) const ALL: &[Scenario] = &[
         launch: Launch::Ci,
         run: |env| Box::pin(c34_background::run(env)),
     },
+    Scenario {
+        criterion: "36",
+        title: "a harness added to the config runs an ai step through the ACP driver on the same binary once a new \
+                daemon takes it, a reload refusing it; doctor probes it; an ACP v1 agent fails its attempt and \
+                doctor, naming the version",
+        launch: Launch::Ci,
+        run: |env| Box::pin(c36_config_harness::run(env)),
+    },
+    Scenario {
+        criterion: "37",
+        title: "an ACP client on `loop-manager acp` lists the runs, opens one late with the tool's output so far, takes \
+                it over and hands it back while a second client watches, goes and comes back, takes it over by a \
+                prompt and the run passes in the same attempt",
+        launch: Launch::Ci,
+        run: |env| Box::pin(c37_acp_client::run(env)),
+    },
+    Scenario {
+        criterion: "38",
+        title: "manual mode through the CLI: a stopped exec step waits for Continue, a stale attempt changes nothing, \
+                an instruction is queued once, a pass declared while manual moves the run once after Continue",
+        launch: Launch::Ci,
+        run: |env| Box::pin(c38_manual::run(env)),
+    },
+    Scenario {
+        criterion: "39",
+        title: "kill -9 of the daemon or the agent at the delivery boundary: not delivered, delivered or disputed; a \
+                disputed run taken over stays manual across a crash until the operator chooses; no prompt twice",
+        launch: Launch::Ci,
+        run: |env| Box::pin(c39_delivery::run(env)),
+    },
 ];
 
 /// A harness on its cheapest real model with the host login: the request scenarios run on each.
@@ -390,4 +429,37 @@ pub(crate) fn hold(root: &Path, name: &str, secs: u32) {
     let path = root.join(format!("config/loop-manager/shop/web/{name}"));
     write(&path, format!("#!/usr/bin/env bash\nread -rt {secs} <> <(:) || true\n"));
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The `acp-agent` fixture of `loop-manager-testkit`, a scripted ACP v2 agent without a model, built next to the
+/// binary under test.
+pub(crate) fn acp_agent(env: &Env) -> PathBuf {
+    let agent = env.loop_manager.with_file_name("acp-agent");
+    assert!(
+        agent.is_file(),
+        "no {}: build it beside loop-manager, `cargo build -p loop-manager-testkit --bin acp-agent`",
+        agent.display()
+    );
+    agent
+}
+
+/// Project `shop` with harness `fake`, the `acp-agent` fixture with `args` (TOML array items) that runs `command` as
+/// its tool, and `top` before the tables of the orchestrator config; agent `dev` on it and the formula `build` of one
+/// `ai` step of `dev`.
+pub(crate) fn fake_agent(env: &Env, root: &Path, top: &str, args: &str, command: &str) {
+    write(
+        root.join("config/loop-manager/config.toml"),
+        format!(
+            "projects = [\"shop\"]\n{top}[harness.fake]\ncommand = \"{}\"\nargs = [{args}]\n[harness.fake.env]\n\
+             ACP_AGENT_COMMAND = \"{command}\"\n",
+            acp_agent(env).display()
+        ),
+    );
+    let shop = root.join("config/loop-manager/shop");
+    write(shop.join("agents/dev/agent.toml"), "harness = \"fake\"\n");
+    write(
+        shop.join("formulas/build.toml"),
+        "name = \"build\"\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+    );
+    write(shop.join("agents/dev/prompt.template.md"), "Build {{ rig.name }}.");
 }

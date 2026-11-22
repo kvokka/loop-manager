@@ -238,6 +238,50 @@ pub(crate) const ALL: &[Scenario] = &[
             ))
         },
     },
+    Scenario {
+        criterion: "37",
+        title: "`loop-manager acp` to an SDK client of ACP v2: list, replay and live follow across a daemon restart, \
+                commands and plain prompts that take a run over and hand it back, a stale screen refused, \
+                `session/cancel`, permission requests of a manual run, a disputed run's choice",
+        launch: Launch::Ci,
+        run: |env| {
+            Box::pin(tests(
+                env,
+                "-p loop-manager -E test(/^acp_client::|^acp::a_client_attaching_while_a_tool_hangs/)",
+                14,
+            ))
+        },
+    },
+    Scenario {
+        criterion: "38",
+        title: "the matrix of manual mode on the scripted driver and the fixture: no clock while manual and every \
+                budget whole after Continue, a parent formula step and a drain wait for a manual child while an \
+                independent sibling goes on, Stop of a turn and of an exec step, instructions queued once, permission \
+                requests answered once, a restart keeps it all",
+        launch: Launch::Ci,
+        run: |env| {
+            Box::pin(tests(
+                env,
+                "-p loop-manager-testkit -p loop-manager -E binary(core)&test(/^(manual|stop|permissions|instruct)::/)\
+                 |binary(e2e)&test(/^manual::/)",
+                44,
+            ))
+        },
+    },
+    Scenario {
+        criterion: "39",
+        title: "the delivery check on the scripted driver and the fixture: the three outcomes after a crash of the \
+                daemon or the agent, a dispute across restarts settled once by two operators at once, a resent \
+                prompt the agent holds not inserted again, a parent's timeout given back",
+        launch: Launch::Ci,
+        run: |env| {
+            Box::pin(tests(
+                env,
+                "-p loop-manager-testkit -p loop-manager -E test(/^delivery::/)",
+                18,
+            ))
+        },
+    },
 ];
 
 /// The workspace this binary was built from.

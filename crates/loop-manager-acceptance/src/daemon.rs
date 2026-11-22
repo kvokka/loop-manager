@@ -107,10 +107,20 @@ impl Daemon {
 
     /// `loop-manager <args>` as a client of this daemon.
     pub(crate) fn cli(&self, args: &[&str]) -> std::process::Output {
+        self.program().args(args).output().unwrap()
+    }
+
+    /// `loop-manager <args> --json` as a client of this daemon: whether it succeeded, and its answer.
+    pub(crate) fn cli_json(&self, args: &[&str]) -> (bool, Value) {
+        let out = self.cli(&[args, &["--json"]].concat());
+        let answer = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|_| panic!("loop-manager {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+        (out.status.success(), answer)
+    }
+
+    /// `loop-manager` with the environment of a client of this daemon, to be given its arguments.
+    pub(crate) fn program(&self) -> Command {
         command(&self.env, self.dir.path(), &self.home)
-            .args(args)
-            .output()
-            .unwrap()
     }
 
     pub(crate) fn path(&self, rel: &str) -> PathBuf {
@@ -175,6 +185,38 @@ impl Daemon {
 }
 
 impl Daemon {
+    /// Polls the view of `run` up to `within` until `ready` holds for it; `what` says what did not come.
+    pub(crate) async fn until_view(
+        &self,
+        run: &str,
+        what: &str,
+        within: Duration,
+        ready: impl Fn(&Value) -> bool,
+    ) -> Value {
+        let deadline = Instant::now() + within;
+        loop {
+            let view = self.get(&format!("/v1/runs/{run}")).await;
+            if ready(&view) {
+                return view;
+            }
+            assert!(Instant::now() < deadline, "{what}: {view}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Waits up to `within` until no process but the daemon names this tree: no step command and no harness is left.
+    pub(crate) async fn until_no_steps(&self, within: Duration) {
+        let deadline = Instant::now() + within;
+        loop {
+            let left = steps(self.dir.path(), self.pid());
+            if left.is_empty() {
+                return;
+            }
+            assert!(Instant::now() < deadline, "processes left behind: {left:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
     /// The journal from its start as `(type, envelope)`, read until `done` holds for what was read, up to `within`.
     pub(crate) async fn journal_until(
         &self,
