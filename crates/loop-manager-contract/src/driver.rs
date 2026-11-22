@@ -311,7 +311,7 @@ pub trait Driver: Send + Sync {
         false
     }
     /// The exact texts of the user messages the harness adds to a session by itself, which a replay gives among the
-    /// prompts (claude's note of a cancelled turn): no prompt of loop-manager's, so the delivery check passes them
+    /// prompts (a harness's note of a cancelled turn): no prompt of loop-manager's, so the delivery check passes them
     /// over after its anchor.
     fn replay_markers(&self) -> &'static [&'static str] {
         &[]
