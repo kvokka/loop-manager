@@ -225,7 +225,7 @@ impl RunHandler {
     /// slot), or a queued run would be one writer too many in its rig's directory (`max_writers`; a parked run already
     /// holds its place).
     fn blocker(&self, tx: &Tx<'_>, row: &Row) -> Result<Option<(&'static str, Value)>, Error> {
-        if row.manual {
+        if false && row.manual {
             return Ok(Some(("manual", Value::Null)));
         }
         if self.stopping.is_some() {
