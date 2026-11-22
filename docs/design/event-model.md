@@ -111,7 +111,7 @@ all of them share.
   | `assistant` | `agent_message_chunk`, `agent_message` | `update` |
   | `thought` | `agent_thought_chunk`, `agent_thought` | `update` |
   | `tool_call` | `tool_call_update`: the call's title, kind, status, raw input and output, content, as the agent sends them | `update` |
-  | `tool_output` | `tool_call_content_chunk`, `terminal_output_chunk` (its base64 `data` decoded into `text`, invalid UTF-8 replaced) | `update` |
+  | `tool_output` | `tool_call_content_chunk`, `terminal_output_chunk` (its base64 `data` decoded into `text`: a character cut between chunks waits for its rest, invalid UTF-8 and a cut left at the exit are replaced) | `update` |
   | `terminal` | `terminal_update`: a terminal's command, exit status, capabilities | `update` |
   | `state` | `state_update`: `running`, `idle` with its stop reason, usage and background work | `update` |
   | `subagent` | any of the above from a session of the agent other than the attempt's own (a subagent's) | `session`, `update` |

@@ -4,6 +4,9 @@
 
 mod translate;
 
+#[cfg(test)]
+mod tests;
+
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v2::{ConnectionTo, Responder, schema};
 use agent_client_protocol::{Agent, Client as Peer, ErrorCode, Stdio};

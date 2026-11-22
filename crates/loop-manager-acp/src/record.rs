@@ -8,6 +8,7 @@ use base64::Engine;
 use loop_manager_contract::history::{History, Record};
 use serde_json::{Map, Value, json};
 use std::{
+    collections::BTreeMap,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -33,6 +34,8 @@ struct Glue {
     open: Option<Open>,
     /// Counts the texts opened, so a timer flushes only its own.
     generation: u64,
+    /// By session and terminal, the bytes of a character cut at the end of a terminal's chunk, waiting for its rest.
+    cut: BTreeMap<(String, String), Vec<u8>>,
 }
 
 /// A text being glued: the record it becomes and what further chunks must match.
@@ -58,10 +61,10 @@ impl Recorder {
 
     /// Writes what `update` of `session` (the recorder's own, or a child: a subagent) says, glued to the text open.
     pub(crate) fn update(&self, session: &str, update: &SessionUpdate) {
-        let Some((kind, key, mut data)) = entry(&self.session, session, update) else {
+        let mut glue = crate::lock(&self.glue);
+        let Some((kind, key, mut data)) = entry(&self.session, session, update, &mut glue.cut) else {
             return;
         };
-        let mut glue = crate::lock(&self.glue);
         if let (Some(key), Some(open)) = (&key, glue.open.as_mut())
             && open.key == *key
         {
@@ -89,9 +92,18 @@ impl Recorder {
         });
     }
 
-    /// Writes the text open now: the session's process is gone.
+    /// Writes the text open now, and what is left of a cut character: the session's process is gone.
     pub(crate) fn flush(&self) {
-        self.flush_locked(&mut crate::lock(&self.glue));
+        let mut glue = crate::lock(&self.glue);
+        self.flush_locked(&mut glue);
+        for ((session, terminal), bytes) in std::mem::take(&mut glue.cut) {
+            if !bytes.is_empty() {
+                let update = json!({ "sessionUpdate": "terminal_output_chunk", "terminalId": terminal,
+                    "text": String::from_utf8_lossy(&bytes) });
+                let (kind, data) = record("tool_output", &self.session, &session, update);
+                self.write(kind, data);
+            }
+        }
     }
 
     fn flush_locked(&self, glue: &mut Glue) {
@@ -119,7 +131,12 @@ impl Recorder {
 /// The record of `update`: its kind, the key a text glues by (`None`: written at once) and its data, `{update}`
 /// for the own session and `{session, update}` for a child. Plans, commands, config options and the like are left
 /// out: the protocol trace has them.
-fn entry(own: &str, session: &str, update: &SessionUpdate) -> Option<(&'static str, Option<Key>, Map<String, Value>)> {
+fn entry(
+    own: &str,
+    session: &str,
+    update: &SessionUpdate,
+    cut: &mut BTreeMap<(String, String), Vec<u8>>,
+) -> Option<(&'static str, Option<Key>, Map<String, Value>)> {
     let mut update = serde_json::to_value(update).ok()?;
     let tag = update["sessionUpdate"].as_str()?.to_owned();
     let (kind, id) = match tag.as_str() {
@@ -134,14 +151,40 @@ fn entry(own: &str, session: &str, update: &SessionUpdate) -> Option<(&'static s
         _ => return None,
     };
     if tag == "terminal_output_chunk" {
-        // The bytes come in base64: the history keeps them as text.
+        // The bytes come in base64: the history keeps them as text, a character cut between chunks made whole.
         let bytes = update["data"]
             .as_str()
-            .map(|d| base64::engine::general_purpose::STANDARD.decode(d));
-        let decoded = String::from_utf8_lossy(&bytes.and_then(Result::ok).unwrap_or_default()).into_owned();
+            .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
+            .unwrap_or_default();
+        let terminal = update["terminalId"].as_str().unwrap_or_default().to_owned();
+        let pending = cut.entry((session.to_owned(), terminal)).or_default();
+        pending.extend_from_slice(&bytes);
+        let whole = match std::str::from_utf8(pending) {
+            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+            _ => pending.len(),
+        };
+        if whole == 0 && !pending.is_empty() {
+            return None;
+        }
+        let decoded = String::from_utf8_lossy(&pending[..whole]).into_owned();
+        pending.drain(..whole);
         update.as_object_mut()?.remove("data");
         update["text"] = json!(decoded);
     }
+    let glued = tag.ends_with("_chunk") && update[id].is_string();
+    let key = (
+        session.to_owned(),
+        tag,
+        update[id].as_str().unwrap_or_default().to_owned(),
+    );
+    let (kind, mut data) = record(kind, own, session, update);
+    let key = (glued && text(&mut data).is_some()).then_some(key);
+    Some((kind, key, data))
+}
+
+/// The kind and data of a record of `update`: `{update}` for the own session, a `subagent`'s `{session, update}`
+/// for a child.
+fn record(kind: &'static str, own: &str, session: &str, update: Value) -> (&'static str, Map<String, Value>) {
     let mut data = Map::new();
     let kind = match session == own {
         true => kind,
@@ -150,15 +193,8 @@ fn entry(own: &str, session: &str, update: &SessionUpdate) -> Option<(&'static s
             "subagent"
         }
     };
-    let glued = tag.ends_with("_chunk") && update[id].is_string();
-    let key = (
-        session.to_owned(),
-        tag,
-        update[id].as_str().unwrap_or_default().to_owned(),
-    );
     data.insert("update".into(), update);
-    let key = (glued && text(&mut data).is_some()).then_some(key);
-    Some((kind, key, data))
+    (kind, data)
 }
 
 /// The text of a chunk record: of a text content block, of a tool call's text content, of a terminal's output.
@@ -223,6 +259,29 @@ mod tests {
         assert_eq!((texts[2].0, &texts[2].1["text"]), ("subagent", &json!("ok")));
         assert_eq!(records[2]["session"], "child");
         assert!(records.iter().all(|r| r["attempt"] == 2), "{records:#?}");
+    }
+
+    #[tokio::test]
+    async fn a_character_cut_between_terminal_chunks_is_written_whole_or_at_the_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = History::open(dir.path(), 1 << 20, Vec::new());
+        let recorder = Recorder::new(history.clone(), "run_1".into(), 1, "s".into());
+        let output = |data: &str| {
+            let update = json!({ "sessionUpdate": "terminal_output_chunk", "terminalId": "t1", "data": data });
+            serde_json::from_value(update).unwrap()
+        };
+        recorder.update("s", &output("ww=="));
+        recorder.update("s", &output("qQ=="));
+        recorder.update("s", &chunk("m1", "next"));
+        recorder.update("s", &output("YcM="));
+        recorder.flush();
+        let records = records(&history).await;
+        let texts: Vec<&Value> = records.iter().map(|r| &r["update"]["text"]).collect();
+        assert_eq!(
+            texts,
+            [&json!("é"), &Value::Null, &json!("a"), &json!("\u{fffd}")],
+            "{records:#?}"
+        );
     }
 
     #[tokio::test]
