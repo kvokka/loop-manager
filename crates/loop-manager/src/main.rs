@@ -2,6 +2,7 @@
 
 #![deny(clippy::disallowed_methods)]
 
+mod acp;
 mod bridge;
 mod daemon;
 mod doctor;
@@ -57,6 +58,7 @@ fn main() -> ExitCode {
                 std::os::unix::process::CommandExt::exec(std::process::Command::new(&command[0]).args(&command[1..]));
             return cli::fail(cli.json, "spawn_failed", &format!("{:?}: {error}", command[0]));
         }
+        Command::Acp { project } => return acp::run(cli.socket, project),
         Command::McpBridge { command, timeout } => {
             return bridge::run(command, std::time::Duration::from_secs(timeout));
         }

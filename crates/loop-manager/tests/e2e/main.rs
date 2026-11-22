@@ -5,6 +5,7 @@
 mod common;
 
 mod acp;
+mod acp_client;
 mod addon_hooks;
 mod agent_mail;
 mod api;

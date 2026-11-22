@@ -1051,8 +1051,11 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 name = "loop-manager"
 version = "0.0.1"
 dependencies = [
+ "agent-client-protocol",
  "axum",
+ "base64",
  "clap",
+ "futures",
  "loop-manager-acp",
  "loop-manager-addons",
  "loop-manager-br",

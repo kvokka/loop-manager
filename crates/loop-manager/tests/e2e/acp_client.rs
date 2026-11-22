@@ -1,0 +1,313 @@
+//! `loop-manager acp` (docs/api/frontends.md, "ACP"): an outside ACP v2 client, the SDK's, on the built binary over
+//! stdio, observing the runs of a daemon whose harness is the `acp-agent` fixture. No model.
+
+use crate::common::{self, Daemon};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::v2::{ConnectionTo, InitializeOutcome, schema};
+use agent_client_protocol::{Agent, Client, Lines, v1};
+use serde_json::{Value, json};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Child,
+    sync::{mpsc, oneshot},
+};
+
+/// A daemon of the projects `shop` and `lab` whose `build` formula is one `ai` step of an agent on the `acp-agent`
+/// fixture running `command` as its tool.
+async fn daemon(command: &str) -> Daemon {
+    let agent = Path::new(common::EXE).with_file_name("acp-agent");
+    let config = format!(
+        "projects = [\"shop\", \"lab\"]\n[harness.fake]\ncommand = \"{}\"\n[harness.fake.env]\nACP_AGENT_COMMAND = \
+         \"{command}\"\n",
+        agent.display()
+    );
+    Daemon::start(move |dir| {
+        let projects = dir.join("config/loop-manager");
+        let files = [
+            (projects.join("config.toml"), config),
+            (projects.join("lab/loop-manager.toml"), String::new()),
+            (
+                projects.join("shop/agents/dev/agent.toml"),
+                "harness = \"fake\"\n".to_owned(),
+            ),
+            (
+                projects.join("shop/formulas/build.toml"),
+                "name = \"build\"\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n".to_owned(),
+            ),
+            (
+                projects.join("shop/agents/dev/prompt.template.md"),
+                "Build {{ rig.name }}.".to_owned(),
+            ),
+        ];
+        for (path, text) in files {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+    })
+    .await
+}
+
+fn project_dir(d: &Daemon, project: &str) -> PathBuf {
+    d.dir.path().join("config/loop-manager").join(project)
+}
+
+/// One `loop-manager acp` process with the SDK's client on its stdio, initialized; dropped, it goes.
+struct Acp {
+    cx: ConnectionTo<Agent>,
+    /// The `session/update` notifications received, as JSON.
+    updates: mpsc::UnboundedReceiver<Value>,
+    _close: oneshot::Sender<()>,
+    _child: Child,
+}
+
+fn spawn(d: &Daemon, args: &[&str]) -> Child {
+    let mut command = tokio::process::Command::from(common::loop_manager());
+    command
+        .arg("acp")
+        .args(args)
+        .env("LOOP_MANAGER_SOCKET", d.socket())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true);
+    command.spawn().unwrap()
+}
+
+/// The client's side of the child's stdio, a JSON-RPC message per line.
+fn lines(child: &mut Child) -> impl agent_client_protocol::ConnectTo<Client> + 'static {
+    let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let incoming = futures::stream::unfold(stdout, async |mut lines| {
+        lines.next_line().await.transpose().map(|line| (line, lines))
+    });
+    let outgoing = futures::sink::unfold(child.stdin.take().unwrap(), async |mut stdin, line: String| {
+        stdin.write_all(format!("{line}\n").as_bytes()).await?;
+        stdin.flush().await?;
+        Ok::<_, std::io::Error>(stdin)
+    });
+    Lines::new(Box::pin(outgoing), Box::pin(incoming))
+}
+
+impl Acp {
+    async fn start(d: &Daemon, args: &[&str]) -> Self {
+        let mut child = spawn(d, args);
+        let transport = lines(&mut child);
+        let (tx, updates) = mpsc::unbounded_channel();
+        let (cx_tx, cx_rx) = oneshot::channel();
+        let (close, closed) = oneshot::channel::<()>();
+        tokio::spawn(
+            Client
+                .v2()
+                .name("test")
+                .on_receive_notification(
+                    async move |n: schema::UpdateSessionNotification, _: ConnectionTo<Agent>| {
+                        let _ = tx.send(serde_json::to_value(&n).unwrap());
+                        Ok(())
+                    },
+                    agent_client_protocol::on_receive_notification!(),
+                )
+                .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
+                    let _ = cx_tx.send(cx.clone());
+                    let _ = closed.await;
+                    Ok(())
+                }),
+        );
+        let cx = cx_rx.await.unwrap();
+        let me = schema::Implementation::new("test", "0");
+        let answer = cx
+            .send_initialize(schema::InitializeRequest::new(ProtocolVersion::V2, me))
+            .block_task()
+            .await
+            .unwrap();
+        let InitializeOutcome::Initialized(answer) = answer else {
+            panic!("not initialized on v2")
+        };
+        assert_eq!(answer.info.name, "loop-manager");
+        assert!(answer.capabilities.session.is_some());
+        Self {
+            cx,
+            updates,
+            _close: close,
+            _child: child,
+        }
+    }
+
+    async fn list(&self, cwd: &Path) -> Vec<Value> {
+        let request: schema::ListSessionsRequest = serde_json::from_value(json!({ "cwd": cwd })).unwrap();
+        let answer = self.cx.send_request(request).block_task().await.unwrap();
+        let answer = serde_json::to_value(answer).unwrap();
+        answer["sessions"].as_array().unwrap().clone()
+    }
+
+    /// `session/resume` of `run`, replaying from the start when `replay`; the updates that came before the answer.
+    async fn resume(&mut self, run: &str, replay: bool) -> Result<Vec<Value>, agent_client_protocol::Error> {
+        let mut request = json!({ "sessionId": run, "cwd": "/" });
+        if replay {
+            request["replayFrom"] = json!({ "type": "start" });
+        }
+        let request: schema::ResumeSessionRequest = serde_json::from_value(request).unwrap();
+        self.cx.send_request(request).block_task().await?;
+        let mut before = Vec::new();
+        while let Ok(update) = self.updates.try_recv() {
+            before.push(update);
+        }
+        Ok(before)
+    }
+
+    /// The updates up to the first that `stop` takes, which comes last.
+    async fn until(&mut self, stop: impl Fn(&Value) -> bool) -> Vec<Value> {
+        let mut seen = Vec::new();
+        loop {
+            let update = tokio::time::timeout(common::WAIT, self.updates.recv()).await;
+            let update = update.unwrap_or_else(|_| panic!("{seen:#?}")).unwrap();
+            let done = stop(&update);
+            seen.push(update);
+            if done {
+                return seen;
+            }
+        }
+    }
+}
+
+/// The text of an update's content, of a message chunk or a tool call's content chunk.
+fn text(update: &Value) -> &str {
+    let content = &update["update"]["content"];
+    content["text"]
+        .as_str()
+        .or(content["content"]["text"].as_str())
+        .unwrap_or_default()
+}
+
+fn printed(update: &Value) -> bool {
+    update["update"]["sessionUpdate"] == "tool_call_content_chunk" && text(update) == "printed-before-the-hang\n"
+}
+
+fn state(update: &Value) -> &str {
+    match update["update"]["sessionUpdate"] == "state_update" {
+        true => update["update"]["state"].as_str().unwrap(),
+        false => "",
+    }
+}
+
+const HANG: &str = "echo printed-before-the-hang; sleep 600";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_list_gives_the_runs_of_the_project_of_the_cwd_or_of_the_project_named() {
+    let d = daemon(&format!("{} finish pass --summary built", common::EXE)).await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    let acp = Acp::start(&d, &[]).await;
+    let sessions = acp.list(&project_dir(&d, "shop").join("web")).await;
+    assert_eq!(sessions.len(), 1, "{sessions:#?}");
+    let session = &sessions[0];
+    assert_eq!(session["sessionId"], run.as_str());
+    assert_eq!(session["title"], "shop.build · 1 · passed");
+    assert!(session["cwd"].as_str().unwrap().starts_with('/'), "{session}");
+    assert!(session["updatedAt"].is_string(), "{session}");
+    assert_eq!(acp.list(&project_dir(&d, "lab")).await, Vec::<Value>::new());
+    // A cwd of no project lists every project.
+    assert_eq!(acp.list(Path::new("/")).await.len(), 1);
+    // `--project` wins over the cwd.
+    let lab = Acp::start(&d, &["--project", "lab"]).await;
+    assert_eq!(lab.list(&project_dir(&d, "shop")).await, Vec::<Value>::new());
+    let shop = Acp::start(&d, &["--project", "shop"]).await;
+    assert_eq!(shop.list(&project_dir(&d, "lab")).await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_replay_a_running_run_follow_it_live_and_leave_it_running_when_they_go() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut first = Acp::start(&d, &[]).await;
+    // The run may not have written a record yet: what the replay lacks follows live, up to the hanging tool's output.
+    let replayed = first.resume(&run, true).await.unwrap();
+    assert_eq!(state(replayed.last().unwrap()), "running", "{replayed:#?}");
+    if !replayed.iter().any(printed) {
+        first.until(printed).await;
+    }
+    // A client attaching now gets it all in the replay: the history from its first record, then the current state.
+    let mut second = Acp::start(&d, &[]).await;
+    let again = second.resume(&run, true).await.unwrap();
+    assert!(again.iter().all(|u| u["sessionId"] == run.as_str()), "{again:#?}");
+    assert!(text(&again[0]).starts_with("— step "), "{again:#?}");
+    assert_eq!(state(again.last().unwrap()), "running", "{again:#?}");
+    let texts: Vec<&str> = again.iter().map(text).collect();
+    assert!(texts.contains(&"— attempt 1: new_session on fake —\n"), "{texts:#?}");
+    assert!(texts.contains(&"Build web."), "{texts:#?}");
+    assert!(texts.iter().any(|t| t.starts_with("Echo: Build web.")), "{texts:#?}");
+    assert!(again.iter().any(printed), "{again:#?}");
+    // A client without a replay gets only the current state, then what comes.
+    let mut live = Acp::start(&d, &[]).await;
+    let now = live.resume(&run, false).await.unwrap();
+    assert_eq!(now.iter().map(state).collect::<Vec<_>>(), ["running"], "{now:#?}");
+    // Closing a session and a client leaves the run running.
+    let close: schema::CloseSessionRequest = serde_json::from_value(json!({ "sessionId": run })).unwrap();
+    first.cx.send_request(close).block_task().await.unwrap();
+    drop(first);
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["state"], "running");
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+    for client in [&mut second, &mut live] {
+        client.until(|u| text(u).starts_with("— run cancelled")).await;
+        // The run is over: the last update is its idle state.
+        client.until(|u| state(u) == "idle").await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_session_a_prompt_an_unknown_run_and_a_v1_client_get_their_errors() {
+    let d = Daemon::start(|_| {}).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    let new: schema::NewSessionRequest = serde_json::from_value(json!({ "cwd": "/" })).unwrap();
+    let error = acp.cx.send_request(new).block_task().await.unwrap_err();
+    assert_eq!(
+        (i32::from(error.code), error.message.as_str()),
+        (-32601, "runs are started with `loop-manager run start`")
+    );
+    let prompt: schema::PromptRequest =
+        serde_json::from_value(json!({ "sessionId": "r1", "prompt": [{ "type": "text", "text": "hi" }] })).unwrap();
+    let error = acp.cx.send_request(prompt).block_task().await.unwrap_err();
+    assert_eq!(i32::from(error.code), -32600, "{error:?}");
+    let error = acp.resume("no-such-run", true).await.unwrap_err();
+    assert_eq!(i32::from(error.code), -32002, "{error:?}");
+    // A client of protocol version 1 only.
+    let mut child = spawn(&d, &[]);
+    let answer = Client
+        .v1()
+        .name("old")
+        .connect_with(lines(&mut child), async |cx: v1::ConnectionTo<Agent>| {
+            Ok(cx
+                .send_request(v1::schema::InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await)
+        })
+        .await
+        .unwrap();
+    assert_eq!(i32::from(answer.unwrap_err().code), -32022);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_follows_a_run_across_a_restart_of_the_daemon_with_no_hole_and_no_repeat() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    let mut seen = acp.resume(&run, true).await.unwrap();
+    if !seen.iter().any(printed) {
+        seen.extend(acp.until(printed).await);
+    }
+    d.post("/v1/daemon/restart?timeout_s=1", json!({}), None).await.unwrap();
+    seen.extend(acp.until(|u| text(u).starts_with("— attempt 2")).await);
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+    seen.extend(acp.until(|u| text(u).starts_with("— run cancelled")).await);
+    let notices: Vec<&str> = (seen.iter())
+        .filter_map(|u| u["update"]["messageId"].as_str().filter(|id| id.starts_with("lm-")))
+        .collect();
+    let numbers: Vec<u64> = notices.iter().map(|id| id[3..].parse().unwrap()).collect();
+    assert!(numbers.is_sorted_by(|a, b| a < b), "{seen:#?}");
+}

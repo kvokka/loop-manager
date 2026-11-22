@@ -3,6 +3,7 @@
 The daemon has three frontends over one typed interface of the core: the HTTP API, the CLI and a small MCP server.
 None of them holds state or domain logic of its own: each translates a request into a call of the core and its
 answer back; the core's state and journal are the truth (docs/design/event-model.md).
+[`loop-manager acp`](#acp) serves the runs to an ACP client and is a client of the HTTP API, as the CLI is.
 
 ## HTTP API
 
@@ -145,6 +146,52 @@ served on `/mcp` of the API listeners in both protocol epochs. No agent gets it 
 tokens in every session, so an agent names it in its own config
 (`[mcp.loop-manager] url = "${LOOP_MANAGER_API}/mcp"`, which needs `api_tcp`).
 
+## ACP
+
+Code: `crates/loop-manager/src/acp.rs` and `acp/translate.rs`; the guide is [ACP clients](../guide/acp-clients.md).
+`loop-manager [--socket <path>] acp [--project <name>]` is an ACP v2 agent on its stdin and stdout for an outside
+client (T3 Code, Zed, any ACP client), started by the client, locally or over `ssh -T`. Each client runs its own
+process; it reaches the daemon on its API socket (`--socket`, else `LOOP_MANAGER_SOCKET`, else the XDG default, as
+every command does), and the harnesses stay with the daemon. Logs go to stderr. One ACP session is one run: the
+session id is the run id, across steps, attempts and harnesses. The command observes runs: it lists them, replays
+their history and follows it.
+
+- `initialize`: protocol version 2 only; a client that asks for version 1 gets `-32022`. The capabilities are the
+  baseline `session` (`{}`); `agentInfo` is `loop-manager` and the binary's version.
+- `session/list`: at most 100 runs of one project, newest first, live and ended. The project is `--project`, else the
+  one whose `dir`, root or rig holds the request's `cwd` most closely, else every project. An entry's `sessionId` is
+  the run id, `cwd` the run's workdir (else the project's `dir`), `title` `<formula> · <step> · <state>`, `updatedAt`
+  the start or end of the run's last attempt (else the run's start or creation).
+- `session/resume` of a run id: `replayFrom: {"type": "start"}` sends every record of the run's history
+  ([History of a run](#http-api)) from the first as `session/update` notifications; without `replayFrom` nothing of
+  the past is sent. Then a `state_update` gives the current state (`running` while the run lives, `idle` once it
+  ended), and the answer follows: the protocol's mark that the replay is done. The records written afterwards follow
+  as they come, until `session/close`, the client leaving, or the run's end, after which an `idle` `state_update`
+  comes. A broken history stream (a restart of the daemon, a dropped connection) is opened again every second from
+  the record after the last one read: no hole, no repeat. An unknown run is `-32002`; another replay cursor is
+  `-32602`.
+- `session/close` stops following; the run goes on. `session/cancel` is ignored. `session/new` is `-32601` with the
+  message "runs are started with `loop-manager run start`". `session/prompt` is `-32600`: the run is observed only.
+  Other methods are `-32601`.
+- Several clients on one run each get the same stream: each is its own process reading the history.
+
+How a history record becomes updates:
+
+| Record | Updates |
+|---|---|
+| `user`, `assistant`, `thought`, `tool_call`, `tool_output`, `terminal`, `state` | its `update` as it came, with the run id as the session. A `messageId`, `toolCallId` or `terminalId` gets the prefix `<attempt>-`: an agent keeps them unique within its own session only. A terminal's output text goes back into base64 `data` |
+| `subagent` | the same, with the ids under `<attempt>-<child session>-`, `_meta` `{"loop-manager/subagent": <child session>}`, and the first text chunk of each of its messages headed `[subagent] ` |
+| `prompt` | a `user_message_chunk` of its text, `messageId` `prompt-<key>` |
+| `exec_output` | its text as a `tool_call_content_chunk` of an `execute` tool call that a `tool_call_update` (`in_progress`, title `<step> (exec)`) opens at the attempt's first output: id `exec-<attempt>`, or `exec-<attempt>-<n>` for output after that call ended. The call ends at the next boundary record: `failed` at an `attempt_end` with a failure, an `outcome` `fail` or a `run` not passed, else `completed` |
+| `step`, `attempt`, `attempt_end`, `outcome`, `run`, `truncated` | an `agent_message_chunk` notice line of its own (`messageId` `lm-<n>`), such as `— step build (ai) —`, `— attempt 2: resume on claude —`, `— attempt 2 failed: rate_limited —`, `— outcome pass: done —`, `— run cancelled (cancel) —` |
+| any other kind | nothing |
+
+The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
+history, and a client may drop it.
+
+Not supported yet: control of a run from an ACP client (taking over its session, instructions, commands, answers to
+permission requests).
+
 ## Humans and runs
 
 - A human sees runs and follows a run's live view through these frontends (`loop-manager run watch` or the API), and
@@ -166,7 +213,8 @@ tokens in every session, so an agent names it in its own config
 
 - Integration tests on the real daemon: `crates/loop-manager/tests/e2e/api.rs`, `cli.rs`, `mcp.rs`; the live view and
   `run watch` on the real claude (`crates/loop-manager/tests/e2e/claude.rs`); the `lagged` path on a real broadcast
-  channel (`api/live.rs`).
+  channel (`api/live.rs`); `loop-manager acp` under the ACP SDK's client, on the `acp-agent` fixture
+  (`crates/loop-manager/tests/e2e/acp_client.rs`).
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.
 

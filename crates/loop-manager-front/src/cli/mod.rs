@@ -160,6 +160,12 @@ pub enum Command {
         #[arg(long)]
         key: Option<String>,
     },
+    /// Serve the daemon's runs to an ACP v2 client on stdin and stdout: list them, replay and follow their history.
+    Acp {
+        /// The project whose runs `session/list` gives (default: the one holding the client's `cwd`, else all).
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Start a long-lived child bound to its spawning parent.
     #[command(hide = true)]
     ExecWithParent {
@@ -253,6 +259,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         | Command::Daemon { .. }
         | Command::Cache(_)
         | Command::McpBridge { .. }
+        | Command::Acp { .. }
         | Command::ExecWithParent { .. } => {
             let message = "this command runs locally";
             return Ok(fail(json, "usage", message));
@@ -317,7 +324,7 @@ fn stop_path(what: &str, timeout: Option<u64>) -> String {
     format!("/v1/daemon/{what}{query}")
 }
 
-pub(crate) fn run_path(id: &str, then: &str) -> String {
+pub fn run_path(id: &str, then: &str) -> String {
     format!("/v1/runs/{}{then}", encode(id))
 }
 
@@ -338,7 +345,7 @@ async fn follow(mut events: Events, json: bool) -> Result<(), ClientError> {
 }
 
 /// Percent-encodes everything but the unreserved characters of RFC 3986.
-fn encode(text: &str) -> String {
+pub fn encode(text: &str) -> String {
     text.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),

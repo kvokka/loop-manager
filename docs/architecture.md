@@ -48,7 +48,7 @@ These are checked by the build, not kept by agreement.
 | `loop-manager-br` | the br tracker adapter: every call is one `br` process on the project's database | [tracker](design/tracker-br.md) |
 | `loop-manager-front` | the frontends: the HTTP API on the daemon's unix socket, the CLI and its client, the MCP server | [frontends](api/frontends.md), [MCP](api/mcp.md), [OpenAPI](api/openapi.json) |
 | `loop-manager-addons` | the bundled addons `default-policy` and `worktree`, in-process executors of the hook contract | [config: bundled addons](design/config.md#bundled-addons-builtinname), [contracts 10](design/contracts.md#10-default-policy-as-decisions) |
-| `loop-manager` | the binary: the daemon, the adapter table, `doctor`, the git cache of packs and addons, the stdio→HTTP MCP bridge | [install](guide/install.md) |
+| `loop-manager` | the binary: the daemon, the adapter table, `doctor`, the git cache of packs and addons, the stdio→HTTP MCP bridge, `loop-manager acp`: the runs for an outside ACP client, over the HTTP API | [install](guide/install.md), [frontends: ACP](api/frontends.md#acp) |
 | `loop-manager-testkit` | test doubles: the scripted driver, fake providers, a test MCP service. Nothing of it runs in the product | [development](guide/development.md) |
 | `loop-manager-acceptance` | end-to-end scenarios on a real daemon and real binaries, run on request | [acceptance](acceptance.md) |
 
