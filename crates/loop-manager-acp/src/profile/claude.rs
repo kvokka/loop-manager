@@ -306,7 +306,7 @@ fn host_token(host: &Path) -> Option<String> {
 }
 
 /// The account the gates use: a hash of where the credential comes from, never the credential itself
-/// (docs/design/contracts.md 7); the native claude driver's, so an account keeps its id.
+/// (docs/design/contracts.md 7).
 pub(super) fn account(_harness: &str, p: &Value) -> String {
     let env = &p["env"];
     let source = match CREDENTIALS.iter().find(|k| !env[**k].is_null()) {
