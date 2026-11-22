@@ -366,13 +366,10 @@ async fn commands_take_a_run_over_and_hand_it_back_in_the_same_attempt_and_anoth
     let run = d.create("build", None).await;
     let mut first = Acp::start(&d, &[]).await;
     let mut replayed = first.resume(&run, true).await.unwrap();
-    // The commands come after the state, with and without a replay.
-    let at = replayed.iter().position(|u| state(u) == "running").unwrap();
-    assert_eq!(
-        commands(&replayed[at + 1]),
-        ["lm-takeover", "lm-continue"],
-        "{replayed:#?}"
-    );
+    // The commands come after the state, with and without a replay; the replay can hold the agent's own states too.
+    let at = (replayed.iter().position(|u| !commands(u).is_empty())).unwrap_or_else(|| panic!("{replayed:#?}"));
+    assert_eq!(state(&replayed[at - 1]), "running", "{replayed:#?}");
+    assert_eq!(commands(&replayed[at]), ["lm-takeover", "lm-continue"], "{replayed:#?}");
     // The session has shown attempt 1 once the tool has printed.
     if !replayed.iter().any(printed) {
         replayed.extend(first.until(printed).await);
@@ -554,4 +551,53 @@ async fn lm_continue_with_an_instruction_unsent_needs_a_choice_and_withdraw_hand
     d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
         .await
         .unwrap();
+}
+
+/// The updates of `seen` that tell of the run's records: not the state and the commands each resume sends.
+fn records(seen: &[Value]) -> Vec<&Value> {
+    let kind = |u: &&Value| u["update"]["sessionUpdate"].clone();
+    (seen.iter())
+        .filter(|u| kind(u) != "state_update" && kind(u) != "available_commands_update")
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_resuming_while_records_are_written_get_each_record_once_in_order() {
+    let d = daemon("for i in $$(seq 1 300); do echo line-$$i; sleep 0.002; done; sleep 600").await;
+    let run = d.create("build", None).await;
+    let last = |u: &Value| text(u).contains("line-300\n");
+    // Clients attach one after another while the command writes: each one's replay meets the live records somewhere.
+    let mut clients = Vec::new();
+    for _ in 0..4 {
+        let mut acp = Acp::start(&d, &[]).await;
+        let seen = acp.resume(&run, true).await.unwrap();
+        clients.push((acp, seen));
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    for (acp, seen) in &mut clients {
+        if !seen.iter().any(last) {
+            seen.extend(acp.until(last).await);
+        }
+    }
+    // A client attaching once it is all written gets it in the replay alone: what every other one has seen.
+    let mut late = Acp::start(&d, &[]).await;
+    let all = late.resume(&run, true).await.unwrap();
+    assert!(all.iter().any(last), "{all:#?}");
+    for (_, seen) in &clients {
+        assert_eq!(records(seen), records(&all));
+    }
+    // And so on to the run's end.
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+    clients.push((late, all));
+    let mut ends = Vec::new();
+    for (acp, seen) in &mut clients {
+        seen.extend(acp.until(|u| state(u) == "idle").await);
+        ends.push(seen.clone());
+    }
+    for seen in &ends {
+        assert!(seen.iter().any(|u| text(u).starts_with("— run cancelled")), "{seen:#?}");
+        assert_eq!(records(seen), records(&ends[ends.len() - 1]));
+    }
 }

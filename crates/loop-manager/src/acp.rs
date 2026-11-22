@@ -434,7 +434,7 @@ impl Follower {
         mut stop: oneshot::Receiver<()>,
     ) -> Result<()> {
         let (mut responder, mut translator) = (Some(responder), Translator::default());
-        let (mut next, mut ended) = (1, false);
+        let (mut next, mut ended, mut drained) = (1, false, false);
         loop {
             let path = format!("{}?from={next}", run_path(&self.run, "/history"));
             match self.daemon.client.stream(&path).await {
@@ -489,11 +489,18 @@ impl Follower {
                 }
                 Err(e) => eprintln!("loop-manager acp: history of run `{}`: {e}; trying again", self.run),
             }
-            if ended || self.daemon.over(&self.run).await {
+            // A stream can break off before the run's end even when the run is over by now: one more read from `next`
+            // gives the records it did not bring (the daemon ends the stream of a run over once its file is read).
+            let over = !ended && self.daemon.over(&self.run).await;
+            if ended || (over && drained) {
                 return match responder.take() {
                     Some(responder) => self.answer(responder, "idle"),
                     None => self.send(json!({ "sessionUpdate": "state_update", "state": "idle" })),
                 };
+            }
+            drained = over;
+            if over {
+                continue;
             }
             tokio::select! {
                 _ = &mut stop => return Self::stopped(responder),
