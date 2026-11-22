@@ -29,6 +29,8 @@ struct Peer {
     cancels: mpsc::UnboundedReceiver<String>,
     /// What the test does as the agent.
     side: Side,
+    /// The agent's task: aborted, its end of the connection closes, as when its process dies.
+    agent: tokio::task::AbortHandle,
 }
 
 /// The agent's side of the connection, as the test plays it.
@@ -101,7 +103,7 @@ async fn connected_to(driver: Acp) -> Peer {
     let (cancels, cancels_rx) = mpsc::unbounded_channel();
     let (prompts, prompts_rx) = mpsc::unbounded_channel();
     let (cx_tx, cx_rx) = oneshot::channel();
-    tokio::spawn(
+    let agent = tokio::spawn(
         Agent
             .v2()
             .on_receive_request(
@@ -175,6 +177,7 @@ async fn connected_to(driver: Acp) -> Peer {
             resumes: resumes_rx,
             cx: cx_rx.await.unwrap(),
         },
+        agent: agent.abort_handle(),
     }
 }
 
@@ -449,6 +452,25 @@ async fn a_cancelled_prompt_is_dropped_and_another_error_is_a_failure() {
         .unwrap();
     match peer.event().await {
         Normalized::Failure(failure) => assert_eq!(failure.kind, FailureKind::AuthRequired),
+        other => panic!("a failure, not {other:?}"),
+    }
+}
+
+/// The agent's process ends with a prompt unanswered: the harness crashed, no error of the agent's to classify.
+#[tokio::test]
+async fn a_prompt_left_unanswered_by_an_agent_that_ends_is_a_harness_crash() {
+    let state = tempfile::tempdir().unwrap();
+    let mut peer = connected(state.path()).await;
+    let key = PromptKey::new("r1", 1, 1);
+    peer.driver
+        .send_prompt(&peer.handle, &session(), "One.", key)
+        .await
+        .unwrap();
+    let held = peer.prompt().await;
+    peer.agent.abort();
+    drop(held);
+    match peer.event().await {
+        Normalized::Failure(failure) => assert_eq!(failure.kind, FailureKind::HarnessCrash),
         other => panic!("a failure, not {other:?}"),
     }
 }

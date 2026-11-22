@@ -138,7 +138,15 @@ fn crashed() -> Failure {
 
 /// The failure of a request the agent answered with an error, or did not answer at all.
 fn failed(error: &agent_client_protocol::Error) -> Failure {
+    if gone(error) {
+        return crashed();
+    }
     session::classify(error.code.into(), &error.message, error.data.as_ref())
+}
+
+/// The SDK failed the request because the agent's process ended before it answered: no error of the agent.
+fn gone(error: &agent_client_protocol::Error) -> bool {
+    agent_client_protocol::is_incoming_transport_closed(error) || agent_client_protocol::is_connection_terminated(error)
 }
 
 impl Acp {
@@ -221,6 +229,9 @@ impl Acp {
 
     /// The failure of an error the agent answered with.
     fn failed(&self, error: &agent_client_protocol::Error) -> Failure {
+        if gone(error) {
+            return crashed();
+        }
         (self.profile.classify)(error.code.into(), &error.message, error.data.as_ref())
     }
 
@@ -505,6 +516,7 @@ impl Acp {
                 Ok(answer) => shared.turn.acked(key, answer.message_id.to_string()),
                 // `session/cancel` took the prompt before the agent inserted it.
                 Err(e) if e.code == ErrorCode::REQUEST_CANCELLED => shared.turn.dropped(key),
+                Err(e) if gone(&e) => shared.turn.refused(key, crashed()),
                 Err(e) => shared
                     .turn
                     .refused(key, classify(e.code.into(), &e.message, e.data.as_ref())),
