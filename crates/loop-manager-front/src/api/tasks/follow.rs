@@ -151,6 +151,8 @@ struct Session {
     reference: SessionRef,
     tail: Option<Tail>,
     ended: bool,
+    /// An ended session read to its end: its file is closed until a later run continues it.
+    done: bool,
     /// The entries read through the current tail, and the most ever passed: a tail made again sends only past those.
     seen: u64,
     sent: u64,
@@ -170,6 +172,7 @@ impl Session {
             reference: reference.clone(),
             tail: None,
             ended: false,
+            done: false,
             seen: 0,
             sent: 0,
             current: first,
@@ -181,6 +184,7 @@ impl Session {
 
     fn restart(&mut self, first: Option<String>) {
         self.tail = None;
+        self.done = false;
         self.seen = 0;
         self.current = first;
         self.pending = None;
@@ -196,7 +200,7 @@ impl Session {
         tx: &Sender,
         after_read: bool,
     ) -> Result<bool, String> {
-        if self.unavailable.is_none() && self.tail.is_none() {
+        if self.unavailable.is_none() && self.tail.is_none() && !self.done {
             let driver = drivers.iter().find(|d| d.harness() == self.harness).cloned();
             let reference = self.reference.clone();
             let log = match driver {
@@ -228,7 +232,13 @@ impl Session {
                 Some(record) => (record, true),
                 None => match tail.next(self.ended).await {
                     Ok(Some(record)) => (record, false),
-                    Ok(None) => break,
+                    Ok(None) => {
+                        if self.ended {
+                            self.tail = None;
+                            self.done = true;
+                        }
+                        break;
+                    }
                     Err(e) => {
                         self.unavailable = Some(e.to_string());
                         break;

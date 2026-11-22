@@ -109,6 +109,10 @@ async fn a_session_read_again_sends_only_what_is_new() {
     let (tx, mut rx) = mpsc::channel(16);
     s.drain(&[], &tree, &keys, &tx, true).await.unwrap();
     assert_eq!(chats(&sent(&mut rx)).len(), 2);
+    // Read to its end, the ended session holds no file and is not read again: there is no driver to reopen it.
+    assert!(s.tail.is_none());
+    s.drain(&[], &tree, &keys, &tx, true).await.unwrap();
+    assert_eq!((sent(&mut rx).len(), &s.unavailable), (0, &None));
     let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
     file.write_all(b"\n{\"key\":\"k4\",\"text\":\"four\"}\n").unwrap();
     s.restart(Some("t:a".into()));
