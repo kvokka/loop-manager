@@ -4,6 +4,7 @@
 #![deny(clippy::disallowed_methods)]
 
 mod part;
+mod profile;
 mod record;
 mod session;
 mod trace;
@@ -23,6 +24,7 @@ use loop_manager_contract::{
     history::History,
     orphans,
 };
+use profile::Profile;
 use serde_json::{Map, Value, json};
 use session::Turn;
 use std::{
@@ -48,6 +50,10 @@ const PROBE_LIMIT: Duration = Duration::from_secs(10);
 /// A harness known by its `[harness.<name>]` alone: the agent executable, its literal arguments and environment.
 pub struct Acp {
     name: String,
+    /// What the driver does for the agent beyond what it does for any (docs/design/adapters.md, "Profiles").
+    profile: &'static Profile,
+    /// The daemon's state directory.
+    state: PathBuf,
     command: PathBuf,
     args: Vec<String>,
     env: Map<String, Value>,
@@ -117,6 +123,8 @@ impl Acp {
     ) -> Result<Self, String> {
         let mut driver = Self {
             name: name.to_owned(),
+            profile: Profile::of(name),
+            state: state.to_owned(),
             command: PathBuf::new(),
             args: Vec::new(),
             env: Map::new(),
@@ -160,15 +168,31 @@ impl Acp {
         command
     }
 
+    /// The failure of an error the agent answered with.
+    fn failed(&self, error: &agent_client_protocol::Error) -> Failure {
+        (self.profile.classify)(error.code.into(), &error.message, error.data.as_ref())
+    }
+
+    /// The answer to a request that only opens or closes something, within [`REQUEST_LIMIT`], an error classified by
+    /// the profile.
+    async fn ask<T>(
+        &self,
+        request: impl Future<Output = Result<T, agent_client_protocol::Error>>,
+    ) -> Result<T, Failure> {
+        within(request).await?.map_err(|e| self.failed(&e))
+    }
+
     async fn start(&self, id: &str, p: &Value, sink: EventSink) -> Result<InstanceHandle, Failure> {
-        let env = part::env(p, id, self.socket.as_deref())?;
+        let env = (self.profile.env)(p, id, self.socket.as_deref())?;
         let trace = match &self.trace {
             Some(dir) => {
-                // The attempt token, the values the harness's and the agent's `env` resolved to, and the proxies
-                // of `HOST_NETWORK_ENV`, which may carry a login in their URL.
+                // The attempt token, the values the harness's and the agent's `env` resolved to, the credentials
+                // the profile adds (a host's login), and the proxies of `HOST_NETWORK_ENV`, which may carry a login
+                // in their URL.
                 let named = |k: &str| {
                     k == "LOOP_MANAGER_ATTEMPT_TOKEN"
                         || p["env"].get(k).is_some()
+                        || self.profile.credentials.contains(&k)
                         || loop_manager_contract::driver::HOST_NETWORK_ENV.contains(&k)
                 };
                 let secrets = env.iter().filter(|(k, _)| named(k)).map(|(_, v)| v.clone());
@@ -181,7 +205,12 @@ impl Acp {
         };
         let mut command = self.command(env);
         command.current_dir(p["workdir"].as_str().unwrap_or("."));
-        let (mut process, pid, start_time) = child::spawn(&mut command, &self.command)?;
+        let exited = self.profile.exited;
+        (self.profile.start)(p).map_err(|e| {
+            exited(p);
+            child::config_error(format!("the files of harness `{}`: {e}", self.name))
+        })?;
+        let (mut process, pid, start_time) = child::spawn(&mut command, &self.command).inspect_err(|_| exited(p))?;
         let handle = InstanceHandle {
             id: id.to_owned(),
             pid,
@@ -190,7 +219,7 @@ impl Acp {
         };
         let shared = Arc::new(Mutex::new(Shared {
             events: child::Events::new(id, sink),
-            turn: Turn::default(),
+            turn: Turn::new(self.profile),
             session: None,
             record: None,
             started: false,
@@ -202,11 +231,12 @@ impl Acp {
         let (conn_tx, conn_rx) = oneshot::channel();
         let (close_tx, close_rx) = oneshot::channel::<()>();
         let connection = connect(shared.clone(), transport, conn_tx, close_rx);
-        let (instances, known, own) = (self.instances.clone(), shared.clone(), id.to_owned());
+        let (instances, known, own, part) = (self.instances.clone(), shared.clone(), id.to_owned(), p.clone());
         let reader = tokio::spawn(async move {
             let _ = connection.await;
             let status = process.wait().await.ok();
             orphans::waited(u32::try_from(pid).ok());
+            exited(&part);
             lock(&instances).remove(&own);
             let stderr = tokio::time::timeout(Duration::from_secs(1), stderr).await;
             let stderr = stderr.ok().and_then(Result::ok).unwrap_or_default();
@@ -250,6 +280,7 @@ impl Acp {
         part::offered(&self.name, part, &known.capabilities)?;
         if let Some(trace) = &known.trace {
             trace.secrets(trace::mcp_secrets(part));
+            trace.secrets((self.profile.secrets)(part));
         }
         Ok(known)
     }
@@ -258,10 +289,34 @@ impl Acp {
         let known = self.for_session(&instance.id, part)?;
         let request: schema::NewSessionRequest =
             serde_json::from_value(part.clone()).map_err(|e| child::config_error(format!("session/new: {e}")))?;
-        let opened = request_within(known.conn.send_request(request).block_task()).await?;
+        let opened = self.ask(known.conn.send_request(request).block_task()).await?;
         let session_id = opened.session_id.to_string();
-        let options = serde_json::to_value(&opened.config_options).unwrap_or_default();
-        for (category, key) in [("model", "model"), ("thought_level", "effort")] {
+        self.configure(&known, &session_id, &opened.config_options, part)
+            .await?;
+        let mut session = json!({ "session_id": session_id, "cwd": part["cwd"] });
+        if !part["home"].is_null() {
+            session["home"] = part["home"].clone();
+        }
+        let session = SessionRef(session);
+        let mut shared = lock(&known.shared);
+        shared.record = self.recorder(part, &session_id);
+        shared.turn.session = Some(session_id);
+        shared.session = Some(session.clone());
+        Ok(session)
+    }
+
+    /// Sets the config options of session `session_id` the session part `part` names, in the order `model`,
+    /// `effort`, `mode` (the effort levels and the modes on offer depend on the model): each to the option of its
+    /// category among `options`, the list the agent answered last.
+    async fn configure(
+        &self,
+        known: &Instance,
+        session_id: &str,
+        options: &[schema::SessionConfigOption],
+        part: &Value,
+    ) -> Result<(), Failure> {
+        let mut options = serde_json::to_value(options).unwrap_or_default();
+        for (category, key) in [("model", "model"), ("thought_level", "effort"), ("mode", "mode")] {
             let Some(wanted) = part[key].as_str() else { continue };
             let option = (options.as_array().into_iter().flatten()).find(|o| o["category"] == category);
             let Some(option) = option else {
@@ -273,16 +328,12 @@ impl Acp {
             let set = json!({ "sessionId": session_id, "configId": option["configId"], "type": "id", "value": wanted });
             let set: schema::SetSessionConfigOptionRequest =
                 serde_json::from_value(set).map_err(|e| child::config_error(format!("`{key}`: {e}")))?;
-            request_within(known.conn.send_request(set).block_task())
+            let answer = request_within(known.conn.send_request(set).block_task())
                 .await
                 .map_err(|f| child::config_error(format!("`{key}` = `{wanted}`: {}", f.raw)))?;
+            options = serde_json::to_value(&answer.config_options).unwrap_or_default();
         }
-        let session = SessionRef(json!({ "session_id": session_id, "cwd": part["cwd"] }));
-        let mut shared = lock(&known.shared);
-        shared.record = self.recorder(part, &session_id);
-        shared.turn.session = Some(session_id);
-        shared.session = Some(session.clone());
-        Ok(session)
+        Ok(())
     }
 
     async fn resume(&self, instance: &InstanceHandle, session: &SessionRef, part: &Value) -> Result<(), Failure> {
@@ -291,7 +342,8 @@ impl Acp {
         params["sessionId"] = session.0["session_id"].clone();
         let request: schema::ResumeSessionRequest =
             serde_json::from_value(params).map_err(|e| child::config_error(format!("session/resume: {e}")))?;
-        request_within(known.conn.send_request(request).block_task())
+        let resumed = self
+            .ask(known.conn.send_request(request).block_task())
             .await
             .map_err(|mut failure| {
                 // The agent has no such session, or cannot resume one: there is no transcript to go on with.
@@ -300,9 +352,12 @@ impl Acp {
                 }
                 failure
             })?;
+        // A resumed session takes its options from its transcript: the config of this attempt goes again.
+        let id = session.0["session_id"].as_str().unwrap_or_default();
+        self.configure(&known, id, &resumed.config_options, part).await?;
         let mut shared = lock(&known.shared);
-        shared.turn.session = session.0["session_id"].as_str().map(str::to_owned);
-        shared.record = self.recorder(part, shared.turn.session.as_deref().unwrap_or_default());
+        shared.turn.session = Some(id.to_owned());
+        shared.record = self.recorder(part, id);
         shared.session = Some(session.clone());
         Ok(())
     }
@@ -342,7 +397,7 @@ impl Acp {
                 shared.send(events);
                 Ok(())
             }
-            Err(error) => Err(failed(&error)),
+            Err(error) => Err(self.failed(&error)),
         }
     }
 }
@@ -466,14 +521,18 @@ async fn initialize(
 async fn request_within<T>(
     request: impl Future<Output = Result<T, agent_client_protocol::Error>>,
 ) -> Result<T, Failure> {
-    match tokio::time::timeout(REQUEST_LIMIT, request).await {
-        Ok(answer) => answer.map_err(|e| failed(&e)),
-        Err(_) => {
-            let mut failure = crashed();
-            failure.raw = format!("the agent did not answer within {} s", REQUEST_LIMIT.as_secs());
-            Err(failure)
-        }
-    }
+    within(request).await?.map_err(|e| failed(&e))
+}
+
+/// The answer to a request, or the error it was answered with, within [`REQUEST_LIMIT`].
+async fn within<T>(
+    request: impl Future<Output = Result<T, agent_client_protocol::Error>>,
+) -> Result<Result<T, agent_client_protocol::Error>, Failure> {
+    tokio::time::timeout(REQUEST_LIMIT, request).await.map_err(|_| {
+        let mut failure = crashed();
+        failure.raw = format!("the agent did not answer within {} s", REQUEST_LIMIT.as_secs());
+        failure
+    })
 }
 
 /// Kills the process group of an instance that could not start, and hands its failure back.
@@ -591,12 +650,14 @@ impl Driver for Acp {
     }
 
     fn account(&self, process: &ProcessPart) -> Option<String> {
-        Some(part::account(&self.name, &process.0))
+        Some((self.profile.account)(&self.name, &process.0))
     }
 
     fn split(&self, config: &EffectiveConfig, plan: &SessionPlan) -> Result<Split, Failure> {
-        let process = part::process(&self.name, (&self.command, &self.args, &self.env), config, plan)?;
-        let session = part::session(config, plan)?;
+        let setup = (self.command.as_path(), self.args.as_slice(), &self.env);
+        let process = (self.profile.process)(&self.name, setup, config, plan, &self.state)?;
+        let mut session = part::session(config, plan)?;
+        (self.profile.session)(config, plan, &self.state, &mut session)?;
         Ok(Split::new(&self.name, ProcessPart(process), SessionPart(session)))
     }
 

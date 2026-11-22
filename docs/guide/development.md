@@ -8,6 +8,8 @@ mise is a convenience, not a requirement: install the same tools any way you lik
 
 - Rust 1.100 with the components `clippy`, `rustfmt`, `rust-src`, `rust-analyzer`.
 - cargo-nextest 0.9.151, cargo-deny 0.20.2, cargo-machete 0.9.2 (`cargo install --locked <crate>@<version>`).
+- node 26.12.0 and the npm package `@agentclientprotocol/claude-agent-acp` 0.109.1: the ACP agent of the `claude`
+  harness profile.
 - br 0.7.6, claude (line `2.1`), codex (line `0`): for the acceptance scenarios that run them; jq 1.8.2 for the
   demos' `run.sh`, which `mise run acceptance` runs; jq and rumdl 0.3.4 also for the model-free scenario of demo 2's
   format step. Demo 3 also needs gh 2.103.2, logged in, from its own `mise.toml` (`mise install` in

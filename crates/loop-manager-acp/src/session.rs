@@ -1,6 +1,7 @@
 //! What the session updates of an ACP v2 agent mean to the core (docs/design/adapters.md, "ACP v2 harnesses"): the
 //! state of the one session of an instance, turned into normalized events.
 
+use crate::profile::Profile;
 use agent_client_protocol::schema::MaybeUndefined;
 use agent_client_protocol::v2::schema::{
     self, BackgroundWork, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop, ToolCallStatus,
@@ -27,6 +28,8 @@ pub(crate) struct Turn {
     cancellable: HashSet<Work>,
     /// The background work of the session's last `idle`.
     background: Vec<Work>,
+    /// What the errors and notices of the agent mean.
+    profile: &'static Profile,
 }
 
 /// A piece of a session's work the client can cancel by its id: `terminal/cancel` or `tool_call/cancel`.
@@ -46,6 +49,14 @@ fn cancel<T>(capabilities: &MaybeUndefined<T>, cancel: impl Fn(&T) -> bool) -> O
 }
 
 impl Turn {
+    /// The session of an instance of the agent of `profile`, before it is opened.
+    pub(crate) fn new(profile: &'static Profile) -> Self {
+        Self {
+            profile,
+            ..Self::default()
+        }
+    }
+
     /// A prompt goes out with `key`.
     pub(crate) fn sent(&mut self, key: PromptKey) {
         self.pending = Some(key);
@@ -105,6 +116,11 @@ impl Turn {
                 self.can_cancel(Work::ToolCall(id), can);
                 self.activity(now)
             }
+            SessionUpdate::Notice(notice) => {
+                let mut out = self.activity(now);
+                out.extend((self.profile.notice)(notice).map(Normalized::Failure));
+                out
+            }
             SessionUpdate::TerminalUpdate(terminal) => {
                 let can = match terminal.exit_status {
                     MaybeUndefined::Value(_) => Some(false),
@@ -159,7 +175,7 @@ impl Turn {
         }
         if std::mem::take(&mut self.in_turn) {
             self.tools.clear();
-            let stop_reason = match stop(idle.stop_reason.as_ref()) {
+            let stop_reason = match stop(idle.stop_reason.as_ref(), self.profile.classify) {
                 Ok(reason) => reason,
                 Err(failure) => {
                     out.push(Normalized::Failure(failure));
@@ -200,8 +216,8 @@ impl Turn {
     }
 }
 
-/// The stop reason of a turn, or the failure it stands for.
-fn stop(reason: Option<&AcpStop>) -> Result<StopReason, Failure> {
+/// The stop reason of a turn, or the failure it stands for; `classify` tells what an `error` means.
+fn stop(reason: Option<&AcpStop>, classify: fn(i32, &str, Option<&Value>) -> Failure) -> Result<StopReason, Failure> {
     let failure = |kind, raw: String| {
         let mut failure = Failure::new(kind, Source::Harness);
         failure.raw = raw;

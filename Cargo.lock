@@ -1090,6 +1090,7 @@ dependencies = [
  "agent-client-protocol",
  "base64",
  "futures",
+ "loop-manager-claude",
  "loop-manager-contract",
  "serde_json",
  "tempfile",

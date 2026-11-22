@@ -16,6 +16,15 @@ pub(crate) fn process(
     plan: &SessionPlan,
 ) -> Result<Value, Failure> {
     unsupported(harness, config).map_err(config_error)?;
+    Ok(fields(setup, config, plan))
+}
+
+/// The keys of the process part every profile has, with no refusal.
+pub(crate) fn fields(
+    setup: (&Path, &[String], &Map<String, Value>),
+    config: &EffectiveConfig,
+    plan: &SessionPlan,
+) -> Value {
     let (command, args, env) = setup;
     let mut env = env.clone();
     env.extend(config.env.iter().map(|(k, v)| (k.clone(), json!(v.value))));
@@ -36,10 +45,10 @@ pub(crate) fn process(
         bead,
         ..
     }) = plan;
-    Ok(json!({
+    json!({
         "command": command, "args": args, "env": env, "workdir": workdir,
         "run": run, "attempt": attempt, "token": token, "actor": actor, "bead": bead,
-    }))
+    })
 }
 
 /// What a harness known only by its config has no mechanism for: refused by key, so the agent's config says what to
@@ -134,6 +143,12 @@ pub(crate) fn base(env: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(
 /// The attempt environment (contracts 4.6) on the [`base`].
 pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(String, String)>, Failure> {
     let mut env = base(&p["env"], id, socket)?;
+    attempt(&mut env, p);
+    Ok(env)
+}
+
+/// Adds the variables of the attempt of the process part `p` to `env`: its run, token, tracker actor and bead.
+pub(crate) fn attempt(env: &mut Vec<(String, String)>, p: &Value) {
     let text = |v: &Value| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string());
     env.extend([
         ("LOOP_MANAGER_RUN".to_owned(), text(&p["run"])),
@@ -146,7 +161,6 @@ pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(Str
             .as_str()
             .map(|b| ("LOOP_MANAGER_BEAD".to_owned(), b.to_owned())),
     );
-    Ok(env)
 }
 
 /// The account the gates use: a hash of the command, the names of the environment and the `${NAME}` references among

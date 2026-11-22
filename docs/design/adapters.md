@@ -62,7 +62,8 @@ ACP v2 agent ([config](config.md#harness-and-model)): `command` is the executabl
 its environment under the agent's own `env`, `trace` a bool that turns on the protocol trace. Any other key, or a
 `binary`, is a config error that names it. The driver is `loop_manager_acp::Acp`, the root's fallback in
 `crates/loop-manager/src/harness.rs` for a name outside `ADAPTERS`; the crate depends on `agent-client-protocol` 5.5.1
-with the feature `unstable_protocol_v2`.
+with the feature `unstable_protocol_v2`. What the driver does for an agent it knows by name, beyond what follows, is
+that agent's [profile](#profiles).
 
 - **A process per session.** The attempt environment and the agent's home are its process's, so an instance holds one
   session and stops when the session is done (`sessions_per_instance` 1, `instance_idle` 0). The process is spawned by
@@ -75,7 +76,9 @@ with the feature `unstable_protocol_v2`.
 - **What the config sets.** `start_session` is `session/new` with the workdir as `cwd`, the agent's MCP servers
   (stdio and HTTP, service placeholders verbatim) and the system prompt as `systemPrompt` in `append` mode. A `model`
   and an `effort` go through `session/set_config_option` (`type: "id"`) to the option of category `model` and
-  `thought_level` the agent offers in its `session/new` answer; an agent with no such option fails the attempt with
+  `thought_level` the agent offers in its `session/new` answer, then a `mode` the profile names to the option of
+  category `mode`, in that order (the effort levels and the modes on offer depend on the model), each looked up in
+  the option list of the agent's last answer; an agent with no such option fails the attempt with
   `config_error` naming the key, and a value the agent refuses with `config_error` naming the key and the value. The
   instance keeps the `capabilities` of the agent's `initialize` answer, and the driver sends nothing they do not
   allow: before `session/new` or `session/resume` is sent, a system prompt (the agent's `system_prompt` and the
@@ -109,10 +112,12 @@ with the feature `unstable_protocol_v2`.
   and has no `exitStatus`, `tool_call/cancel` for a listed tool call whose last `tool_call_update` advertises it and
   is not final. A subagent, other work, or work without the capability is left to end by itself or to its
   background budget; an error answer (the work ended first) is ignored.
-- **What ACP does not give.** `resume_session` is `session/resume`; an agent with no such session (`-32002`) or no
-  such method (`-32601`) fails it with `transcript_divergence`, and the core goes on with a fresh session. Whether the
-  agent holds a prompt it does not tell: `transcript` answers `Present { delivered: false }`, so a resumed attempt
-  sends its prompt again with the same idempotency key. Only the agent's memory of that key keeps the prompt from
+- **What ACP does not give.** `resume_session` is `session/resume` with the same session part, then the same config
+  options as after `session/new`: an agent may take them from its transcript, and the config of the new attempt
+  wins. An agent with no such session (`-32002`) or no such method (`-32601`) fails it with
+  `transcript_divergence`, and the core goes on with a fresh session. Whether the agent holds a prompt it does not
+  tell: `transcript` answers `Present { delivered: false }`, so a resumed attempt sends its prompt again with the
+  same idempotency key. Only the agent's memory of that key keeps the prompt from
   being taken twice, and an agent whose process died with the daemon has none: the delivery may repeat. There is no
   transcript file for `chat_log` and no live tap.
 - **The account.** `account` is a hash of the `command`, the names of the harness's and the agent's `env` and the
@@ -130,9 +135,10 @@ with the feature `unstable_protocol_v2`.
   as JSON, or as a string when it does not parse. The directory is made with mode 0700, the file 0600; a file stops
   growing at 256 MiB. Before a line is written, these values are replaced by `[redacted]` wherever they occur in a
   string of it: the attempt token, the values the harness's and the agent's `env` resolved to, the values of the
-  daemon's `HOST_NETWORK_ENV` (a proxy URL may carry a login), and the values of the `env` and `headers` of the
-  session's MCP servers (service tokens arrive there). A value shorter than 8 characters is not redacted: it cannot be
-  told from ordinary text (a one-letter issue prefix, a flag `1`). Prompt text, the agent's messages and tool output
+  daemon's `HOST_NETWORK_ENV` (a proxy URL may carry a login), the values of the `env` and `headers` of the
+  session's MCP servers (service tokens arrive there), and what the [profile](#profiles) names a secret. A value
+  shorter than 8 characters is not redacted: it cannot be told from ordinary text (a one-letter issue prefix, a flag
+  `1`). Prompt text, the agent's messages and tool output
   are not redacted beyond those values: a secret a tool prints in another form is written as it is.
   `trace` is no part of the process part, so turning it on changes no fingerprint. The periodic resync removes a
   trace file not written for `[history] keep_days` (default 30; 0 keeps them forever;
@@ -148,6 +154,76 @@ with a background terminal cancelled, killed in a turn (`harness_crash`, then th
 in a turn; and checks the version refusals, the capability checks and the redacted trace.
 `crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates, `src/tests.rs` the driver's calls
 against an agent in the test's process.
+
+### Profiles
+
+A profile is what the ACP driver does for one agent it knows by name, at fixed points of a session: the table
+`PROFILES` in `crates/loop-manager-acp/src/profile.rs`, one row per agent, its functions in `src/profile/<name>.rs`.
+A harness with no row gets the generic profile, which is everything above: the config's keys and the refusal of what
+the driver has no mechanism for.
+
+| Point of the driver | What a profile gives |
+|---|---|
+| `split`, the process part | the keys the process needs, or the refusal (generic) |
+| `split`, the session part | what goes with `session/new` and `session/resume` beyond ACP, and a `mode` |
+| `start_instance`, before the spawn and after the exit | the files the process reads, and which of them go with it |
+| the process environment | the daemon's variables it gets and what it adds; the variables that carry a credential |
+| the protocol trace | the values of the session part that are secrets |
+| an error of a request or of a turn, a `notice` | the failure it stands for |
+| `account` | the hash the gates use |
+
+**`claude`** drives `claude-agent-acp`, the ACP adapter of claude (`@agentclientprotocol/claude-agent-acp` on npm,
+pinned in `mise.toml` with the `node` it runs on); the adapter carries its own claude CLI. While `ADAPTERS` lists
+`loop-manager-claude`, the root drives `claude` by that adapter and makes no ACP driver under the name.
+
+- **What it sends.** claude's own options go in `_meta.claudeCode.options` of `session/new` and `session/resume`:
+  `settingSources: ["project", "local"]` for a session with `inherit_host = false`; `settings`, the `native.claude`
+  block without `permission_mode`, with `claudeMdExcludes` of the host's `CLAUDE.md` and rules for an isolated
+  session and the enabled hooks added to its `hooks`; `agents`, a definition per target (description, prompt, model,
+  effort, the target's own MCP servers as a list of one-server maps, its own hooks); `plugins`, the one local plugin
+  of the skills. A key is absent when it has nothing, and `_meta` with them. The permission mode is the config option
+  `mode`, set after `model` and `effort` on every new and resumed session: `native.claude.permission_mode`, else
+  `native.claude.permissions.defaultMode`, else `bypassPermissions` (decision 117); otherwise the adapter would pick
+  a starting mode of its own. A mode the adapter does not offer (`dontAsk`; `bypassPermissions` for root without
+  `IS_SANDBOX`) fails the attempt with `config_error` naming `mode`.
+- **The directories.** `<state>/acp/claude/<run>-<attempt>/` holds the attempt's generated files. Its `home`, made
+  with mode 0700 before the spawn, is the claude config directory (`CLAUDE_CONFIG_DIR`) of an isolated session: the
+  adapter and its CLI keep the session's settings and transcript there. The `SessionRef` keeps it as `home`; a
+  resumed session takes its `home` from there and its plugin from the new attempt's directory. `plugin` holds a
+  manifest and a link per skill to its directory (the targets' skills among them, the session's first); it is
+  written before the spawn and removed when the process exits.
+- **What stays on disk.** The `home` of an isolated session, with its transcript, in the directory of its attempt;
+  the plugin of a process the daemon did not see exit (a daemon that died), until a start of the same attempt
+  rebuilds it.
+- **The environment.** The daemon's `PATH`, `HOME` and `LANG`; for a session that inherits the host also its
+  `HOST_NETWORK_ENV` and `CLAUDE_CONFIG_DIR`. Then the harness's and the agent's `env` and the attempt's variables;
+  `CLAUDE_CODE_ENTRYPOINT=loop-manager`, and `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `DISABLE_TELEMETRY`,
+  `DISABLE_ERROR_REPORTING`, `DISABLE_FEEDBACK_COMMAND`, `DISABLE_AUTOUPDATER` and
+  `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` set to `1`, unless the `env` or `native.claude.env` names them;
+  `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` (decision 143). An isolated session gets `CLAUDE_CONFIG_DIR=<home>`
+  and, with no `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` of its own, the host's
+  login as `CLAUDE_CODE_OAUTH_TOKEN` (read from `.credentials.json` at every spawn). The protocol trace redacts
+  those three variables, the values of `native.claude.env` and the `env` and `headers` of the targets' MCP servers.
+- **Failures.** By the error's code first (`-32000` `auth_required`, `-32602` `config_error`, `-32002` on a resume
+  `transcript_divergence`), then by `data.errorKind`: `authentication_failed`, `oauth_org_not_allowed`,
+  `cloud_credential_error`, `verification_required` are `auth_required`; `billing_error`, `account_on_hold`
+  `billing`; `rate_limit` is `billing` with `rateLimit.errorCode` `credits_required`, `quota_exhausted` with
+  `rateLimit.status` `rejected` or a message that starts with `You've hit your` (`retry_at_ms` from
+  `rateLimit.resetsAt`), else `rate_limited`; `overloaded`, `server_error` are `overloaded`; `model_not_found`
+  `config_error`; `invalid_request` with a message that starts with `Prompt is too long` `context_overflow`. Then
+  `data.startupFailureReason`, with the reasons of the native driver: `session_held_by_background` is
+  `transcript_divergence`, the gateway sign-in ones `auth_required`, the configuration ones `config_error`. Then
+  `data.cause`, or a message that starts with `Claude Code stopped`: `harness_crash`. Anything else is `unknown` with
+  the adapter's message. `rate_limited` and `overloaded` are `retried_by_harness`: the CLI retries before it gives
+  up. A `notice` titled `MCP server "<name>" failed to start` or `… needs authentication` is a `tool_failure`
+  (decision 119); the adapter sends one for the servers of the session part only.
+- **The account.** The native driver's hash of where the credential comes from: the name and value of the first
+  credential variable of `env`, else the host's claude config directory. An account keeps its id across the two
+  drivers.
+
+`crates/loop-manager-acp/src/profile/tests.rs` holds the claude profile: the parts and the environment of a typical
+agent, the account against the native driver's, the failures row by row, the plugin around a spawned process, and
+the config options after `session/new` and `session/resume` against an agent in the test's process.
 
 ## What the core expects of a driver
 
