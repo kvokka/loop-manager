@@ -70,7 +70,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | pi and other harnesses | Not planned |
 | ACP as the transport "down" | Native protocols; the driver interface follows the semantics of ACP v2, so an ACP driver can be one more implementation |
 | A human joining a live session, handover of control | A later release: no operations, states or stubs for it now. A human sees the session reference in the run's state and opens the conversation with the harness's own tools after the run ([frontends](api/frontends.md)) |
-| An ACP hub "up" for editors | Not planned |
+| Prompting or controlling work from an editor over ACP | Not planned: `loop-manager acp` is a read-only ACP v2 view of tasks and their transcripts ([ACP](api/acp.md)) |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
 | A web interface, a dashboard | The task board is `bv`; observation is the CLI and the event stream |
 | Alerting a human about a failure | Only the event journal and the logs; a notice addon is on the [roadmap](roadmap.md) |

@@ -18,6 +18,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [design/config.md](design/config.md) | every config file and key; layers and "explain config"; packs, agents, formulas, triggers, addons |
 | [api/frontends.md](api/frontends.md) | the HTTP API and the CLI; what a human sees and does with a run |
 | [api/mcp.md](api/mcp.md), [api/openapi.json](api/openapi.json) | the MCP server; the OpenAPI document |
+| [api/acp.md](api/acp.md) | `loop-manager acp`: the read-only ACP v2 view of tasks for editors, and how a client starts it |
 | [../demos/README.md](../demos/README.md) | two live examples |
 | [../devloop/README.md](../devloop/README.md) | the pack that develops loop-manager with loop-manager |
 
