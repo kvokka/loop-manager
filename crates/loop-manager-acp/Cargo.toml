@@ -1,0 +1,23 @@
+[package]
+name = "loop-manager-acp"
+description = "The ACP v2 harness driver of loop-manager: any agent that speaks ACP v2 over stdio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+loop-manager-contract = { version = "0.0.1", path = "../loop-manager-contract" }
+agent-client-protocol = { version = "=5.5.1", features = ["unstable_protocol_v2", "unstable_end_turn_token_usage"] }
+futures = "0.3.32"
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
+tokio-stream = { version = "0.1.19", features = ["io-util"] }
+toml = "1.2.1"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros", "time"] }

@@ -45,32 +45,44 @@ fn setup<'a>(binary: PathBuf, harness: &'a config::Harness, paths: &'a Paths) ->
 }
 
 /// The driver of harness `name` on its resolved binary, with the binary and its source; `None` for a harness loop-manager
-/// has no adapter for or settings it does not take, which `load` refused.
+/// has no adapter for or settings it does not take, which `load` refused. A harness with no adapter and a `command` is
+/// an ACP v2 agent (docs/design/adapters.md); its binary is that command.
 pub(crate) fn driver(
     name: &str,
     harness: &config::Harness,
     paths: &Paths,
 ) -> Option<(Arc<dyn Driver>, PathBuf, &'static str)> {
-    let adapter = adapter(name)?;
+    let Some(adapter) = adapter(name) else {
+        let acp = loop_manager_acp::Acp::new(name, &harness.options, Some(&paths.socket)).ok()?;
+        let command = harness.options["command"].as_str().unwrap_or_default().into();
+        return Some((Arc::new(acp), command, "config"));
+    };
     let (binary, source) = binary(name, harness.binary.as_deref());
     let driver = (adapter.new)(&setup(binary.clone(), harness, paths)).ok()?;
     Some((driver, binary, source))
 }
 
-/// The oldest harness version the adapter of `driver` supports, inclusive.
-pub(crate) fn minimum(driver: &Arc<dyn Driver>) -> (u32, u32, u32) {
-    adapter(driver.harness())
-        .expect("every driver comes from an adapter")
-        .minimum
+/// The oldest harness version the adapter of `driver` supports, inclusive; `None` for an ACP harness of the config,
+/// whose version loop-manager does not know.
+pub(crate) fn minimum(driver: &Arc<dyn Driver>) -> Option<(u32, u32, u32)> {
+    adapter(driver.harness()).map(|a| a.minimum)
 }
 
-/// What is wrong with `[harness.<name>]`: no adapter for it, or settings its adapter does not take.
+/// What is wrong with `[harness.<name>]`: settings its adapter does not take, or, with no adapter, no ACP agent
+/// `command` or a key the ACP driver does not take.
 fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option<String> {
     let Some(adapter) = adapter(name) else {
-        let known = ADAPTERS.iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
-        return Some(format!(
-            "loop-manager has no adapter for harness `{name}`; known: {known}"
-        ));
+        if !harness.options.contains_key("command") {
+            let known = ADAPTERS.iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+            return Some(format!(
+                "loop-manager has no adapter for harness `{name}` (known: {known}); an ACP v2 agent is named by \
+                 `command`"
+            ));
+        }
+        if harness.binary.is_some() {
+            return Some("`binary`: an ACP harness names its agent executable by `command`".into());
+        }
+        return loop_manager_acp::Acp::new(name, &harness.options, None).err();
     };
     // The binary is not resolved for a check: no adapter reads it before a spawn.
     let binary = harness.binary.clone().unwrap_or_else(|| name.into());

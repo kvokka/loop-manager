@@ -4,6 +4,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod acp;
 mod addon_hooks;
 mod agent_mail;
 mod api;

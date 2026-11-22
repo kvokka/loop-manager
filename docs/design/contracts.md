@@ -363,7 +363,7 @@ live session ([frontends](../api/frontends.md#humans-and-runs)).
 
 ```rust
 trait Driver: Send + Sync {
-    fn harness(&self) -> &'static str;                        // "claude", "codex"
+    fn harness(&self) -> &str;                                // "claude", "codex", or an ACP harness of the config
     fn capabilities(&self, process: &ProcessPart) -> Capabilities;
     fn account(&self, process: &ProcessPart) -> Option<String>;
     fn split(&self, config: &EffectiveConfig, plan: &SessionPlan) -> Result<Split, Failure>;   // kind config_error
@@ -463,9 +463,9 @@ Success traps are the adapter's: claude `subtype:"success"` with `is_error:true`
 `Capabilities { sessions_per_instance, instance_idle, min_version }`:
 
 - `sessions_per_instance`: claude 1 (a process per session, 8); codex the config value `max_sessions`
-  (default 8).
+  (default 8); an ACP harness of the config 1 ([adapters](adapters.md#acp-v2-harnesses)).
 - `instance_idle`: how long an instance without sessions lives on (8): claude 0, codex the config value
-  `instance_idle_s` (default 60 s).
+  `instance_idle_s` (default 60 s), an ACP harness 0.
 - Whether the harness retries 429 itself is the adapter's knowledge: it sets `Failure.retried_by_harness` on the
   failure, and the policy never retries on top of a harness that already did. claude retries 429 and 5xx itself, up
   to 10 times by default (`CLAUDE_CODE_MAX_RETRIES`; 7 seen in the experiment log), so its `rate_limited` and
@@ -477,7 +477,8 @@ Success traps are the adapter's: claude `subtype:"success"` with `is_error:true`
 - `min_version`: the oldest supported version of the harness binary, inclusive, with no upper bound; the same as
   `Adapter.minimum` ([adapters](adapters.md)): claude 2.1.329, codex 0.171.0. A version below it, or `--version`
   output with no `major.minor.patch` in it, gets a warning naming the minimum from the daemon at start and from
-  `loop-manager doctor`; the harness still runs.
+  `loop-manager doctor`; the harness still runs. An ACP harness of the config has no known version: its check is
+  the protocol version `initialize` settles on.
 
 `account(process)` returns the account id the gates use (7): a stable hash of the credential source of the
 process part, never the credential itself; an `env` reference counts as written (`${NAME}`), so the id says where

@@ -19,8 +19,8 @@ The behaviour itself is described in the document named under each heading; this
 - No ACP hub "up" for editors.
 - The orchestrator's state is its own SQLite database.
 - Config files are TOML.
-- Adapters are modules of the one binary, with no protocol between processes; the outside path later is an ACP v2
-  driver.
+- Adapters are modules of the one binary; a harness without one is an ACP v2 agent, a child process of the daemon
+  driven over its stdio by the one ACP driver.
 - One journal and one `seq` counter per orchestrator, for all projects.
 - The core does not store the content of a conversation: the live view relays the adapter's stream, the history is
   the harness's transcript.

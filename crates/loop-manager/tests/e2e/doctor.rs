@@ -175,11 +175,21 @@ fn a_harness_with_no_adapter_is_a_config_error_naming_the_known_ones() {
     let (passed, found) = doctor(dir.path());
     let (config, why) = level(&found, "config");
     assert!(!passed && config == "error", "{found:?}");
-    let want = "`harness.opencode`: loop-manager has no adapter for harness `opencode`; known: claude, codex";
-    assert!(why.ends_with(want));
+    let want = "`harness.opencode`: loop-manager has no adapter for harness `opencode` (known: claude, codex); an ACP \
+                v2 agent is named by `command`";
+    assert!(why.ends_with(want), "{why}");
     let config = dir.path().join("config/loop-manager/config.toml");
     let out = lm(dir.path(), &["config", "check", "--config", config.to_str().unwrap()]);
     assert!(!out.status.success() && String::from_utf8_lossy(&out.stdout).contains("known: claude, codex"));
+}
+
+#[test]
+fn an_acp_harness_names_the_key_it_does_not_take() {
+    let dir = tree("[harness.mine]\ncommand = \"/opt/mine/acp\"\nmax_sessions = 2\n");
+    let (passed, found) = doctor(dir.path());
+    let (config, why) = level(&found, "config");
+    assert!(!passed && config == "error", "{found:?}");
+    assert!(why.ends_with("`harness.mine`: unknown key `max_sessions`"), "{why}");
 }
 
 #[test]

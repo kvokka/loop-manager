@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 loop-manager-br = { version = "0.0.1", path = "../loop-manager-br" }
+loop-manager-acp = { version = "0.0.1", path = "../loop-manager-acp" }
 loop-manager-claude = { version = "0.0.1", path = "../loop-manager-claude" }
 loop-manager-codex = { version = "0.0.1", path = "../loop-manager-codex" }
 loop-manager-core = { version = "0.0.1", path = "../loop-manager-core" }

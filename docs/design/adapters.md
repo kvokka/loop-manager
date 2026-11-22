@@ -4,8 +4,9 @@ A harness is an agent CLI loop-manager drives (claude, codex). The core treats e
 ([contracts 4](contracts.md#4-driver-interface)); each harness gets an adapter crate, `crates/loop-manager-<name>`, that
 translates its protocol into the trait. Everything known of one harness — its protocol, the shape of its failures, its
 options, its model short names, its `doctor` checks — lives in its adapter. Adapters are modules of the one
-`loop-manager` binary, not processes of their own: there is no adapter protocol between processes; the way to connect an
-outside harness later is a generic ACP v2 driver.
+`loop-manager` binary, not processes of their own. A harness the build has no adapter for is an agent executable that
+speaks the Agent Client Protocol, version 2, named in the config alone and driven by the one ACP driver,
+`crates/loop-manager-acp` ([ACP v2 harnesses](#acp-v2-harnesses)).
 
 Where adapters stand among the other parts, and the boundaries the build checks, is in the
 [architecture](../architecture.md). The adapter never decides policy: retry, park and refuse live in addons and
@@ -53,6 +54,51 @@ config ([config](config.md#where-the-bundled-addons-end-and-the-core-begins)).
    Nothing else in the root names a harness; a `[harness.<name>]` with no row is a config error that lists the known
    ones.
 4. The binary pinned in `mise.toml` by release line ([harness updates](../harness-updates.md)) and the contract suite below.
+
+## ACP v2 harnesses
+
+A `[harness.<name>]` of the orchestrator config whose name has no adapter in the build and which has a `command` is an
+ACP v2 agent ([config](config.md#harness-and-model)): `command` is the executable, `args` its literal arguments, `env`
+its environment under the agent's own `env`. Any other key, or a `binary`, is a config error that names it. The driver
+is `loop_manager_acp::Acp`, the root's fallback in `crates/loop-manager/src/harness.rs` for a name outside `ADAPTERS`;
+the crate depends on `agent-client-protocol` 5.5.1 with the feature `unstable_protocol_v2`.
+
+- **A process per session.** The attempt environment and the agent's home are its process's, so an instance holds one
+  session and stops when the session is done (`sessions_per_instance` 1, `instance_idle` 0). The process is spawned by
+  `child::spawn` with the clean base of `base_env` (`PATH`, `HOME`, `LANG` and `HOST_NETWORK_ENV` of the daemon) and the
+  attempt environment; the JSON-RPC lines go over its stdin and stdout.
+- **Version 2 or nothing.** `start_instance` sends `initialize` with `protocolVersion: 2` and waits for the answer. An
+  agent that settles on another version, answers `-32022` or offers no `capabilities.session` fails the attempt with
+  `config_error`: "harness `x`: `<command>` negotiated ACP protocol version 1; loop-manager requires version 2".
+- **What the config sets.** `start_session` is `session/new` with the workdir as `cwd`, the agent's MCP servers
+  (stdio and HTTP, service placeholders verbatim) and the system prompt as `systemPrompt` in `append` mode. A `model`
+  and an `effort` go through `session/set_config_option` to the option of category `model` and `thought_level` the
+  agent offers in its answer; an agent with no such option fails the attempt with `config_error` naming the key. The
+  driver has no mechanism for `hooks`, `skills`, `subagents`, a `native` block or `inherit_host = false`: an agent
+  with one fails its attempt with `config_error` naming the key.
+- **The turn.** `send_prompt` is `session/prompt` with the `PromptKey` as `idempotencyKey`; the agent answers once it
+  took the prompt. `prompt.acked` comes from that answer or from the first `state_update: running` of the session,
+  whichever is first, so it always precedes `turn.started`. `state_update: idle` ends the turn: `end_turn`, no reason
+  or an unknown one is `completed`, `cancelled` is `cancelled`; `max_tokens` (`context_overflow`), `max_turn_requests`
+  (`runaway_turn`), `refusal` and `error` (by its JSON-RPC code: `-32000` `auth_required`, `-32602` `config_error`,
+  else `unknown` with the agent's words) are a `failure`, then `failed`. Then `state{idle, background}`, `background`
+  true while the update lists background work. The idle's `usage` is the turn's `usage`; ACP carries no rate limit
+  and no retry signal. Any other update of the session or of a child session (a subagent) is `activity`, at most once
+  a second, `tool_running` while a tool call is `pending` or `in_progress`; a child session never drives the state.
+  The exit of the process in an open turn is `harness_crash`.
+- **Permissions.** loop-manager answers a `session/request_permission` with the agent's `reject_once` option, else
+  `cancelled`, and reports it as `permission_denied`: no person answers a run's request (decision 116).
+- **What ACP does not give.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. ACP v2 lets
+  a client stop no single piece of background work, so `stop_background` does nothing and the run waits for its
+  background budget. `resume_session` is `session/resume`; an agent with no such session or method fails it with
+  `transcript_divergence`. `transcript` answers `Present { delivered: false }`: a resumed attempt sends its prompt
+  again with the same idempotency key, which an agent that keeps its keys takes once. There is no transcript file
+  for `chat_log` and no live tap.
+
+The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the
+prompt, runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, keeps the idempotency keys of its process, and
+with `--v1` speaks only protocol version 1. `crates/loop-manager/tests/e2e/acp.rs` runs a formula on it through the
+finisher and checks the v1 refusal; `crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates.
 
 ## What the core expects of a driver
 
@@ -114,9 +160,8 @@ updates, steps).
 
 Made for the two harnesses there are; none is changed before a harness needs it.
 
-- `harness()` returns a constant equal to the name in the config, and an adapter has one name: one adapter for
-  several harnesses (a generic ACP adapter behind `[harness.gemini]` and `[harness.opencode]`) cannot be listed
-  twice yet.
+- `harness()` returns the name in the config: an adapter's constant, or the `[harness.<name>]` of an ACP agent, so
+  one ACP driver serves any number of names.
 - `account(&ProcessPart)` assumes the process decides the account, true when the credential is a key in the
   environment or a login directory. For a harness that picks a provider per model it is the session's, not the
   process's. The gate key is `account:<harness>/<hash>`, so one provider key used by two harnesses is two gates.

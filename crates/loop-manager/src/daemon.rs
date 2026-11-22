@@ -106,7 +106,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         let Some((driver, binary, _)) = driver(name, harness, &paths) else {
             continue;
         };
-        if let Err(why) = loop_manager_core::supported_version(&binary, minimum(&driver)) {
+        if let Some(Err(why)) = minimum(&driver).map(|m| loop_manager_core::supported_version(&binary, m)) {
             eprintln!("loop-manager daemon: warning: {why}");
         }
         drivers.push(driver);

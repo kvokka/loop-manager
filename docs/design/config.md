@@ -271,8 +271,9 @@ setting. Which vendor serves the model is the harness's own setting (its host co
 as the other launch settings: an agent edit, a variant, a pack, a formula step.
 
 A harness with an adapter in the build (`claude`, `codex`) needs no `[harness.<name>]` section; the section only sets its
-defaults. Any other name is an error: harness `x` is neither of this build nor in the orchestrator config. Some layer
-must set the harness. These are load errors:
+defaults. Any other name is an ACP v2 agent the orchestrator config names by `command`
+([adapters](adapters.md#acp-v2-harnesses)): it needs no rebuild of loop-manager. A name with neither an adapter nor a
+`command` is an error, as is a harness no layer names. Some layer must set the harness. These are load errors:
 every ai step of every formula of a project must assemble on every rig and on the root, and an error names the
 project file, the formula and rig (`formula `kit.implement` on rig `backend`: no layer sets `harness``).
 
@@ -358,6 +359,12 @@ binary = "/opt/claude/bin/claude"   # optional explicit path; otherwise mise, th
 [harness.codex]                     # keys beyond `model` and `binary` are the adapter's; claude takes none
 max_sessions = 8                    # codex: threads per app-server before a second one starts (default 8)
 instance_idle_s = 60                # codex: seconds an app-server without threads lives on (default 60; 0 stops it at once)
+
+[harness.my-agent]                  # no adapter in the build: an ACP v2 agent run as a child process of the daemon
+command = "/opt/my-agent/bin/acp"   # the agent executable, run without a shell
+args = ["--stdio"]                  # literal arguments (default none)
+env = { MY_AGENT_KEY = "${KEY}" }   # the agent's environment, under the agent's own `env`; `${NAME}` as in `env`
+model = "large"                     # set through the session's `model` config option the agent offers
 
 [[addon]]                          # an installed addon; its orchestrator side is enabled
 path = "~/loop-manager-addons/loop-manager-addon-mail"

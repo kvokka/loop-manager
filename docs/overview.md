@@ -30,7 +30,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **project** | a directory with `loop-manager.toml`: a root, a set of rigs, packs, addons and one tracker database |
 | **root** | the root directory of a project: where agents of scope `root` work, and in a one-repository project the executors too. By default the directory of `loop-manager.toml`, named `root`; both are settings. It need not be a git repository |
 | **rig** | a repository of a project on disk, with its bead prefix and variables (`test_cmd`, `lint_cmd`, …) |
-| **harness** | a kind of agent CLI: `claude`, `codex`. One adapter each |
+| **harness** | a kind of agent CLI: `claude`, `codex`, one adapter each; or an ACP v2 agent named in the config, all on one ACP driver |
 | **harness instance** | a running harness process (an app-server or a session process) that serves one or several sessions |
 | **agent** | a general role (`coder`, `planner`): a role prompt, a prompt template, skills, a scope and default launch settings. It knows nothing of a concrete task. The core's code names no role |
 | **agent scope** | `rig`: the agent works in one rig's directory; `root`: in the root, over all rigs of the project |
@@ -68,7 +68,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id" |
 | opencode | The next release, after a spike ([experiments](design/experiments.md)) |
 | pi and other harnesses | Not planned |
-| ACP as the transport "down" | Native protocols; the driver interface follows the semantics of ACP v2, so an ACP driver can be one more implementation |
+| ACP for claude and codex | Their native protocols; a harness the build has no adapter for is an ACP v2 agent named in the config ([adapters](design/adapters.md#acp-v2-harnesses)) |
 | A human joining a live session, handover of control | A later release: no operations, states or stubs for it now. A human sees the session reference in the run's state and opens the conversation with the harness's own tools after the run ([frontends](api/frontends.md)) |
 | An ACP hub "up" for editors | Not planned |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
@@ -79,7 +79,6 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | A bundled check "the work is really done" | A check is a formula step, a script or an agent, written by the author of the pack or the project |
 | Account rotation and failover between subscriptions | A zone of vendor-policy risk; not the core's business |
 | Translation of hooks between harness dialects | The hook formats of claude and codex are nearly one; a translator when a third dialect appears |
-| A generic ACP adapter, one adapter for several harnesses | When a third harness appears |
 | A model provider setting apart from the harness | The user names a harness; the provider inside it is the harness's native setting |
 | A chain of several formulas over one bead | `pass` closes the bead; the next work comes by taking the next ready bead |
 | A demo "loop-manager develops itself" | Later: the agent setup of this repository as a loop-manager pack |

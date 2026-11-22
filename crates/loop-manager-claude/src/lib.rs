@@ -183,7 +183,7 @@ impl Claude {
 }
 
 impl Driver for Claude {
-    fn harness(&self) -> &'static str {
+    fn harness(&self) -> &str {
         "claude"
     }
 

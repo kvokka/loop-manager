@@ -159,7 +159,7 @@ impl Codex {
 }
 
 impl Driver for Codex {
-    fn harness(&self) -> &'static str {
+    fn harness(&self) -> &str {
         "codex"
     }
 

@@ -228,7 +228,7 @@ pub type EventSink = mpsc::UnboundedSender<DriverEvent>;
 /// One harness, behind one object-safe trait. The core owns one driver per harness.
 pub trait Driver: Send + Sync {
     /// The harness name the config uses for it, `[harness.<name>]`.
-    fn harness(&self) -> &'static str;
+    fn harness(&self) -> &str;
     fn capabilities(&self, process: &ProcessPart) -> Capabilities;
     /// The account id the gates use (docs/design/contracts.md 7): a stable hash of the credential source, never the
     /// credential.

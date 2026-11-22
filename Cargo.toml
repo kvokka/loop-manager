@@ -5,6 +5,7 @@ members = ["crates/*"]
 # `-p` or `--workspace` leave it out. The gate (`mise run ci`) checks the whole workspace.
 default-members = [
   "crates/loop-manager",
+  "crates/loop-manager-acp",
   "crates/loop-manager-br",
   "crates/loop-manager-claude",
   "crates/loop-manager-codex",

@@ -28,7 +28,7 @@ if [[ -n $found ]]; then
   exit 1
 fi
 # The adapters build without the engine: what they share with it is `loop-manager-contract`. Their tests may use it.
-for crate in loop-manager-claude loop-manager-codex loop-manager-br loop-manager-addons; do
+for crate in loop-manager-acp loop-manager-claude loop-manager-codex loop-manager-br loop-manager-addons; do
   if cargo tree -q -e normal,build --prefix none -p "$crate" | grep -q '^loop-manager-core '; then
     echo "$crate depends on loop-manager-core (decision 43): $(cargo tree -q -e normal,build -i loop-manager-core -p "$crate" | paste -sd ' ')"
     exit 1

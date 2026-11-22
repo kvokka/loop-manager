@@ -113,7 +113,7 @@ fn ready<'a, T: Send + 'a>(value: T) -> BoxFuture<'a, T> {
 }
 
 impl Driver for ScriptedDriver {
-    fn harness(&self) -> &'static str {
+    fn harness(&self) -> &str {
         self.harness
     }
 
