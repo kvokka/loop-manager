@@ -108,6 +108,11 @@ async fn a_root_bead_with_an_exec_run_under_it_is_a_task_with_its_body_and_comme
 
 /// A daemon whose `fix` formula is a prompt run of a claude agent on the fake `provider`, with a br tracker.
 pub(super) async fn claude(provider: &Provider) -> Daemon {
+    claude_with(provider, fix("kind = \"ai\"\nagent = \"dev\"\n")).await
+}
+
+/// A daemon whose formula `fix` is `formula`, its agent `dev` a claude on the fake `provider`, with a br tracker.
+pub(super) async fn claude_with(provider: &Provider, formula: String) -> Daemon {
     let base_url = provider.base_url();
     Daemon::start(|dir| {
         let shop = dir.join("config/loop-manager/shop");
@@ -128,7 +133,7 @@ pub(super) async fn claude(provider: &Provider) -> Daemon {
                 shop.join("agents/dev/prompt.template.md"),
                 "Build {{ rig.name }}.".to_owned(),
             ),
-            (shop.join("formulas/fix.toml"), fix("kind = \"ai\"\nagent = \"dev\"\n")),
+            (shop.join("formulas/fix.toml"), formula),
         ];
         for (path, text) in files {
             fs::create_dir_all(path.parent().unwrap()).unwrap();

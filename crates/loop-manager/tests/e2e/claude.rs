@@ -251,7 +251,7 @@ async fn next(events: &mut loop_manager_front::client::Events, kind: &str) -> Va
 
 /// The processes whose environment holds `LOOP_MANAGER_RUN=<run>` and a path under `dir` (run ids repeat across
 /// daemons): pid and command line.
-fn of_run(run: &str, dir: &Path) -> Vec<(i32, String)> {
+pub(super) fn of_run(run: &str, dir: &Path) -> Vec<(i32, String)> {
     let needle = format!("LOOP_MANAGER_RUN={run}");
     let dir = dir.to_string_lossy();
     let entries = fs::read_dir("/proc").unwrap().flatten();

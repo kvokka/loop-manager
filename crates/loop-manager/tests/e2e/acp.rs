@@ -3,6 +3,10 @@
 //! still running, the live result of that tool, the read-only methods, the snapshot of the root's comments, and a
 //! client that goes away in the middle of a turn.
 
+mod codex;
+mod rounds;
+mod sessions;
+
 use super::tasks::{br, claude};
 use crate::common::{self, Daemon};
 use loop_manager_testkit::anthropic::{Provider, Reply};
