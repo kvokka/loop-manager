@@ -210,6 +210,31 @@ async fn an_agent_killed_in_a_turn_is_a_harness_crash_and_a_fresh_session_goes_o
     gone(&run, &d).await;
 }
 
+/// The text glued when the agent dies is written before its attempt ends, not lost to its glue timer.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_words_of_an_agent_killed_are_in_the_history_before_its_attempt_ends() {
+    let out = tempfile::tempdir().unwrap();
+    let marker = out.path().join("killed");
+    let command = format!(
+        "test -e {m} || {{ touch {m}; echo last-words; sleep 0.05; kill -9 $$PPID; sleep 5; }}; {} finish pass \
+         --summary built",
+        common::EXE,
+        m = marker.display()
+    );
+    let section = format!(
+        "command = \"{}\"\n[harness.fake.env]\nACP_AGENT_COMMAND = \"{command}\"\n",
+        agent().display()
+    );
+    let d = daemon("fake", &section, "").await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    let records = history_now(&d, &run).await;
+    let place = |found: &dyn Fn(&Value) -> bool| records.iter().position(found);
+    let words = place(&|r| r["attempt"] == 1 && r["update"]["content"]["content"]["text"] == "last-words\n");
+    let end = place(&|r| r["attempt"] == 1 && r["kind"] == "attempt_end");
+    assert!(words.is_some() && words < end, "{records:#?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_cancelled_in_a_turn_leaves_no_command_of_the_agent_running() {
     let out = tempfile::tempdir().unwrap();
