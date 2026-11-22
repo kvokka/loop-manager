@@ -502,3 +502,26 @@ fn an_agent_on_an_acp_harness_with_a_hook_is_a_config_error_naming_the_agent_the
     let (config, why) = level(&found, "config");
     assert!(!passed && config == "error" && why.contains("`hooks`"), "{found:?}");
 }
+
+#[test]
+fn a_claude_agent_with_the_mode_dont_ask_is_a_config_error_naming_the_agent_the_key_and_the_harness() {
+    let dir = tree("");
+    let agent = dir.path().join("config/loop-manager/shop/agents/dev/agent.toml");
+    fs::create_dir_all(agent.parent().unwrap()).unwrap();
+    fs::write(
+        &agent,
+        "harness = \"claude\"\n[native.claude]\npermission_mode = \"dontAsk\"\n",
+    )
+    .unwrap();
+    let config = dir.path().join("config/loop-manager/config.toml");
+    let out = lm(dir.path(), &["config", "check", "--config", config.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "{text}");
+    assert!(
+        text.contains(
+            "agent `shop/root@shop.dev`: `native.claude.permission_mode`: the ACP harness `claude` offers no mode \
+             `dontAsk`"
+        ),
+        "{text}"
+    );
+}

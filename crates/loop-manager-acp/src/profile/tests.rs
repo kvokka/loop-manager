@@ -122,6 +122,28 @@ fn a_session_that_inherits_the_host_has_no_setting_sources_and_no_home() {
     assert!(split.session.0.get("_meta").is_none(), "{}", split.session.0);
 }
 
+#[test]
+fn the_mode_dont_ask_is_refused_by_its_key_when_the_config_loads() {
+    let mut config = typical(true);
+    assert_eq!(crate::unsupported("claude", &config), Ok(()));
+    for (native, key) in [
+        (
+            json!({ "permission_mode": "dontAsk" }),
+            "`native.claude.permission_mode`",
+        ),
+        (
+            json!({ "permissions": { "defaultMode": "dontAsk" } }),
+            "`native.claude.permissions.defaultMode`",
+        ),
+    ] {
+        config.native = Some(serde_json::from_value(sourced(native)).unwrap());
+        let refused = crate::unsupported("claude", &config).unwrap_err();
+        assert!(refused.starts_with(key) && refused.contains("`dontAsk`"), "{refused}");
+    }
+    config.native = Some(serde_json::from_value(sourced(json!({ "permission_mode": "default" }))).unwrap());
+    assert_eq!(crate::unsupported("claude", &config), Ok(()));
+}
+
 fn value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
     env.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
 }

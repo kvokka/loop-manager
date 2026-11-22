@@ -169,8 +169,9 @@ pub(crate) fn load(paths: &Paths) -> Result<config::Config, Vec<String>> {
         harness_error(name, h, paths).map(|e| format!("{}: `harness.{name}`: {e}", file.display()))
     });
     // What an agent on an ACP harness sets that the driver has no mechanism for, said now and not at its attempt.
-    let acp =
-        (config.harnesses.iter()).filter(|(name, h)| adapter(name).is_none() && h.options.contains_key("command"));
+    let acp = (config.harnesses.iter()).filter(|(name, h)| {
+        loop_manager_acp::profiled(name) || (adapter(name).is_none() && h.options.contains_key("command"))
+    });
     let unsupported = acp.flat_map(|(name, _)| {
         let agents = agents(&config, name).into_iter();
         let refused = agents.filter_map(|(label, c)| {

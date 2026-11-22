@@ -576,10 +576,10 @@ pub fn profiled(name: &str) -> bool {
     Profile::own(name).is_some()
 }
 
-/// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, by key:
-/// the same refusal as at an attempt's start, said when the config loads (docs/design/config.md).
+/// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, or that
+/// the harness never takes, by key: refused when the config loads, not at an attempt's start (docs/design/config.md).
 pub fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), String> {
-    part::unsupported(harness, config)
+    (Profile::of(harness).unsupported)(harness, config)
 }
 
 impl Acp {

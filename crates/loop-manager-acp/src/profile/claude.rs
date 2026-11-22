@@ -127,6 +127,27 @@ fn text(s: &Option<Sourced<String>>) -> Option<String> {
 /// for a person (decision 117).
 const DEFAULT_PERMISSION_MODE: &str = "bypassPermissions";
 
+/// The permission mode `claude-agent-acp` never offers, whatever the model and the host; a mode it offers only on
+/// some hosts (`bypassPermissions` under root, `auto`) is refused at the attempt, when the session lists its modes.
+const NEVER_OFFERED_MODE: &str = "dontAsk";
+
+/// What a claude agent's config names that the adapter never takes: the mode `dontAsk`, by its key.
+pub(crate) fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), String> {
+    let native = config.native.as_ref().map(|n| &n.value);
+    let keys = [
+        ("permission_mode", "/permission_mode"),
+        ("permissions.defaultMode", "/permissions/defaultMode"),
+    ];
+    let named = |pointer| native.and_then(|n| n.pointer(pointer)).and_then(Value::as_str) == Some(NEVER_OFFERED_MODE);
+    match keys.into_iter().find(|(_, pointer)| named(pointer)) {
+        Some((key, _)) => Err(format!(
+            "`native.{harness}.{key}`: the ACP harness `{harness}` offers no mode `{NEVER_OFFERED_MODE}`; \
+             `default` with the `permissions.allow` rules the agent needs denies the rest"
+        )),
+        None => Ok(()),
+    }
+}
+
 /// The settings: the native block (claude's own settings keys) with the enabled hooks added to its own, null when
 /// empty; and the permission mode, which is a session config option and not a settings key: the block's
 /// `permission_mode`, else its `permissions.defaultMode`, else the default. The adapter decides the mode a session

@@ -96,9 +96,9 @@ does not allow is denied at once, and the agent sees the denial; each denial the
   rules `permissions.allow`, `deny` and `ask`, and the harness hooks `PermissionRequest` and `PreToolUse`. The mode
   is set on the session after it starts and again on every resume ([contracts 4.6](contracts.md#46-harness-specifics-the-contract-relies-on)).
   Outside `bypassPermissions`, what the rules do not allow, an `ask` rule included, comes to loop-manager as a
-  permission request, which it declines at once. `dontAsk` is not offered: a config that names it fails the attempt
-  with `config_error` naming `mode`; `default` with the `permissions.allow` rules the agents need denies the rest
-  the same way.
+  permission request, which it declines at once. `dontAsk` is never offered: an agent whose config names it is a load
+  error naming the agent and the key, reported by `config check`, `doctor` and the daemon's start; `default` with
+  the `permissions.allow` rules the agents need denies the rest the same way.
 - codex: `native.codex.approval_policy` (its granular form included), `sandbox_mode`, and the `PreToolUse` hook. Under
   a policy other than `never`, a command or file change that needs approval is declined.
 - A hook may ask loop-manager or another agent for the decision through the CLI or the MCP of loop-manager: the session

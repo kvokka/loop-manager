@@ -194,6 +194,7 @@ the driver has no mechanism for.
 | the protocol trace | the values of the session part that are secrets |
 | an error of a request or of a turn, a `notice` | the failure it stands for |
 | `account` | the hash the gates use |
+| the config check | what an agent's config sets that the harness never takes, by key: what the driver has no mechanism for (generic) |
 
 **`claude`** drives `claude-agent-acp`, the ACP adapter of claude (`@agentclientprotocol/claude-agent-acp` on npm,
 pinned in `mise.toml` with the `node` it runs on); the adapter carries its own claude CLI. `ADAPTERS` lists it as
@@ -209,8 +210,10 @@ its process. Its minimum version is 0.109.1, the version its contract suite runs
   of the skills. A key is absent when it has nothing, and `_meta` with them. The permission mode is the config option
   `mode`, set after `model` and `effort` on every new and resumed session: `native.claude.permission_mode`, else
   `native.claude.permissions.defaultMode`, else `bypassPermissions` (decision 117); otherwise the adapter would pick
-  a starting mode of its own. A mode the adapter does not offer (`dontAsk`; `bypassPermissions` for root without
-  `IS_SANDBOX`) fails the attempt with `config_error` naming `mode`.
+  a starting mode of its own. `dontAsk`, which the adapter never offers, is a load error naming its key
+  (`native.claude.permission_mode` or `native.claude.permissions.defaultMode`). Another mode the adapter does not
+  offer (`bypassPermissions` for root without `IS_SANDBOX`, `auto` by the model) fails the attempt with
+  `config_error` naming `mode`.
 - **The directories.** `<state>/acp/claude/<run>-<attempt>/` holds the attempt's generated files. Its `home`, made
   with mode 0700 before the spawn, is the claude config directory (`CLAUDE_CONFIG_DIR`) of an isolated session: the
   adapter and its CLI keep the session's settings and transcript there. The `SessionRef` keeps it as `home`; a

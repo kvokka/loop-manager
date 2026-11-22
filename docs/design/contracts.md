@@ -550,8 +550,8 @@ claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.m
   sends such a `notice` only for the servers loop-manager passes.
 - The permission mode is `bypassPermissions` unless `native.claude` sets `permission_mode` or
   `permissions.defaultMode` ([config](config.md#permissions)). The adapter offers `default`, `acceptEdits`, `plan`
-  and, by the model and the host, `auto` and `bypassPermissions`; a mode it does not offer (`dontAsk`) fails the
-  attempt with `config_error` naming `mode`. As root it offers `bypassPermissions` only when the session's `env` sets `IS_SANDBOX=1`. Under
+  and, by the model and the host, `auto` and `bypassPermissions`; `dontAsk`, which it never offers, is a load error
+  naming its key, and another mode it does not offer fails the attempt with `config_error` naming `mode`. As root it offers `bypassPermissions` only when the session's `env` sets `IS_SANDBOX=1`. Under
   `bypassPermissions` no request comes; under another mode what the rules do not allow comes as
   `session/request_permission`, which the driver declines at once with the adapter's `reject_once` option, so
   nothing waits and the model sees the denial.

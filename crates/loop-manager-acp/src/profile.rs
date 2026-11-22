@@ -46,6 +46,8 @@ pub(crate) struct Profile {
     pub(crate) notice: fn(&Notice) -> Option<Failure>,
     /// The account the gates use, for the harness and its process part.
     pub(crate) account: fn(&str, &Value) -> String,
+    /// What an agent's config sets that the harness never takes, by key; said when the config loads.
+    pub(crate) unsupported: fn(&str, &EffectiveConfig) -> Result<(), String>,
 }
 
 /// The ACP agents the driver knows by name.
@@ -62,6 +64,7 @@ pub(crate) const PROFILES: &[Profile] = &[Profile {
     classify: claude::classify,
     notice: claude::notice,
     account: claude::account,
+    unsupported: claude::unsupported,
 }];
 
 /// The profile of a harness known by its config alone.
@@ -78,6 +81,7 @@ pub(crate) const GENERIC: Profile = Profile {
     classify: crate::session::classify,
     notice: |_| None,
     account: part::account,
+    unsupported: part::unsupported,
 };
 
 impl Profile {
