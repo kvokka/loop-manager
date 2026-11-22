@@ -61,10 +61,9 @@ all of them share.
 - A consumer continues reading from a `seq`. A `seq` already rotated away is an explicit "gap" error (the `gap` event
   of `GET /v1/events`), and the consumer recovers by reading the state over the API.
 - Only orchestration-level events enter it ([contracts.md 1.3](contracts.md#13-payloads)). The core neither stores
-  the content of a conversation (model messages, tool calls) nor passes it through its state: the live view relays
-  the adapter's stream directly (`GET /v1/runs/{id}/live`, [frontends](../api/frontends.md)), and the conversation
-  is the harness transcript, reached by the session reference. The work of one run, step by step, is in its
-  [history](#history).
+  the content of a conversation (model messages, tool calls) nor passes it through its state: the conversation is in
+  the run's [history](#history), with the work of the run step by step, and in the harness transcript, reached by the
+  session reference.
 
 ## History
 

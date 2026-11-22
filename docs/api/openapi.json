@@ -1945,7 +1945,7 @@
     },
     "/v1/runs/{id}/live": {
       "get": {
-        "summary": "The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current\nsession as `event: harness` with no `id`; `event: lagged` with `{\"missed\": n}` when the reader fell behind the\nsession. With `chat=true`, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.",
+        "summary": "The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`). The stream ends after the run's\n`run.passed`, `run.failed` or `run.cancelled`.",
         "operationId": "live",
         "parameters": [
           {
@@ -1964,15 +1964,6 @@
             "schema": {
               "type": "integer",
               "format": "int64"
-            }
-          },
-          {
-            "name": "chat",
-            "in": "query",
-            "description": "Replay the current session's chat and follow it to run end. Mutually exclusive with a journal cursor.",
-            "required": false,
-            "schema": {
-              "type": "boolean"
             }
           },
           {

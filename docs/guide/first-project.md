@@ -86,7 +86,7 @@ loop-manager run show run_1                    # the whole run: state, attempts,
 ```
 
 `loop-manager events` follows the event stream live (`--from <seq>` to replay from a point),
-and `loop-manager run watch <run>` follows one run with the raw messages of its session. Structured replies are TOON
+and `loop-manager run watch <run>` follows the events of one run (`--history` its sessions' messages and tool calls). Structured replies are TOON
 by default. Scripts can read JSON with `--json`, for example `loop-manager run list --json | jq '.[].id'`.
 
 ## 5. Change the config

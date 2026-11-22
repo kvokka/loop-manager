@@ -61,7 +61,7 @@ pub struct Api {
     pub applied: tokio::sync::Mutex<u64>,
     /// Reads the daemon's config file with every check a start makes, or says what is wrong in it.
     pub load: Box<dyn Fn() -> Result<Config, Vec<String>> + Send + Sync>,
-    /// The harness drivers, whose session streams the live view of a run relays.
+    /// The harness drivers, which say what the agent of a running instance is.
     pub drivers: Vec<Arc<dyn Driver>>,
     /// The checks of `loop-manager doctor`, made from the daemon's process: one `{check, level, detail}` object each.
     pub doctor: Box<dyn Fn() -> Vec<Value> + Send + Sync>,

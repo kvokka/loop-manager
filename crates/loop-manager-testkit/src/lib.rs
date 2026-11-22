@@ -18,7 +18,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::task::JoinHandle;
 
 pub mod anthropic;
 mod control;
@@ -373,15 +373,6 @@ impl Driver for ScriptedDriver {
                 delivered: s.prompts.contains(&key),
             },
         }))
-    }
-
-    /// The scripted driver has no raw harness stream.
-    fn chat_log(&self, _session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {
-        Err(std::io::Error::other("scripted sessions have no chat log"))
-    }
-
-    fn live(&self, _session: &SessionRef) -> Option<broadcast::Receiver<Value>> {
-        None
     }
 }
 

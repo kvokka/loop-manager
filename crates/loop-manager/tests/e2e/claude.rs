@@ -119,11 +119,11 @@ async fn a_claude_session_that_calls_the_finisher_passes_its_run() {
     assert!(result.contains("tool_result"), "{result}");
 }
 
-/// The live view relays the run's events and ends with the run. The ACP driver relays no raw message of the
-/// session there: the run's history has them (`the_history_of_a_run_replays_and_follows_a_running_tool`).
+/// The live view relays the run's events and ends with the run. The messages of the session are in the run's history
+/// (`the_history_of_a_run_replays_and_follows_a_running_tool`).
 #[tokio::test(flavor = "multi_thread")]
 async fn the_live_view_of_a_run_relays_its_events_and_ends_with_the_run() {
-    // The command sleeps first, so the view taps the run before the tool result comes back.
+    // The command sleeps first, so the view attaches before the tool result comes back.
     let finish = format!("sleep 1 && {} finish pass --summary built", common::EXE);
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;
     let d = daemon(&provider).await;

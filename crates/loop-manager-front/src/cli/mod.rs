@@ -2,7 +2,6 @@
 //! Local commands include `format`, `daemon`, `cache clear`, `--version`, and `doctor` and `config check|explain`
 //! on a file named with `--config`.
 
-mod chat;
 mod commands;
 mod config;
 mod finish;
@@ -331,7 +330,7 @@ pub fn run_path(id: &str, then: &str) -> String {
 }
 
 /// Emits a TOON document per event, separated by a blank line. Journal envelopes carry their type;
-/// other SSE events (harness messages, gaps) carry it only in the SSE event field. JSON streams are raw data as NDJSON.
+/// other SSE events (gaps, `caught_up`, errors) carry it only in the SSE event field. JSON streams are raw data as NDJSON.
 async fn follow(mut events: Events, json: bool) -> Result<(), ClientError> {
     while let Some(event) = events.next().await? {
         let mut data: Value = serde_json::from_str(&event.data).unwrap_or(Value::String(event.data));

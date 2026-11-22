@@ -2,19 +2,12 @@
 //! writer without blocking it).
 
 use super::{RunHandler, gates::closures, row, row::Row};
-use crate::{driver::SessionRef, writer::Error};
+use crate::writer::Error;
 use rusqlite::{Connection, OpenFlags, params};
 use serde_json::{Value, json};
 use std::{path::Path, sync::Mutex};
 
 pub struct Reader(Mutex<Connection>);
-
-/// A session recorded on an attempt, in attempt order.
-pub struct AttemptSession {
-    pub attempt: u32,
-    pub harness: String,
-    pub session: SessionRef,
-}
 
 /// Which runs `Reader::runs` lists.
 #[derive(Default)]
@@ -143,28 +136,6 @@ impl Reader {
             |r| r.get(0),
         )?;
         Ok(json!({ "outbox_depth": depth, "outbox_oldest_ms": oldest, "active_runs": active }))
-    }
-
-    /// Sessions a run has bound from `from` inclusive and whether it ended. A slow observer may span
-    /// more attempts than the recent ones in the run view. Read the state first so a terminal read includes them all.
-    pub fn sessions_since(&self, run: &str, from: u32) -> Result<(Vec<AttemptSession>, bool), Error> {
-        let conn = self.conn();
-        let terminal = conn.query_row(
-            "SELECT state IN ('passed','failed','cancelled') FROM runs WHERE id = ?1",
-            [run],
-            |r| r.get(0),
-        )?;
-        let mut stmt = conn.prepare(
-            "SELECT n, harness, session FROM attempts WHERE run = ?1 AND n >= ?2 AND session IS NOT NULL ORDER BY n",
-        )?;
-        let rows = stmt.query_map(params![run, from], |r| {
-            Ok(AttemptSession {
-                attempt: r.get(0)?,
-                harness: r.get(1)?,
-                session: SessionRef(r.get(2)?),
-            })
-        })?;
-        Ok((rows.collect::<Result<_, _>>()?, terminal))
     }
 
     /// The last `seq` the outbox assigned, journaled or not; 0 before the first event.

@@ -22,8 +22,8 @@ The behaviour itself is described in the document named under each heading; this
 - Adapters are modules of the one binary; a harness without one is an ACP v2 agent, a child process of the daemon
   driven over its stdio by the one ACP driver.
 - One journal and one `seq` counter per orchestrator, for all projects.
-- The core does not store the content of a conversation: the live view relays the adapter's stream, the history is
-  the harness's transcript.
+- The core does not store the content of a conversation in its state or journal: the run's history file and the
+  harness's transcript hold it.
 - After a restart the daemon stops every recorded harness instance and resumes the runs; it does not reconnect.
 - The account id of an account gate is reported by the adapter.
 - Issue gates are the only mechanism of "do not start for now".

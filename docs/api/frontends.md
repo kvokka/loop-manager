@@ -30,11 +30,9 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   `gap` reply (with `oldest`) before the stream starts, and a `gap` event when it is rotated away under a slow
   stream (a failed read of the journal ends the stream with a `journal` event); the client then re-reads the state
   over the API.
-- **Live view of a run** (`GET /v1/runs/{id}/live`): the run's events from a `seq`, interleaved with the raw messages
-  of its current session as `harness` events, relayed from the adapter's tap and never stored by the core. A reader
-  that falls behind the tap's buffer (256 messages) gets `lagged` with `{"missed": n}` and goes on. The stream ends
-  once it has read past the run's terminal event, and when the client leaves. A later attempt's session is picked up
-  as it starts.
+- **Live view of a run** (`GET /v1/runs/{id}/live`): the run's events from a `seq` (or `Last-Event-ID`), as on
+  `/v1/events`. The stream ends once it has read past the run's terminal event, and when the client leaves. The
+  messages of the run's sessions are in its history.
 - **History of a run** (`GET /v1/runs/{id}/history?from=<n>`): the records of the run's
   [history](../design/event-model.md#history) as SSE, `id` the record's `n`, `event` its `kind`, `data` the record.
   It sends every record from `from` (default 1; without `from`, the one after `Last-Event-ID`), then one `caught_up`
@@ -46,14 +44,6 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   a harness exit, new attempts and a daemon restart: reconnecting with `from` = the last `n` seen + 1 gives the rest
   with no hole and no repeat. A failed read of the file ends the stream with `history_error` and its `message`. An
   unknown run is 404 `not_found`.
-- `GET /v1/runs/{id}/live?chat=true` streams the conversation from the beginning of the current attempt’s session.
-  Each `chat` event carries a JSON object with a `type` of `user` or `assistant` (with `text`), `tool_call`
-  (with `name` and `input`), or `tool_result` (with `output`). Calls and results carry the matching `id` when supplied
-  by the harness. A result can also carry `is_error`.
-  The daemon follows the harness transcript as it is written and picks up new sessions until run end. A transcript
-  read failure ends the stream with `chat_error` and its `message`. Journal cursors apply only to the event view.
-  An ACP harness (claude, codex, and one named in the config) has no transcript to read: its chat stream ends at once
-  with `chat_error`, and its conversation is in the run's history (`/v1/runs/{id}/history`).
 
 The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir` — the directory of
 `loop-manager.toml`, `root` and `rigs`, each `{name, path, vars}`; the root is not among the rigs); agents
@@ -91,15 +81,11 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   another formula, not directly. `loop-manager formula list` leaves the internal ones out; `--all` shows them too.
 - `loop-manager events` and `loop-manager run watch <run>` print each event as it arrives, with a blank line between
   TOON documents. Journal events include their `seq`, `type` and `data`. Events outside the journal (such as
-  `harness` and `lagged`) have `event` and `data` fields. With `--json`, each line contains the original SSE data as
+  `gap` and `caught_up`) have `event` and `data` fields. With `--json`, each line contains the original SSE data as
   a JSON value. A watch exits 0 when the run's stream ends. Use `loop-manager run wait` for the outcome.
 - `loop-manager run watch <run> --history [--from <n>]` prints the records of the run's history from record `n`
   (default 1), the `caught_up` event (as `event` and `data`) once it has printed what is written, then each record as
   it comes, until the run's `run` record.
-- `loop-manager run watch <run> --chat` shows the conversation as readable turns, including tool input and output.
-  Connecting during a tool call shows the call and follows its result. Connecting after the last AI attempt ends
-  replays its chat if it is still the current attempt. With `--json`, each entry is one JSON line. An ACP harness
-  (claude, codex, and one named in the config) has no chat view; `run watch --history` shows its conversation.
 - `loop-manager run wait <run>... [--timeout <dur>]` waits on the event stream (not by polling) until every named run is
   terminal, then prints for each `id`, `state`, `class`, `reason` and the finisher's `summary` and `data` (with
   `--json` an array of these objects). A run already terminal is answered at once. Exit codes: 0 when all passed,
@@ -226,8 +212,8 @@ permission requests).
 ## Verified by
 
 - Integration tests on the real daemon: `crates/loop-manager/tests/e2e/api.rs`, `cli.rs`, `mcp.rs`; the live view and
-  `run watch` on the real claude (`crates/loop-manager/tests/e2e/claude.rs`); the `lagged` path on a real broadcast
-  channel (`api/live.rs`); `loop-manager acp` under the ACP SDK's client, on the `acp-agent` fixture
+  `run watch` on the real claude (`crates/loop-manager/tests/e2e/claude.rs`); `run watch --history` arriving while a
+  tool runs (`crates/loop-manager/tests/e2e/chat.rs`); `loop-manager acp` under the ACP SDK's client, on the `acp-agent` fixture
   (`crates/loop-manager/tests/e2e/acp_client.rs`).
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.

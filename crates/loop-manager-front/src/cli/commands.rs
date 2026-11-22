@@ -46,13 +46,10 @@ pub enum RunCommand {
     },
     /// Show a run.
     Show { id: String },
-    /// Follow a run live until it ends: its events from `--from` (default: the oldest held) and the raw messages of
-    /// its session from now on. Exits 0 however the run ends; `loop-manager run wait` gives the outcome.
+    /// Follow a run live until it ends: its events from `--from` (default: the oldest held). Exits 0 however the run
+    /// ends; `loop-manager run wait` gives the outcome.
     Watch {
         id: String,
-        /// Show messages, tool calls and results from the beginning of the current session, then follow live.
-        #[arg(long, conflicts_with_all = ["from", "history"])]
-        chat: bool,
         /// Print the records of the run's history from record `--from` (default 1), then follow them to the run's end.
         #[arg(long)]
         history: bool,
@@ -222,10 +219,7 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             print(json, &runs);
         }
         RunCommand::Show { id } => print(json, &client.request("GET", &run_path(&id, ""), None, None).await?),
-        RunCommand::Watch { id, chat: true, .. } => {
-            return super::chat::follow(client.stream(&run_path(&id, "/live?chat=true")).await?, json).await;
-        }
-        RunCommand::Watch { id, from, history, .. } => {
+        RunCommand::Watch { id, from, history } => {
             let query = from.map(|f| format!("?from={f}")).unwrap_or_default();
             let stream = if history { "/history" } else { "/live" };
             follow(client.stream(&run_path(&id, &format!("{stream}{query}"))).await?, json).await?;

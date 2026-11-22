@@ -7,11 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, time::Duration};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 mod adapter;
-pub mod chat;
 pub mod child;
 mod failure;
 pub use adapter::{Adapter, Check, DoctorAgents, Setup, host_mcp_check, login_check};
@@ -283,10 +282,6 @@ pub trait Driver: Send + Sync {
         session: &'a SessionRef,
         key: PromptKey,
     ) -> BoxFuture<'a, Result<Transcript, Failure>>;
-    /// Locates a session's readable conversation. May read the filesystem, so call on a blocking thread.
-    fn chat_log(&self, session: &SessionRef) -> std::io::Result<chat::ChatLog>;
-    /// The raw harness messages of a session (docs/design/event-model.md direct relay); a slow reader loses messages.
-    fn live(&self, session: &SessionRef) -> Option<broadcast::Receiver<Value>>;
     /// What the agent of the running instance `instance` said of itself: `{name, version, protocol}` of an ACP agent;
     /// `None` for a harness that says nothing, or an instance not running in this daemon.
     fn agent(&self, _instance: &str) -> Option<Value> {

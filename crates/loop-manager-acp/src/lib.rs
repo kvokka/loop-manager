@@ -37,7 +37,7 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
-    sync::{broadcast, oneshot},
+    sync::oneshot,
 };
 use trace::Trace;
 
@@ -866,19 +866,8 @@ impl Driver for Acp {
         })
     }
 
-    fn chat_log(&self, _session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "an ACP harness keeps no transcript file loop-manager reads",
-        ))
-    }
-
     fn agent(&self, instance: &str) -> Option<Value> {
         lock(&self.instances).get(instance).map(|known| known.agent.clone())
-    }
-
-    fn live(&self, _session: &SessionRef) -> Option<broadcast::Receiver<Value>> {
-        None
     }
 }
 

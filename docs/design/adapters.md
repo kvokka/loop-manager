@@ -148,7 +148,7 @@ that agent's [profile](#profiles).
   agent that holds a key answers a prompt sent again with it at once and starts no turn (codex's adapter, claude's
   after a resume). A prompt the agent took but whose answer the daemon did not live to read is not known delivered:
   it goes again with its key, and the agent's memory of the key decides whether it runs again or is answered without
-  a turn. There is no transcript file for `chat_log` and no live tap.
+  a turn.
 - **The account.** `account` is a hash of the `command`, the names of the harness's and the agent's `env` and the
   `${NAME}` references among their values: a literal value (a flag, a path, a key written inline) changes no
   account gate.
