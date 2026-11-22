@@ -427,6 +427,15 @@ async fn a_client_attaching_while_a_tool_hangs_sees_what_the_agent_reported_so_f
     assert_eq!(find("state")["update"]["state"], "running");
     let numbers: Vec<u64> = records.iter().map(|r| r["n"].as_u64().unwrap()).collect();
     assert_eq!(numbers, (1..=records.len() as u64).collect::<Vec<_>>());
+    // The instance says which agent runs it, and on which protocol.
+    let instances = d.get("/v1/instances").await;
+    let agent = &instances[0]["agent"];
+    assert_eq!(
+        (&agent["name"], &agent["protocol"]),
+        (&Value::from("acp-agent"), &Value::from(2)),
+        "{instances}"
+    );
+    assert!(agent["version"].is_string(), "{instances}");
     d.post(&format!("/v1/runs/{run}/cancel"), serde_json::json!({}), None)
         .await
         .unwrap();

@@ -287,6 +287,11 @@ pub trait Driver: Send + Sync {
     fn chat_log(&self, session: &SessionRef) -> std::io::Result<chat::ChatLog>;
     /// The raw harness messages of a session (docs/design/event-model.md direct relay); a slow reader loses messages.
     fn live(&self, session: &SessionRef) -> Option<broadcast::Receiver<Value>>;
+    /// What the agent of the running instance `instance` said of itself: `{name, version, protocol}` of an ACP agent;
+    /// `None` for a harness that says nothing, or an instance not running in this daemon.
+    fn agent(&self, _instance: &str) -> Option<Value> {
+        None
+    }
 }
 
 /// The last 4 KiB of `stderr`, read to its end (a descendant may hold it open past the exit: the caller bounds it).

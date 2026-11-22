@@ -288,6 +288,17 @@ pub(crate) struct Instance {
     idle_since: Option<String>,
     /// Why the harness says a ready instance is degraded; it keeps its sessions.
     degraded: Option<String>,
+    /// What the agent of a running instance of an ACP harness said of itself in `initialize`; `null` for another
+    /// harness or an instance not running.
+    agent: Option<InstanceAgent>,
+}
+
+#[derive(ToSchema)]
+pub(crate) struct InstanceAgent {
+    name: String,
+    version: String,
+    /// The ACP protocol version negotiated: 2.
+    protocol: u16,
 }
 
 #[derive(ToSchema)]

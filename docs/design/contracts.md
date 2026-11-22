@@ -1017,6 +1017,9 @@ subsystem of their own. The adapter reports the account id (4.5, `Driver::accoun
   `{instance, reason: text}` and `degraded: <text>` in the instance view (`GET /v1/instances`,
   `loop-manager instance list`; null otherwise); it keeps the state `ready` and its sessions. When it is well,
   `instance.ready` with `reason: null` is emitted again.
+- The instance view of an ACP harness's running instance carries `agent: {name, version, protocol}`, what the agent
+  said of itself in its `initialize` answer and the protocol negotiated (`Driver::agent`); `null` for another harness
+  or an instance not running.
 - Resync ([event model](event-model.md#resync)): every 5 minutes, with the trackers, the driver is asked for the health of every instance not `stopping`
   that has a process (pid + start time for claude and codex). One found `Dead` whose record still holds that process and
   is not `stopping` counts as its `exited` event, as above: a gone process is not ambiguous, so no `resync.diverged`. A

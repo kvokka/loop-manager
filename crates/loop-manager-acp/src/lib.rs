@@ -67,6 +67,8 @@ struct Instance {
     close: Mutex<Option<oneshot::Sender<()>>>,
     /// The `capabilities` of the agent's `initialize` answer.
     capabilities: Value,
+    /// `{name, version, protocol}` of the agent's `initialize` answer.
+    agent: Value,
     trace: Option<Arc<Trace>>,
 }
 
@@ -234,6 +236,8 @@ impl Acp {
             shared,
             close: Mutex::new(Some(close_tx)),
             capabilities: serde_json::to_value(&answer.capabilities).unwrap_or_default(),
+            agent: json!({ "name": answer.info.name, "version": answer.info.version,
+                "protocol": answer.protocol_version.as_u16() }),
             trace,
         });
         lock(&self.instances).insert(id.to_owned(), instance);
@@ -722,6 +726,10 @@ impl Driver for Acp {
             std::io::ErrorKind::Unsupported,
             "an ACP harness keeps no transcript file loop-manager reads",
         ))
+    }
+
+    fn agent(&self, instance: &str) -> Option<Value> {
+        lock(&self.instances).get(instance).map(|known| known.agent.clone())
     }
 
     fn live(&self, _session: &SessionRef) -> Option<broadcast::Receiver<Value>> {

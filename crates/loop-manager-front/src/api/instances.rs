@@ -10,10 +10,17 @@ use loop_manager_core::run::Msg;
 use serde_json::json;
 
 /// Lists every harness instance: `{id, kind, harness, fingerprint, state, sessions, capacity, pid, pgid,
-/// idle_since, degraded}`.
+/// idle_since, degraded, agent}`.
 #[utoipa::path(get, path = "/v1/instances", responses((status = OK, body = [Instance]), Failed))]
 pub(crate) async fn list(state: State) -> Reply {
-    Ok(Json(state.reader.instances()?.into()))
+    let mut instances = state.reader.instances()?;
+    for instance in &mut instances {
+        let harness = instance["harness"].as_str().unwrap_or_default();
+        let driver = state.drivers.iter().find(|d| d.harness() == harness);
+        let id = instance["id"].as_str().unwrap_or_default();
+        instance["agent"] = driver.and_then(|d| d.agent(id)).into();
+    }
+    Ok(Json(instances.into()))
 }
 
 /// Stops an idle instance (`instance.stopped{reason: "operator"}`); one that starts or has sessions is refused
