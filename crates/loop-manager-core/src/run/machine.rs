@@ -457,7 +457,9 @@ impl RunHandler {
             self.end_child(tx, &row)?;
         }
         self.let_go_bead(tx, &row, state, reason)?;
-        if row.manual {
+        // A run that stood for the operator — manual, or its delivery disputed — gives its waiting parents their
+        // step timeout back.
+        if row.manual || row.disputed_open() {
             self.thaw(tx, &row)?;
         }
         let usage = super::row::usage(tx.sql(), &row.id)?;

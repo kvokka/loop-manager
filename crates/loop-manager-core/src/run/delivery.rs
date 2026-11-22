@@ -175,7 +175,7 @@ impl RunHandler {
                         Dispute::save(tx, run, Some(&dispute))?;
                         self.stand(tx, &row)?;
                         let (key, text, source) = dispute.prompt(tx.sql(), run)?;
-                        let data = json!({ "key": key, "outcome": "disputed", "why": why, "text": text, "seen": seen });
+                        let data = json!({ "key": key, "outcome": "disputed", "by": "replay", "why": why, "text": text, "seen": seen });
                         row.record(tx, "delivery", data);
                         let data = json!({ "run": row.view(), "key": key, "source": source, "why": why });
                         row.emit(tx, "run.delivery_disputed", data)?;
