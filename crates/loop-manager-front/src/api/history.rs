@@ -12,7 +12,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
@@ -83,8 +83,13 @@ async fn relay(state: Arc<Api>, run: String, from: u64, tx: mpsc::Sender<Result<
         }
         if records.is_empty() {
             // A run over whose `run` record is not in its file (the file is pruned, older than histories or lost in a
-            // crash) ends here: the state commits before its records, so a flush first lets them land.
+            // crash) ends here. The state commits before its records are queued; the core queues them before it
+            // writes the journal, so once the journal holds the run's end, a flush lets them land.
             if over(&state, &run) {
+                if let Ok(seq) = state.reader.last_seq() {
+                    let mut written = state.written.clone();
+                    let _ = tokio::time::timeout(Duration::from_secs(5), written.wait_for(|w| *w >= seq)).await;
+                }
                 state.history.flush().await;
                 for record in cursor.read().unwrap_or_default() {
                     if tx.send(Ok(event(&record))).await.is_err() {
