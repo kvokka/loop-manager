@@ -103,11 +103,7 @@ impl RunHandler {
         for what in ["state", "silence", "decide"] {
             tx.clear_deadline(&row.deadline(what))?;
         }
-        let mut child = row.id.clone();
-        while let Some(parent) = Self::waiting_parent(tx, &child)? {
-            tx.clear_deadline(&parent.deadline("state"))?;
-            child = parent.id;
-        }
+        Self::freeze(tx, &row.id)?;
         if row.state == "queued" {
             // The run tells it waits for the operator now.
             self.schedule(tx)?;
@@ -131,6 +127,10 @@ impl RunHandler {
         }
         if !row.manual {
             return Ok(answer("not_manual"));
+        }
+        // The operator chooses on the delivery first: the attempt would stand without a first prompt.
+        if let Some(refused) = super::delivery::refused(tx.sql(), &row.id)? {
+            return Ok(refused);
         }
         let input = prompts::unsent(tx.sql(), &row.id, row.attempt)?;
         if input.is_empty() {
@@ -244,6 +244,10 @@ impl RunHandler {
             return Ok(answer(refused));
         }
         self.takeover(tx, run, attempt)?;
+        // Nothing goes into a session whose last prompt may or may not be there.
+        if let Some(refused) = super::delivery::refused(tx.sql(), &row.id)? {
+            return Ok(refused);
+        }
         let session: Option<String> = tx
             .sql()
             .query_row(
@@ -409,8 +413,8 @@ impl RunHandler {
             }
             ("running", "exec") | ("finishing", _) => command_due(now, row),
             ("running", "await") => now.saturating_add(row.timeout_ms.unwrap_or(AWAIT_TIMEOUT_MS)),
-            // A step that waits for a child still manual keeps its timeout off.
-            ("running", _) if Self::holds_manual(tx, &row.id)? => return Ok(()),
+            // A step that waits for a child still manual or disputed keeps its timeout off.
+            ("running", _) if Self::holds_still(tx, &row.id)? => return Ok(()),
             ("running", _) => now.saturating_add(row.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS)),
             // An interrupted run with its decision taken starts its next attempt at once (`go_on`).
             _ => return Ok(()),
@@ -429,12 +433,22 @@ impl RunHandler {
         }
     }
 
+    /// The step timeout of each ancestor of `run` that waits for its children stops, up the chain.
+    pub(super) fn freeze(tx: &mut Tx<'_>, run: &str) -> Result<(), Error> {
+        let mut child = run.to_owned();
+        while let Some(parent) = Self::waiting_parent(tx, &child)? {
+            tx.clear_deadline(&parent.deadline("state"))?;
+            child = parent.id;
+        }
+        Ok(())
+    }
+
     /// The step timeout of each ancestor of `row` that waits for its children starts afresh, up the chain, while no
-    /// live child of the ancestor is still manual or holds a manual run below it.
+    /// live child of the ancestor still stands or holds a run that stands below it.
     pub(super) fn thaw(&self, tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
         let mut child = row.id.clone();
         while let Some(parent) = Self::waiting_parent(tx, &child)? {
-            if parent.manual || Self::holds_manual(tx, &parent.id)? {
+            if parent.manual || Self::holds_still(tx, &parent.id)? {
                 return Ok(());
             }
             let timeout = parent.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS);
@@ -459,8 +473,9 @@ impl RunHandler {
         Ok(Some(Row::load(tx, &parent)?).filter(waits_on_children))
     }
 
-    /// A live child of `run`, of its step, is manual or holds a manual run below it.
-    pub(super) fn holds_manual(tx: &Tx<'_>, run: &str) -> Result<bool, Error> {
+    /// A live child of `run`, of its step, stands for the operator — manual, or its delivery disputed — or holds such
+    /// a run below it.
+    pub(super) fn holds_still(tx: &Tx<'_>, run: &str) -> Result<bool, Error> {
         let children: Vec<String> = {
             let mut stmt = tx.sql().prepare(
                 "SELECT id FROM runs WHERE parent_run = ?1 AND trigger IS NULL \
@@ -470,7 +485,8 @@ impl RunHandler {
         };
         for id in children {
             let child = Row::load(tx, &id)?;
-            if child.manual || (waits_on_children(&child) && Self::holds_manual(tx, &child.id)?) {
+            if child.manual || child.disputed_open() || (waits_on_children(&child) && Self::holds_still(tx, &child.id)?)
+            {
                 return Ok(true);
             }
         }

@@ -19,6 +19,7 @@ mod beads;
 mod children;
 mod config_inputs;
 mod deciding;
+mod delivery;
 mod drain;
 mod drain_pool;
 mod drain_rounds;

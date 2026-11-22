@@ -102,6 +102,12 @@ The behaviour itself is described in the document named under each heading; this
 - A run started by a trigger inherits the correlation of the event; a human's write in the tracker starts a new
   chain. The depth limit is 10; `bead.ready` adds no depth.
 - While a run of the same trigger with the same input key is alive, a new firing is skipped (`trigger.skipped`).
+- A prompt whose delivery a resumed attempt cannot tell from the session's replay is disputed
+  ([contracts 6.4](../design/contracts.md#64-prompt-delivery-and-recovery)). An open dispute is settled only by the
+  operator's choice: a fresh replay after a restart or another failure does not revisit it. A `new_session` attempt
+  drops the dispute with the session. A dispute has no timeout: the run, and the parents that wait for it, stand
+  until the choice. A prompt that starts with `/` is never confirmed undelivered: it may be a local command of the
+  agent, kept nowhere.
 - `bead.ready` is raised when a bead first enters the ready set.
 - `bead.labeled` is raised for a label a bead the core already read gains; its `ready` is true only for a bead that
   was ready before that read and still is, so one gain never fires both a `bead.ready` and a `bead.labeled` trigger.

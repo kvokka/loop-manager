@@ -5,6 +5,7 @@ mod await_step;
 mod bead_events;
 mod beads;
 mod decide;
+mod delivery;
 mod drain;
 mod events;
 mod exec;
@@ -54,7 +55,7 @@ pub use crate::process::Exit;
 pub use finish::MAX_REMARKS;
 pub use gates::{GateSpec, valid_key};
 pub use hooks::{BundledHook, ExecHooks, HookRunner};
-pub use msg::{Create, Decision, Msg, Outcome, Unsent, Verdict};
+pub use msg::{Choice, Create, Decision, Msg, Outcome, Unsent, Verdict};
 pub use read::{Reader, RunFilter};
 
 type Drivers = Arc<BTreeMap<String, Arc<dyn Driver>>>;
@@ -152,6 +153,8 @@ impl Handler for RunHandler {
             Msg::Continue { run, attempt, unsent } => return self.hand_back(tx, &run, attempt, unsent),
             Msg::Instruct { run, attempt, text } => return self.instruct(tx, &run, attempt, &text),
             Msg::Stop { run, attempt } => return self.stop(tx, &run, attempt),
+            Msg::Resumed { run, attempt, replay } => return self.resumed(tx, &run, attempt, &replay),
+            Msg::Delivery { run, attempt, choice } => return self.choose(tx, &run, attempt, choice),
             Msg::Permission {
                 run,
                 attempt,
@@ -180,12 +183,6 @@ impl Handler for RunHandler {
             Msg::ServiceFailed { id, stderr, taken } => Self::service_failed(tx, &id, &stderr, taken),
             Msg::ServiceStopped { id, reason } => Self::service_stopped(tx, &id, &reason),
             Msg::Session { run, attempt, session } => self.session(tx, &run, attempt, &session),
-            Msg::PromptReplayed {
-                run,
-                attempt,
-                key,
-                text,
-            } => prompts::intent(tx, &run, attempt, 1, key, &text),
             Msg::PromptSent { run, attempt, key } => prompts::advance(tx, &run, attempt, key, "sent").map(drop),
             Msg::AttemptFailed { run, attempt, failure } => self.launch_failed(tx, &run, attempt, failure),
             Msg::Driver(event) => self.driver_event(tx, event),

@@ -4,7 +4,7 @@
 use super::{Live, gone, resumed, sourced};
 use loop_manager_contract::{
     config::{Hook, Mcp, Skill},
-    driver::{Driver, Normalized, PromptKey, Replay, Replayed, SessionState, StopReason, Transcript},
+    driver::{Driver, Normalized, PromptKey, Replay, Replayed, SessionState, StopReason},
 };
 use loop_manager_testkit::{
     mcp,
@@ -52,8 +52,6 @@ async fn a_prompt_runs_a_command_with_the_attempt_environment_and_the_turn_compl
     assert_eq!(requests.len(), 2, "the title request is no model request of the plan");
     assert_eq!(requests[0]["model"], "gpt-fake");
     assert!(requests[0].to_string().contains("zq7-mail"), "the skill is listed");
-    let transcript = live.driver.transcript(&live.instance, &live.session, key).await;
-    assert_eq!(transcript.unwrap(), Transcript::Present { delivered: true });
     live.stop().await;
 }
 

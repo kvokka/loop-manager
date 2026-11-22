@@ -3,6 +3,7 @@
 
 use super::{
     RunHandler,
+    delivery::RECONCILE,
     manual::Deferred,
     row::{Row, attempts},
 };
@@ -15,10 +16,6 @@ use crate::{
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
-
-/// The prompt of a resumed attempt (contracts 6.4).
-const RECONCILE: &str =
-    "Your previous turn was interrupted. Check the current state of the work and continue toward the goal.";
 
 /// The session and previous run a launch must reconcile, and whether the step is starting afresh.
 struct AttemptSession {
@@ -264,22 +261,33 @@ impl RunHandler {
             true => None,
             false => super::prompts::unsettled(tx, &row.id, row.attempt)?,
         };
-        let step_prompt = row.prompt.clone().unwrap_or_default();
-        let (prompt, retry) = match (&resume, unsettled) {
-            (Some(_), _) if entering => (step_prompt, None),
-            (Some(_), unsettled) => (RECONCILE.to_owned(), unsettled.map(|(_, key, text)| (key, text))),
-            // A new session knows nothing of the old one: a remark the daemon died under follows the step's prompt.
-            (None, Some((n, _, text))) if n > 1 => (format!("{step_prompt}\n\n{text}"), None),
-            (None, _) => (step_prompt, None),
+        // The prompt a resumed session may or may not have got goes first, unless the check of its delivery says
+        // otherwise (contracts 6.4); with no session to resume, a dispute goes with the old one.
+        let carried = match (&resume, entering) {
+            (Some(_), false) => Self::carried(tx, &row)?,
+            (Some(_), true) => None,
+            (None, _) => {
+                self.drop_dispute(tx, &row)?;
+                None
+            }
         };
-        let key = PromptKey::new(&row.id, row.attempt, 1);
-        super::prompts::intent(tx, &row.id, row.attempt, 1, key, &prompt)?;
+        let step_prompt = row.prompt.clone().unwrap_or_default();
+        let new = PromptKey::new(&row.id, row.attempt, 1);
+        let (key, prompt, source) = match (&resume, carried.clone().map(|c| c.0), unsettled) {
+            (Some(_), _, _) if entering => (new, step_prompt, "lm".to_owned()),
+            (Some(_), Some((key, text, source)), _) => (super::prompts::key(&key), text, source),
+            (Some(_), None, _) => (new, RECONCILE.to_owned(), "lm".to_owned()),
+            // A new session knows nothing of the old one: a remark the daemon died under follows the step's prompt.
+            (None, _, Some((n, _, text))) if n > 1 => (new, format!("{step_prompt}\n\n{text}"), "lm".to_owned()),
+            (None, ..) => (new, step_prompt, "lm".to_owned()),
+        };
+        super::prompts::intent(tx, (&row.id, row.attempt, 1), key, &prompt, &source)?;
+        let reconcile = carried.map(|(_, replay)| json!({ "replay": replay }));
         let payload = json!({
             "op": "launch", "run": row.id, "attempt": row.attempt, "harness": config.harness,
             "instance": instance, "handle": handle, "after": after, "process": split.process.0,
             "session": split.session.0, "resume": resume.map(|s| s.0),
-            "prompt": prompt, "key": key.0.to_string(), "services": services,
-            "retry": retry.map(|(key, text)| json!({ "key": key, "text": text })),
+            "prompt": prompt, "key": key.0.to_string(), "services": services, "reconcile": reconcile,
         });
         tx.effect(&row.id, &format!("launch:{}", row.attempt), &payload)?;
         tx.set_deadline(
@@ -401,6 +409,7 @@ impl RunHandler {
             params![row.id, row.attempt, tx.now_ms(), failure.map(Value::to_string)],
         )?;
         row.record(tx, "attempt_end", json!({ "failure": failure }));
+        Self::let_go_dispute(tx, row)?;
         if let Some(handle) = handle {
             let session: Value = session.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let handle: Value = serde_json::from_str(&handle).unwrap_or_default();
@@ -438,7 +447,7 @@ impl RunHandler {
             tx.clear_deadline(&row.deadline(what))?;
         }
         tx.sql().execute(
-            "UPDATE runs SET class = ?2, reason = ?3, waiting = NULL, next = NULL WHERE id = ?1",
+            "UPDATE runs SET class = ?2, reason = ?3, waiting = NULL, next = NULL, disputed = NULL WHERE id = ?1",
             params![row.id, class, reason],
         )?;
         row.class = class.map(str::to_owned);

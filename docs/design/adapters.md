@@ -159,17 +159,15 @@ that agent's [profile](#profiles).
   `replay_complete` makes the replay complete. A resume with the replay that fails otherwise than for want of the
   session (`-32602` of an agent without replays, no answer within the 60 s of a request, an error reading the history)
   goes once more without it, and its replay is not complete. Of the profiled agents, claude and codex keep the user
-  messages (`retains_prompts`); an agent known by its config alone does not vouch for it. The answer to
-  `session/prompt` names the message (`messageId`), and the driver tells it with `prompt.acked`: also when the turn
-  the prompt started told the acknowledgement first, without the id. Whether the agent holds a prompt ACP does not
-  tell otherwise: no update gives the idempotency key back. The answer is the record: when the agent answers a prompt, the driver writes its key
-  to `<state>/acp/<harness>/answered/<session id in hex>` (the key of the last prompt answered in the session;
-  `close_session` removes the file), and `transcript` answers `Present { delivered }`, delivered when the key asked
-  about is the one in that file. A delivered prompt is reconciled with a prompt of a new key, which starts a turn; an
-  agent that holds a key answers a prompt sent again with it at once and starts no turn (codex's adapter, claude's
-  after a resume). A prompt the agent took but whose answer the daemon did not live to read is not known delivered:
-  it goes again with its key, and the agent's memory of the key decides whether it runs again or is answered without
-  a turn.
+  messages (`retains_prompts`), and claude adds a message of its own after a cancelled turn (`replay_markers`); an
+  agent known by its config alone vouches for neither. The answer to `session/prompt` names the message
+  (`messageId`), and the driver tells it with `prompt.acked`: also when the turn the prompt started told the
+  acknowledgement first, without the id. No update gives the idempotency key back, so whether the agent holds a
+  prompt the core reads from the replay alone: the message the answer named, or a message after it with the prompt's
+  text ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)). The driver keeps no record of its own. A
+  delivered prompt is reconciled with a prompt of a new key, which starts a turn; an agent that holds a key answers a
+  prompt sent again with it at once and starts no turn (codex's adapter, claude's after a resume), so a prompt the
+  replay shows absent, or the operator chose to send again, does not run twice.
 - **The account.** `account` is a hash of the `command`, the names of the harness's and the agent's `env` and the
   `${NAME}` references among their values: a literal value (a flag, a path, a key written inline) changes no
   account gate.
@@ -226,6 +224,8 @@ the driver has no mechanism for.
 | `split`, the process part | the keys the process needs, or the refusal (generic) |
 | `split`, the session part | what goes with `session/new` and `session/resume` beyond ACP, and a `mode` |
 | `prompts_in_turn` | whether the agent may insert a prompt into a turn in flight: claude `true`, codex and the generic profile `false` |
+| `retains_prompts` | whether the agent keeps the user messages of a session across its processes, so a complete replay without a prompt tells it was never inserted: claude and codex `true`, the generic profile `false` |
+| `replay_markers` | the exact texts of the user messages the agent adds to a session by itself, which the delivery check passes over: claude `[Request interrupted by user]`, codex and the generic profile none |
 | `start_instance`, before the spawn and after the exit | the files the process reads, and which of them go with it |
 | the process environment | the daemon's variables it gets and what it adds; the variables that carry a credential |
 | the protocol trace | the values of the session part that are secrets |
@@ -440,9 +440,10 @@ Made for the two harnesses there are; none is changed before a harness needs it.
 - `account(&ProcessPart)` assumes the process decides the account, true when the credential is a key in the
   environment or a login directory. For a harness that picks a provider per model it is the session's, not the
   process's. The gate key is `account:<harness>/<hash>`, so one provider key used by two harnesses is two gates.
-- `PromptKey` is carried as the harness's own message id, and `transcript(key)` asks where that message stands.
-  A harness that takes no client id or keeps no readable history can only answer whether the session exists, and
-  the guard against a double delivery after the daemon died does not hold for it.
+- `PromptKey` is carried as the harness's own idempotency key, and the delivery check reads the session's replay
+  for the message the harness named. A harness that takes no client id has no guard against a double delivery after
+  the daemon died; one that gives no complete replay leaves every such delivery to the operator's choice, and one
+  that does not vouch for keeping the user messages leaves it so until its replay shows a message it named.
 - Hooks of `EffectiveConfig` are in the Claude dialect (`event`, `matcher`, `command`, `timeout`). codex takes the same
   form in its config; a harness without command hooks can only refuse an agent that has any, as a `config_error` at the
   start of a run.

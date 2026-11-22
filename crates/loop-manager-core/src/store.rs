@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 30;
+const VERSION: i32 = 31;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -44,7 +44,10 @@ INSERT INTO consumers (name, seq) VALUES ('journal', 0);
 -- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before.
 -- `manual` (since `manual_ms`): an operator holds the run and its orchestration stands; `deferred` is the JSON of the
 -- one event that would have moved it meanwhile, applied when it is handed back (contracts 6.1); `handing_back`: a Continue
--- waits for the operator's input the harness has not taken yet, and hands the run back once it has.
+-- waits for the operator's input the harness has not taken yet, and hands the run back once it has. `disputed`: the
+-- delivery of a prompt the resume could not settle, as JSON `{attempt, n, why, since_ms, held, choice}` (contracts 6.4):
+-- the prompt `n` of `attempt`, the attempt that holds the session waiting (`held`) and the operator's choice not yet
+-- applied (`choice`); open while it has no choice.
 CREATE TABLE runs (
     n INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -86,7 +89,8 @@ CREATE TABLE runs (
     manual INTEGER NOT NULL DEFAULT 0,
     manual_ms INTEGER,
     deferred TEXT,
-    handing_back INTEGER NOT NULL DEFAULT 0
+    handing_back INTEGER NOT NULL DEFAULT 0,
+    disputed TEXT
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);

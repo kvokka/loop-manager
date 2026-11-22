@@ -30,6 +30,8 @@ pub(crate) struct Profile {
     pub(crate) prompts_in_turn: bool,
     /// Whether the agent keeps the user messages of a session across its processes (`Driver::retains_prompts`).
     pub(crate) retains_prompts: bool,
+    /// The exact texts of the user messages the agent adds to a session by itself (`Driver::replay_markers`).
+    pub(crate) replay_markers: &'static [&'static str],
     /// The process part of a session (`part::process` and what the profile delivers through the process); `state` is
     /// the daemon's state directory.
     pub(crate) process: fn(&str, Setup, &EffectiveConfig, &SessionPlan, &Path) -> Result<Value, Failure>,
@@ -64,6 +66,8 @@ pub(crate) const PROFILES: &[Profile] = &[
         prompts_in_turn: true,
         // Claude Code's transcript holds every prompt the adapter inserted, and a replay gives it back.
         retains_prompts: true,
+        // After a cancelled turn Claude Code adds this user message, with an id of its own, and a replay gives it.
+        replay_markers: &["[Request interrupted by user]"],
         process: claude::process,
         session: claude::session,
         env: claude::env,
@@ -83,6 +87,7 @@ pub(crate) const PROFILES: &[Profile] = &[
         prompts_in_turn: false,
         // The thread's rollout holds every prompt the adapter inserted, and a replay gives it back.
         retains_prompts: true,
+        replay_markers: &[],
         process: codex::process,
         session: codex::session,
         env: codex::env,
@@ -104,6 +109,7 @@ pub(crate) const GENERIC: Profile = Profile {
     minimum: (0, 0, 0),
     prompts_in_turn: false,
     retains_prompts: false,
+    replay_markers: &[],
     process: |harness, setup, config, plan, _| part::process(harness, setup, config, plan),
     session: |_, _, _, _| Ok(()),
     env: part::env,

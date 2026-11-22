@@ -287,7 +287,7 @@ impl RunHandler {
         // The operator's prompts take numbers too: `prompts` counts those of loop-manager, for the ceiling.
         let n = super::prompts::next_n(tx, &row.id, row.attempt)?;
         let key = PromptKey::new(&row.id, row.attempt, n);
-        super::prompts::intent(tx, &row.id, row.attempt, n, key, text)?;
+        super::prompts::intent(tx, (&row.id, row.attempt, n), key, text, "lm")?;
         // The session of the turn died with the daemon that ran it (recovery let go of its handle), or dies with the
         // one that is stopping now: no next turn starts, the attempt fails for the policy to decide
         // (docs/design/invariants.md), and the prompt left as an intent goes to the session a resumed attempt brings

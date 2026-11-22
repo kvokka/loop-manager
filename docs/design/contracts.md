@@ -85,7 +85,10 @@ Shared objects:
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`
   return sets 1; `attempt` stays the attempt of the session) and `permissions` (the permission requests of the live
   attempt that wait for the operator's answer, `[{id, tool, tool_use_id, input, options}]` as in 4.3, oldest first;
-  empty under `lm`, whose requests the policy answers at once).
+  empty under `lm`, whose requests the policy answers at once) and `disputed` (the prompt whose delivery is disputed
+  and waits for the operator's choice, 6.4: `{key, text, source, attempt, why, since}`, `attempt` the attempt the
+  prompt was sent in, `why` the rule that left it open, `since` when; null with no dispute open, or once a choice is
+  made).
 - `Failure`: `{kind, text, scope, retry_at, retried_by_harness, source, raw, account, provider_model}`: `kind` from
   see 4.4, `text` set only for `unknown`, `scope` one of `session | instance | account | provider_model | run | rig`,
   `retry_at` time or null, `source` one of `harness | adapter | core`, `raw` the harness text cut to 4 KiB,
@@ -125,6 +128,8 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.permission_requested` | `{run, request: {id, tool, tool_use_id, input, options}}`; a permission request of the session of a manual run (4.3) waits for the operator's answer (6.1) |
 | `run.permission_answered` | `{run, request, by: "operator"\|"harness", option}`; the operator answered the request `request` of a manual run with `option` (null: declined), or the harness took it back (`by: harness`, `option` null) |
 | `run.handed_back` | `{run, deferred, unsent: {withdrawn: [key], kept: [key]}}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied; `unsent` names the operator's prompts the Continue took back and those the harness still holds, which stay part of the attempt |
+| `run.delivery_disputed` | `{run, key, source, why}`; a resumed attempt could not tell from the session's replay whether the harness got the prompt `key` (`source` as in 6.4, `why` the rule of 6.4 that left it open): nothing goes into the session until the operator chooses |
+| `run.delivery_resolved` | `{run, key, choice: "delivered"\|"resend"\|"new_session", by: "operator"\|"lm"}`; the dispute over the prompt `key` is over: the operator chose (`delivered`, `resend`), or the policy gave the session up and the dispute went with it (`new_session`, `by: lm`) (6.4) |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
 | `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the policy declined a permission request of the agent (4.3): at once under `lm`, and on Continue each one the operator left open, so nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` why it was declined |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
@@ -333,8 +338,8 @@ the hooks of every deciding event still pending — on `run.preparing`, `run.fin
 The harness session of a run that ended its turn is gone with the dead daemon (no reconnection, 6.4): a decision that
 needs it — `remark` on `run.finishing`, `continue` on `run.turn_ended_without_outcome` — fails the attempt with
 `daemon_crash` in the transaction of the decision, and its text waits as the unsettled prompt of the next attempt
-(6.4: a resume checks the transcript for it, a new session gets it after the step's prompt); the other decisions apply
-as they would have. Recovery drops the pending deciding hooks only of a run whose attempt was live (`starting`,
+(6.4: a resume checks its delivery in the session's replay, a new session gets it after the step's prompt); the other
+decisions apply as they would have. Recovery drops the pending deciding hooks only of a run whose attempt was live (`starting`,
 `running` in a turn, 6.4): they judge the lost attempt, and that attempt's `attempt_failed` queues
 its own hooks.
 
@@ -373,10 +378,14 @@ never retries a turn, parks or decides an outcome (adapter duties in 4.4–4.6 a
 semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fails with a typed failure (4.4).
 `send_prompt` returns once the request is written: the harness holds a prompt sent while a turn is in flight, and
 inserts it into that turn when `prompts_in_turn` is true, else after the turn ends; the insertion is `prompt.acked`, a
-drop `prompt.dropped` (4.3). `resume_session` with `replay` asks the harness for the whole history of the session and
-gives back its user messages (`Replay`, 4.2); without it the replay is empty. `retains_prompts` tells that the harness
-keeps the user messages of a session across its processes, so a complete replay without a message tells it was never
-inserted; `cancel_turn` carries the operator's Stop as well (6.1). A permission request of a session
+drop `prompt.dropped` (4.3). `resume_session` moves a session onto a new instance, and a harness that does not have
+the session fails it with `transcript_divergence` (invariant 17); with `replay` it also asks the harness for the whole
+history of the session and gives back its user messages (`Replay`, 4.2), without it the replay is empty. The core asks
+for the replay only to check the delivery of a prompt (6.4). `retains_prompts` tells that the harness keeps the user
+messages of a session across its processes, so a complete replay without a message tells it was never inserted;
+`replay_markers` are the exact texts of the user messages the harness adds to a session by itself (claude's
+`[Request interrupted by user]` after a cancelled turn), which the check passes over. `cancel_turn` carries the
+operator's Stop as well (6.1). A permission request of a session
 waits for `answer_permission`, given by the core's policy or by the operator of a manual run. The interface has no
 model change inside a live session; a human joins a live session only through the core, whose `send_prompt` carries
 an operator's instruction as any prompt (6.1, [frontends](../api/frontends.md#humans-and-runs)).
@@ -395,17 +404,15 @@ trait Driver: Send + Sync {
 
     // session
     fn start_session(&self, instance: &InstanceHandle, session: &SessionPart) -> BoxFuture<Result<SessionRef, Failure>>;
-    fn resume_session(&self, instance: &InstanceHandle, session: &SessionRef, part: &SessionPart, replay: bool) -> BoxFuture<Result<Replay, Failure>>; // replay: the history's user messages
+    fn resume_session(&self, instance: &InstanceHandle, session: &SessionRef, part: &SessionPart, replay: bool) -> BoxFuture<Result<Replay, Failure>>; // no such session: transcript_divergence; replay: the history's user messages
     fn send_prompt(&self, instance: &InstanceHandle, session: &SessionRef, text: &str, key: PromptKey) -> BoxFuture<Result<(), Failure>>; // returns once written
     fn prompts_in_turn(&self) -> bool;                        // the harness may insert a prompt into a turn in flight; default false
     fn retains_prompts(&self) -> bool;                        // the harness keeps a session's user messages across its processes; default false
+    fn replay_markers(&self) -> &'static [&'static str];      // texts of the user messages the harness adds by itself; default none
     fn answer_permission(&self, instance: &InstanceHandle, request: &str, option: Option<&str>) -> BoxFuture<()>; // None declines
     fn cancel_turn(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<Result<(), Failure>>;
     fn stop_background(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<()>; // commands left after the turn; session stays
     fn close_session(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<()>; // transcript stays
-
-    // transcript
-    fn transcript(&self, instance: &InstanceHandle, session: &SessionRef, key: PromptKey) -> BoxFuture<Result<Transcript, Failure>>;
 
     // what the agent of a running instance said of itself: {name, version, protocol} of an ACP agent
     fn agent(&self, instance: &str) -> Option<serde_json::Value>;
@@ -423,7 +430,6 @@ trait Driver: Send + Sync {
 | `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. an ACP harness (claude and codex among them): `{session_id, cwd, home?}`. `home` is the agent's own config directory, which holds the session's transcript, and a resume takes it again: of an isolated claude session the process's `CLAUDE_CONFIG_DIR`; of a codex session with a home of its own (an isolated one, or one that inherits the host and has skills) the process's `CODEX_HOME`, which holds the thread's rollout; without it the session runs in the host's config. codex's `session_id` is the id of its thread |
 | `PromptKey` | UUID v5 of `"loop-manager:prompt:<run>/<attempt n>/<prompt n>"` in the URL namespace; the idempotency key of one prompt (see 6.4) |
 | `Replay` | `{ complete: bool, messages: [Replayed { id, text }] }`: what a `resume_session` with `replay` gave of the session's user messages, oldest first. `complete`: the harness ended the replay it was asked for (`replay_complete` of ACP); `id` is the harness's id of the message, the `message_id` of the `prompt.acked` that inserted it; `text` joins the text blocks of the message, any other block is U+FFFC. Without `replay`, or when the harness could not replay, nothing is complete |
-| `Transcript` | `Missing` or `Present { delivered: bool }` — whether the session exists and whether the prompt with `key` is in it; answered or not is not told apart: a resumed session never has a turn in flight (the old process is always stopped before the resume), so a delivered prompt is reconciled either way |
 | `Health` | `Ok`, `Degraded { text }` (the instance stays `ready` and keeps its sessions; `instance.degraded`, 8), `Dead` |
 
 ### 4.3 Normalized events
@@ -472,7 +478,7 @@ harness says so).
 | `stall` | core | session |
 | `runaway_turn` | core | session |
 | `tool_failure` | adapter | session (MCP server down for the whole session) |
-| `transcript_divergence` | adapter, core (resume found no transcript) | session |
+| `transcript_divergence` | adapter (a resume found no such session) | session |
 | `workspace_failure` | core | rig |
 | `hollow_done` | core | run |
 | `unknown` | adapter | session; `text` holds the harness wording |
@@ -523,7 +529,7 @@ is given as a reference.
 | Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | `session/resume` in a new process with the same session part, then `mode` again by `session/set_config_option` (the adapter resumes a session in a mode of its own); the codex config of the new attempt, model and effort included, comes in that process's `CODEX_CONFIG`, its `CODEX_HOME` from the `SessionRef` |
 | Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | the environment of the adapter's process, which codex and its hooks inherit, and the same variables in `shell_environment_policy.set` of the codex config, so codex keeps them in a command's environment |
 | Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | as claude; a command that detached itself goes when the session's process stops, on the sweep of the instance marker |
-| Transcript check | ACP does not tell whether the session holds the prompt: delivered when the agent answered `session/prompt` with that key, the driver's record of the last key answered in the session ([adapters](adapters.md#acp-v2-harnesses)); the adapter answers a key its stored history holds without a turn | as claude; the adapter finds the key in the thread's history |
+| Delivery check | `session/resume` with `replayFrom` gives the session's user messages back, each with the `messageId` the answer to its `session/prompt` named; the session keeps them across processes (`retains_prompts`), and the note `[Request interrupted by user]` it adds after a cancelled turn is a replay marker (6.4, [adapters](adapters.md#acp-v2-harnesses)); the adapter answers a key its stored history holds without a turn | as claude, with no replay marker; the adapter finds the key in the thread's history |
 
 The driver runs each agent process in its own process group, and takes the end of a turn from the harness's
 authoritative signal, never from the answer to a request.
@@ -551,9 +557,10 @@ claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.m
   a limit is a plain `rate_limited` without it. The shape of the error when a real quota runs out has not been seen
   live (the claude half of criterion 10 stays open).
 - When the daemon dies, the adapter loses its stdin and exits, and the open turn ends with it (contract scenario 11).
-  The next attempt resumes the session by `session/resume`, its `home` from the `SessionRef`, and reconciles a prompt
-  the adapter answered with a prompt of a new key; one it never answered goes again with the same idempotency key
-  (4.2 `Transcript`, 6.4); a planned restart drains first
+  The next attempt resumes the session by `session/resume`, its `home` from the `SessionRef`, and checks in the
+  session's replay whether the prompt the daemon died under is there: a prompt the session holds is reconciled with a
+  prompt of a new key, one it does not goes again with the same idempotency key, and one the replay does not settle
+  waits for the operator (6.4); a planned restart drains first
   ([invariants](invariants.md#recovery)). The claude CLI reaches `init` 0.30 s after a resume of a one-turn session
   (claude 2.1.322), and 0.4–0.5 s through an ACP adapter (2.1.321), so a resumed attempt costs little.
   <!-- MEASURE id=claude-resume-time date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/42 note="one-turn session, haiku, n=6; through the ACP adapter on 2.1.321 0.4–0.5 s (reports/14); resume of a long transcript not measured" -->
@@ -598,9 +605,9 @@ codex (the `codex` profile of `crates/loop-manager-acp`, [adapters](adapters.md#
   own: the core's watchdog owns it.
 - When the daemon dies, the adapter loses its stdin and stops codex, and the open turn ends with it (contract
   scenario 11). The next attempt resumes the session by `session/resume` in a new process, its `CODEX_HOME` from the
-  `SessionRef`, and reconciles a prompt the adapter answered with a prompt of a new key; one it never answered goes
-  again with the same idempotency key, which the adapter makes codex's `clientUserMessageId`. A key the thread's
-  history already holds the adapter answers at once, inserting nothing and starting no turn.
+  `SessionRef`, and checks the prompt the daemon died under in the session's replay as claude's (6.4); one the thread
+  does not hold goes again with the same idempotency key, which the adapter makes codex's `clientUserMessageId`. A key
+  the thread's history already holds the adapter answers at once, inserting nothing and starting no turn.
 - The permission mode follows `native.codex.approval_policy` and `sandbox_mode` ([config](config.md#permissions)).
   Under `agent-full-access`, the default, no request comes; under `workspace-write` and `read-only` what the sandbox
   does not allow comes as `session/request_permission`, one `permission.requested`, which the core's policy declines
@@ -905,6 +912,16 @@ flight keeps its course, and `control` of the `RunView` is `manual` ([invariant 
   `queued` prompt, which is never delivered, and hands the run back now; a prompt the harness holds already (`intent`,
   `sent`) stays part of the attempt and starts its turn as above when it goes in. `run.handed_back` names both.
 - A cancel ends a manual run as any run; a parent that waited for it gets its whole step timeout back, as on Continue.
+- A disputed delivery (6.4) is no manual mode, and the two go together: a run under `lm` or a manual one may stand in a
+  dispute, and a takeover of it is accepted. While the dispute is open nothing goes into its session: an instruction
+  takes the run over as ever, then is answered `{"answer": "delivery_disputed", "disputed": {key, text}}` and sends
+  nothing; a Continue of a manual run gets the same answer and changes nothing, since the attempt would stand without
+  a first prompt; a Stop finds no turn (`nothing_to_stop`). The operator's choice on the delivery (6.4) is what settles
+  it. A dispute stands as a manual run does: the run's deadlines (`state`, silence) go when it opens and one that still
+  fires is dropped; the step timeout of each parent up the chain that waits for it in a `formula` or `drain` step goes
+  too, and no new attempt of that step starts it while the child's dispute is open; a planned drain of the daemon does
+  not wait for it. Other runs, the siblings under a drain among them, go on. The choice gives the run under `lm` its
+  `start_timeout` afresh and the waiting parents their whole step timeout back, as Continue does.
 
 Ceilings of the core (invariant 16): 20 failed attempts per run (the attempts of every step together), not counting the
 attempts whose `auth_required`, `billing` or `quota_exhausted` failure the decision parked on the run's own `account:`
@@ -955,7 +972,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `starting`, `running` | `failure`, `exited`, deadline, exec exit 75 | `interrupted` | stop the session (cancel, then stop the instance if it is the session's own, then sweep descendants); `run.attempt_failed` hooks |
 | `finishing` | accept of a `pass` of a step that is not the last | `preparing` of the next step | `run.step_finished`; the next step's prompt renders (after the read of the bead's comments and parents when it shows them; the workdir and the bead claim stay) and its `run.preparing` hooks run |
 | `finishing` | accept / veto / remark | `passed` or `failed{agent}` / `failed{check}` / `running` | bead close or conditional release; on remark the message goes as the next prompt of the same attempt, the declared outcome is cleared, the token stays valid. A remark for a step other than `ai` is not allowed (hook failure) |
-| `interrupted` | `resume` / `new_session` | `starting` after `after` | new attempt: `generation + 1`, new token; `resume` first checks the transcript (invariant 17), `Missing` → attempt failure `transcript_divergence` |
+| `interrupted` | `resume` / `new_session` | `starting` after `after` | new attempt: `generation + 1`, new token; `resume` resumes the session, which a harness without it fails with `transcript_divergence` (invariant 17), then checks the delivery of the prompt the attempt before left unsure (6.4); `new_session` drops an open dispute with the old session |
 | `interrupted` | `park` | `parked` | gate closed in the same transaction |
 | `interrupted` | `fail`, no decision, attempts ceiling | `failed{infrastructure}` | gate closed if the decision carries one |
 | `parked` | every key of the run open, a concurrency slot free (in creation order with the queue) | `starting` (`then` of the park decision); `run.resumed` | new attempt |
@@ -969,6 +986,10 @@ cancel); a pass or a failure of the parent leaves them alone.
 | any live, manual | `permission.requested` | the same state | `run.permission_requested`; the request waits for the operator's answer (`run.permission_answered`) or the harness's `permission.withdrawn`; Continue declines it (`run.permission_denied`) |
 | `running`, manual or not | `prompt.acked` of an operator's prompt | `running` | the turn's end, the paused step timeout, the decision awaited and the deferred `settled` or `decision` go; under `lm` the step and silence clocks run again |
 | `starting`, `running` | turn ended, or `prompt.dropped`, the session holding no prompt | the same | the oldest `queued` prompt goes `intent`, with its effect |
+| `starting` (`resume`) | the session's replay settles the delivery of the prompt checked (6.4) | `starting` | history `delivery`; delivered: the reconcile prompt goes with a new key; not delivered: the same prompt goes again with its key |
+| `starting` (`resume`) | the replay does not settle it, or a dispute is open | `starting`, disputed | history `delivery{disputed}` and `run.delivery_disputed` when it opens; no prompt goes, the run's deadlines and those of the parents waiting for it go; the session waits for the operator's choice |
+| `starting`, disputed | the operator's choice at the current `attempt` | `starting` | `run.delivery_resolved{by: operator}`, history `delivery`; the prompt the choice says goes, `start_timeout` afresh under `lm` |
+| `interrupted`, `parked`, disputed | the operator's choice at the current `attempt` | the same | `run.delivery_resolved{by: operator}`; the choice is kept, and the next `resume` applies it instead of a check |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its
 bead. A bead the run
@@ -1043,10 +1064,9 @@ for it is not.
   `prompt.acked`, the harness inserted it; `settled` when the turn of an `acked` prompt ended (a prompt the harness
   still holds stays as it is). `withdrawn` is final: from `queued` when the operator withdraws it or its attempt ends,
   from `intent` or `sent` on `prompt.dropped`; the prompt is never delivered. A state never goes back. No marker in the prompt text: the key goes as the
-  harness's own idempotency key. An ACP harness, claude
-  and codex among them, knows a prompt delivered when the agent answered it (the driver records the key of the last
-  answer of the session, 4.6); a prompt whose answer the daemon did not live to read goes again with its key, and only
-  the agent's memory of the key keeps it from running twice ([adapters](adapters.md#acp-v2-harnesses)).
+  harness's own idempotency key, and the agent's memory of the key keeps a prompt sent again from running twice
+  ([adapters](adapters.md#acp-v2-harnesses)). The record keeps the `message_id` of `prompt.acked` (4.3), the
+  harness's id of the message the prompt became, which the delivery check below reads.
 - Daemon start ([invariants](invariants.md#recovery)): open the state and drain the outbox; for every recorded instance check pid + start time, kill its
   process group and sweep every process carrying its marker `LOOP_MANAGER_INSTANCE=<id>` in the environment, wait for
   the end (invariants 6, 7); every hook still queued is first killed by its `LOOP_MANAGER_INSTANCE` marker, with what it
@@ -1079,11 +1099,67 @@ for it is not.
   while the machine slept fires late by at most that.
 - Daemon stop (a signal, the end of a drain, `restart`): the core stops first, then the daemon, a child subreaper,
   kills every descendant it still has — sessions, hooks, exec commands — before it exits.
-- A resumed attempt after `daemon_crash` checks the transcript for the last unsettled key: not delivered → send the
-  same prompt with the same key; delivered → send the reconcile prompt (a constant of the core:
-  "Your previous turn was interrupted. Check the current state of the work and continue toward the goal.") with a
-  new key. A `new_session` attempt after `daemon_crash` sends the step's prompt; a remark or a `continue` left
-  unsettled follows it, after a blank line, in the same first prompt.
+- A `new_session` attempt after `daemon_crash` sends the step's prompt; a remark or a `continue` left unsettled
+  follows it, after a blank line, in the same first prompt.
+
+Delivery check. A `resume` attempt that does not enter its step afresh resumes the session of the attempt before,
+whatever that attempt failed of (`daemon_crash`, `harness_crash`, `stall`, an error of a request): the old process is
+always gone before the resume (invariant 6), so the harness's store is the truth. What it sends first:
+
+- The last prompt of the attempt before in `intent` or `sent` is the one the harness may or may not have got: it is
+  checked. With none (the last one `acked` or later) nothing is checked, and the reconcile prompt goes with a new key:
+  a constant of the core, "Your previous turn was interrupted. Check the current state of the work and continue
+  toward the goal.". With a dispute open (below), the disputed prompt is the one, and no replay is asked for.
+- The launch resumes the session with `replay` (4.1) and hands the writer the replay; the writer decides what goes.
+  Its signals are the protocol's, the same for every harness: `Replay.complete`; `Replay.messages`, the session's user
+  messages `(id, text)` in order; the anchor, the `message_id` of the last prompt of this session (as the attempts
+  record it, of any run, since a run may continue another's session) the harness named; `retains_prompts` and
+  `replay_markers` of the driver (4.1). The tail is the messages after the last one with the anchor's id, all of them
+  with no anchor, less those whose text is exactly a replay marker. The rules, the first that holds:
+
+  | # | Condition | Outcome, `why` |
+  |---|---|---|
+  | 0 | the prompt's text starts with `/` (it may be a local command of the agent, kept nowhere) | disputed, `command` |
+  | 1 | the replay is not complete (not supported, failed, over the request limit) | disputed, `replay_incomplete` |
+  | 2 | an anchor is named, and the replay does not have it | disputed, `anchor_missing` |
+  | 3 | no anchor, and the harness does not retain prompts | disputed, `no_anchor` |
+  | 4 | the tail is empty | not delivered |
+  | 5 | the tail is one message whose text equals the prompt's, both trimmed | delivered, as that message |
+  | 6 | anything else (more messages, another text) | disputed, `unexpected_messages` |
+
+  A false "not delivered" needs a harness that claims a complete replay without the message it inserted; a false
+  "delivered" needs another message after the anchor word for word the prompt. The key stays the guard, not the
+  check.
+- Delivered: the prompt is `acked`, named with the message's id, and the reconcile prompt goes with a new key.
+  Not delivered: the same prompt, its text, key and `source`, goes again as the attempt's first prompt. Either way the
+  history has a `delivery` record (`by: replay`, [event model](event-model.md#history)).
+- Disputed: nothing goes. The attempt stands in `starting` with its session resumed and idle, its first prompt an
+  unsent `intent`; the run's deadlines go, and so does the step timeout of each parent up the chain that waits for it,
+  as for a manual run (6.1). The run's `disputed` (1.3) names the prompt, the history has `delivery` with `outcome:
+  disputed`, the rule's `why`, the prompt's `text` and `seen`, the last messages of the tail, and the journal
+  `run.delivery_disputed`. A dispute is not manual mode: `control` stays as it was, and an instruction or a Continue
+  gets `delivery_disputed` (6.1).
+
+The operator's choice settles a dispute: `POST /v1/runs/{id}/delivery` with `{attempt, choice}`, `choice` `delivered`
+or `resend` (`loop-manager run delivery`), through the single writer with its `Idempotency-Key` as the commands of
+6.1. The answer is `accepted`; `stale_attempt` when `attempt` is not the run's current one; `run_terminal`;
+`not_disputed` with no dispute; `{"answer": "already_resolved", "choice"}` when a choice is made and not applied yet.
+The first choice wins, with `run.delivery_resolved{by: operator}`. `delivered` makes the prompt `acked` (no message
+named) and sends the reconcile prompt; `resend` sends the same prompt with its key, and an agent that holds the key
+answers it without a turn, so that attempt ends by silence and the next one reconciles. The attempt that holds the
+session sends at once, in the transaction of the choice, with `start_timeout` afresh and the waiting parents' step
+timeout back unless the run is manual; a manual run stays manual, its prompt going as the operator chose and its
+turn's end waiting for Continue. With no attempt holding the session (the run `interrupted` or `parked`), the choice
+is kept and the next `resume` applies it instead of a check.
+
+A dispute outlives what happens to the attempt that holds it. A daemon restart fails that attempt with
+`daemon_crash` as any, and the death of the harness with `harness_crash`: the attempt's unsent first prompt is
+`withdrawn` (`by: attempt_end`), and the next `resume` asks for no replay and settles nothing anew: it holds the
+session again for the choice, with no new `run.delivery_disputed`. Only the choice settles an open dispute. A
+`new_session` attempt (the policy's choice, `transcript_divergence` among the reasons) gives the session up, and the
+question goes with it: the history records `delivery` with `outcome: dropped, by: lm`, and an open dispute ends with
+`run.delivery_resolved{choice: new_session, by: lm}` and the waiting parents' step timeout back. A terminal run
+drops its dispute with no event.
 
 ## 7. Issue gates
 

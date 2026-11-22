@@ -31,7 +31,7 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 | 14 | Every transitional state has a deadline and a terminal exit | contracts 6.1 |
 | 15 | A watchdog on an issued run: a deadline to the first event and a silence budget that depends on the state. A running tool and background subagents have their own, longer budget. A retry the harness announces adds its pause to the limit. The core raises the failure `stall`, the policy chooses the reaction. The thresholds are `[watchdog]` of the orchestrator config (config.md) | contracts 6.1, 4.3 |
 | 16 | Attempt and restart counters live in the state and are bounded; the core has an absolute ceiling the policy cannot raise (20 failed attempts per run over all its steps, 10 remarks per attempt); the executions of a step are bounded by its `max_attempts` and counted in the state (`runs.step_attempt`), and a repeat spends neither ceiling; an attempt whose `auth_required`, `billing` or `quota_exhausted` failure parked the run on its own `account:` gate, closed by that decision, is outside the attempts ceiling: a wait for one's own account is not a failed try; any other park, a park on a gate that is not closed included, counts. Limit: a policy may still close that gate for a moment and retry at once — every such round is a real attempt of the harness | contracts 6.1 |
-| 17 | Resume is checked: only when the adapter confirmed the transcript exists. "New session keeping the ownership" is a core mechanism; after how many refused resumes to switch to it is policy | contracts 6.2, 6.4 |
+| 17 | Resume is checked: `resume_session` fails a session the harness does not have (`transcript_divergence`), so an attempt resumes only a session that exists. "New session keeping the ownership" is a core mechanism; after how many refused resumes to switch to it is policy | contracts 6.2, 6.4 |
 | 18 | An operator hold beats automation: a pause or cancel by a human is a record in the state read by every automatic decision | contracts 6.2, 7 |
 | 19 | A worktree has one owner and is removed only when its commits are reachable from refs (the `worktree` addon) | `loop-manager-addons/src/worktree.rs` |
 | 20 | An event is a reason to re-read the state; resync is mandatory; ambiguity means zero effects and a loud `resync.diverged` (a repeated or skipped driver `seq` included) | [event model](event-model.md) |
@@ -100,9 +100,11 @@ resumes what the drain cut.
 
 Prompt delivery is "at least once with an idempotent effect": the per-attempt record `intent → sent → acked →
 settled` and the prompt key the harness keeps in its transcript (contracts 6.4). Harness protocols give no
-idempotency of their own. An ACP harness of the config knows a prompt delivered when the agent answered it (the
-driver's record of the last key answered); a prompt whose answer the daemon did not live to read goes again with its
-key, and only the agent's memory of the key keeps it from running twice ([adapters](adapters.md#acp-v2-harnesses)).
+idempotency of their own. A resumed attempt checks the prompt the attempt before may or may not have delivered in the
+session's replay: one the replay shows inserted is reconciled with a prompt of a new key, one it shows absent goes
+again with its key, and one it does not settle is sent nowhere until the operator chooses (a disputed delivery,
+contracts 6.4), which no restart and no later replay settles in their place. Only the agent's memory of the key keeps
+a prompt sent again from running twice ([adapters](adapters.md#acp-v2-harnesses)).
 
 Measured on the owner's host (2026-11-13, loop-manager 0.1.0; criterion 8, 20 kills mid-step): after a `kill -9` the
 daemon answers again within 0.13 s, far under the 30 s bound; every run reaches its end exactly once, every trigger

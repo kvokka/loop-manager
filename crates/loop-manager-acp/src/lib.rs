@@ -19,7 +19,7 @@ use loop_manager_contract::{
     config::EffectiveConfig,
     driver::{
         Adapter, Capabilities, Driver, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized,
-        ProcessPart, PromptKey, Replay, SessionPart, SessionPlan, SessionRef, Setup, Source, Split, Transcript, child,
+        ProcessPart, PromptKey, Replay, SessionPart, SessionPlan, SessionRef, Setup, Source, Split, child,
     },
     history::History,
     orphans,
@@ -469,14 +469,6 @@ impl Acp {
         })
     }
 
-    /// The file of the key of the last prompt the agent of `session` answered, across restarts of the daemon:
-    /// `<state>/acp/<harness>/answered/<session id in hex>`.
-    fn answered(&self, session: &SessionRef) -> PathBuf {
-        let id = session.0["session_id"].as_str().unwrap_or_default();
-        let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
-        self.state.join("acp").join(&self.name).join("answered").join(hex)
-    }
-
     /// The history writer of `session`, for the run and attempt the session part `part` names.
     fn recorder(&self, part: &Value, session: &str) -> Option<record::Recorder> {
         let (run, attempt) = (part["run"].as_str()?, part["attempt"].as_u64()?);
@@ -505,15 +497,9 @@ impl Acp {
         let request: schema::PromptRequest =
             serde_json::from_value(request).map_err(|e| child::config_error(e.to_string()))?;
         lock(&known.shared).turn.sent(key);
-        let (shared, file, classify) = (known.shared.clone(), self.answered(session), self.profile.classify);
+        let (shared, classify) = (known.shared.clone(), self.profile.classify);
         // Ordered with the session's updates, and short: it waits for nothing.
         let written = known.conn.send_request(request).on_receiving_result(move |answer| {
-            if answer.is_ok() {
-                // The answer means the agent inserted the prompt into the session: a resumed attempt asks
-                // (`transcript`). Unwritten, the prompt is not known delivered and goes again with its key.
-                let _ = file.parent().map(std::fs::create_dir_all);
-                let _ = std::fs::write(&file, key.0.to_string());
-            }
             let mut shared = lock(&shared);
             let events = match answer {
                 Ok(answer) => shared.turn.acked(key, answer.message_id.to_string()),
@@ -936,6 +922,10 @@ impl Driver for Acp {
         self.profile.retains_prompts
     }
 
+    fn replay_markers(&self) -> &'static [&'static str] {
+        self.profile.replay_markers
+    }
+
     fn answer_permission<'a>(
         &'a self,
         instance: &'a InstanceHandle,
@@ -1012,24 +1002,6 @@ impl Driver for Acp {
             if let Ok(close) = serde_json::from_value::<schema::CloseSessionRequest>(close) {
                 let _ = request_within(known.conn.send_request(close).block_task()).await;
             }
-            let _ = std::fs::remove_file(self.answered(session));
-        })
-    }
-
-    /// The session is there (`resume_session` fails one the agent does not have); the prompt with `key` is delivered
-    /// when it is the last one the agent of the session answered. ACP gives the key back in no update, and a replay
-    /// names a message only by the `messageId` of that answer, so the answer is the driver's own record of delivery.
-    fn transcript<'a>(
-        &'a self,
-        _instance: &'a InstanceHandle,
-        session: &'a SessionRef,
-        key: PromptKey,
-    ) -> BoxFuture<'a, Result<Transcript, Failure>> {
-        Box::pin(async move {
-            let answered = std::fs::read_to_string(self.answered(session)).unwrap_or_default();
-            Ok(Transcript::Present {
-                delivered: answered == key.0.to_string(),
-            })
         })
     }
 

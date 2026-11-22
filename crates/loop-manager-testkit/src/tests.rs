@@ -84,11 +84,9 @@ impl Setup {
         resumed.await.unwrap()
     }
 
-    async fn transcript(&self, n: u32) -> Transcript {
-        self.driver
-            .transcript(&self.instance, &self.session, key(n))
-            .await
-            .unwrap()
+    /// Whether prompt `n` was inserted into a session.
+    fn delivered(&self, n: u32) -> bool {
+        self.driver.insertions(key(n)) > 0
     }
 }
 
@@ -103,7 +101,7 @@ async fn a_delayed_turn_ends_without_an_outcome_after_its_delay() {
     ]);
     let start = Instant::now();
     s.prompt(1).await;
-    assert_eq!(s.transcript(1).await, Transcript::Present { delivered: true });
+    assert!(s.delivered(1));
     assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
     assert_eq!(next(&mut s.events).await, Some(Normalized::TurnStarted));
     let end = next(&mut s.events).await;
@@ -121,8 +119,8 @@ async fn a_delayed_turn_ends_without_an_outcome_after_its_delay() {
             background: false
         })
     );
-    assert_eq!(s.transcript(1).await, Transcript::Present { delivered: true });
-    assert_eq!(s.transcript(2).await, Transcript::Present { delivered: false });
+    assert!(s.delivered(1));
+    assert!(!s.delivered(2));
 }
 
 #[tokio::test(start_paused = true)]
@@ -143,7 +141,7 @@ async fn a_provider_error_fails_the_turn() {
             stop_reason: StopReason::Failed
         })
     );
-    assert_eq!(s.transcript(1).await, Transcript::Present { delivered: true });
+    assert!(s.delivered(1));
 }
 
 #[tokio::test(start_paused = true)]
@@ -227,14 +225,12 @@ async fn the_process_dies_mid_turn_and_later_calls_fail() {
         .start_instance("i-1", &ProcessPart(Value::Null), sink)
         .await
         .unwrap();
-    s.driver
-        .resume_session(&instance, &s.session, &SessionPart(Value::Null), false)
+    let replay = s
+        .driver
+        .resume_session(&instance, &s.session, &SessionPart(Value::Null), true)
         .await
         .unwrap();
-    assert_eq!(
-        s.driver.transcript(&instance, &s.session, key(1)).await.unwrap(),
-        Transcript::Present { delivered: true }
-    );
+    assert_eq!(replay.messages.len(), 1, "{replay:?}");
     s.driver.script(vec![ended(StopReason::Completed)]);
     s.driver
         .send_prompt(&instance, &s.session, "go on", key(2))
@@ -288,21 +284,12 @@ async fn unknown_sessions_have_no_transcript_and_closed_ones_resume() {
     // The core holds drivers as trait objects.
     let driver: &dyn Driver = &s.driver;
     let unknown = SessionRef(json!({ "session": 99 }));
-    let transcript = driver.transcript(&s.instance, &unknown, key(1)).await.unwrap();
-    assert_eq!(transcript, Transcript::Missing);
-    // A harness may resume what it does not know as an empty session: only the transcript tells.
-    driver
-        .resume_session(&s.instance, &unknown, &SessionPart(Value::Null), false)
-        .await
-        .unwrap();
-    let transcript = driver.transcript(&s.instance, &unknown, key(1)).await.unwrap();
-    assert_eq!(transcript, Transcript::Missing);
+    let resumed = driver.resume_session(&s.instance, &unknown, &SessionPart(Value::Null), false);
+    assert_eq!(resumed.await.unwrap_err().kind, FailureKind::TranscriptDivergence);
     assert!(!s.driver.has_transcript(&unknown.0));
     driver.close_session(&s.instance, &s.session).await;
-    let closed = s.transcript(1).await;
-    assert_eq!(
-        closed,
-        Transcript::Present { delivered: false },
+    assert!(
+        s.driver.has_transcript(&s.session.0),
         "a closed session keeps its transcript"
     );
     let part = SessionPart(Value::Null);
@@ -310,6 +297,8 @@ async fn unknown_sessions_have_no_transcript_and_closed_ones_resume() {
         .resume_session(&s.instance, &s.session, &part, false)
         .await
         .unwrap();
+    s.driver.lose_transcripts();
+    assert!(s.driver.has_transcript(&s.session.0), "a live process holds it");
 }
 
 #[test]
@@ -360,10 +349,10 @@ async fn a_prompt_sent_in_a_turn_is_held_until_inserted_or_dropped_by_the_cancel
     assert_eq!(next(&mut s.events).await, Some(acked(1, "m1")));
     s.prompt(2).await;
     s.prompt(3).await;
-    assert_eq!(s.transcript(2).await, Transcript::Present { delivered: false });
+    assert!(!s.delivered(2));
     go.notify_one();
     assert_eq!(next(&mut s.events).await, Some(acked(2, "m2")));
-    assert_eq!(s.transcript(2).await, Transcript::Present { delivered: true });
+    assert!(s.delivered(2));
     s.driver.cancel_turn(&s.instance, &s.session).await.unwrap();
     assert_eq!(
         next(&mut s.events).await,
@@ -373,7 +362,7 @@ async fn a_prompt_sent_in_a_turn_is_held_until_inserted_or_dropped_by_the_cancel
         stop_reason: StopReason::Cancelled,
     };
     assert_eq!(next(&mut s.events).await, Some(cancelled));
-    assert_eq!(s.transcript(3).await, Transcript::Present { delivered: false });
+    assert!(!s.delivered(3));
 }
 
 /// The answers to permission requests are kept in order; whether prompts go into a turn is the test's knob.

@@ -5,7 +5,7 @@ use crate::{
     BoxFuture,
     driver::{
         Driver, DriverEvent, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized, ProcessPart,
-        PromptKey, SessionPart, SessionRef, Source, Transcript,
+        PromptKey, SessionPart, SessionRef, Source,
     },
     writer::{CoreHandle, Executor},
 };
@@ -212,9 +212,10 @@ impl RunExecutor {
         }
     }
 
-    /// The processes it replaces gone (invariant 6), the instance, then the session (new or resumed after a
-    /// transcript check, invariant 17), then the prompt. The writer learns the instance and the session before the
-    /// next call, so every event of them finds its attempt.
+    /// The processes it replaces gone (invariant 6), the instance, then the session (new, or resumed: a harness without
+    /// it fails the resume, invariant 17), then the prompt — after a resume that checks a delivery, the one the writer
+    /// says, if any (contracts 6.4). The writer learns the instance and the session before the next call, so every
+    /// event of them finds its attempt.
     async fn launch(&self, core: &CoreHandle<Msg>, driver: &dyn Driver, p: &Value) -> Result<(), Failure> {
         let services: Vec<(String, u16)> = serde_json::from_value(p["services"].clone()).unwrap_or_default();
         let p = &super::service_proc::resolve(&self.services, &services, p, self.service_wait).await;
@@ -242,34 +243,14 @@ impl RunExecutor {
             return Ok(());
         }
         let (mut key, mut text) = (key, p["prompt"].as_str().unwrap_or_default().to_owned());
-        let session = match p["resume"].clone() {
-            Value::Null => driver.start_session(&handle, &part).await?,
+        let reconcile = &p["reconcile"];
+        let (session, replay) = match p["resume"].clone() {
+            Value::Null => (driver.start_session(&handle, &part).await?, None),
             value => {
                 let session = SessionRef(value);
-                driver.resume_session(&handle, &session, &part, false).await?;
-                // The prompt the daemon died under is checked, else the new one (it only shows the session is there).
-                let retry = &p["retry"];
-                let check = if retry.is_null() { key } else { self::key(retry) };
-                match driver.transcript(&handle, &session, check).await? {
-                    Transcript::Missing => {
-                        return Err(Failure::new(FailureKind::TranscriptDivergence, Source::Core));
-                    }
-                    // The harness never got it: the same prompt with the same key, so it cannot run twice.
-                    Transcript::Present { delivered: false } if !retry.is_null() => {
-                        (key, text) = (check, retry["text"].as_str().unwrap_or_default().to_owned());
-                        let msg = Msg::PromptReplayed {
-                            run: run.clone(),
-                            attempt,
-                            key,
-                            text: text.clone(),
-                        };
-                        if core.send(None, msg).await.is_err() {
-                            return Ok(());
-                        }
-                    }
-                    Transcript::Present { .. } => {}
-                }
-                session
+                let replay = reconcile["replay"].as_bool().unwrap_or(false);
+                let replay = driver.resume_session(&handle, &session, &part, replay).await?;
+                (session, Some(replay))
             }
         };
         let msg = Msg::Session {
@@ -280,6 +261,24 @@ impl RunExecutor {
         // A prompt goes only into a session the writer recorded.
         if core.send(None, msg).await.is_err() {
             return Ok(());
+        }
+        if let (Some(replay), false) = (replay, reconcile.is_null()) {
+            let msg = Msg::Resumed {
+                run: run.clone(),
+                attempt,
+                replay,
+            };
+            let Ok(reply) = core.send(None, msg).await else {
+                return Ok(());
+            };
+            // The delivery is disputed: the session waits for the operator's choice.
+            if reply["send"].is_null() {
+                return Ok(());
+            }
+            (key, text) = (
+                self::key(&reply["send"]),
+                reply["send"]["text"].as_str().unwrap_or_default().to_owned(),
+            );
         }
         driver.send_prompt(&handle, &session, &text, key).await?;
         let _ = core.send(None, Msg::PromptSent { run, attempt, key }).await;

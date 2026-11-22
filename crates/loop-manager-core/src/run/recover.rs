@@ -1,8 +1,9 @@
 //! Daemon start (docs/design/invariants.md, docs/design/contracts.md 6.4): what the previous daemon left running is
 //! killed; the attempts it was running fail with `daemon_crash` for the policy to decide, a run that waited for a
 //! decision on a deciding event goes on waiting for it, its hooks run again with their full time, and a run that waited
-//! only for its background to stop after the outcome goes to `finishing` with that outcome. Effects and the outbox are
-//! in the state, so they carry on by themselves; schedules are armed after this.
+//! only for its background to stop after the outcome goes to `finishing` with that outcome. A disputed delivery stays as
+//! it is, with no attempt holding its session: the next one holds it again and checks nothing anew (`delivery.rs`).
+//! Effects and the outbox are in the state, so they carry on by themselves; schedules are armed after this.
 
 use super::{RunHandler, decide::DECIDE_SLACK_MS, row::Row};
 use crate::{

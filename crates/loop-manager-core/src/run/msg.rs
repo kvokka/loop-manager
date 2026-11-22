@@ -2,7 +2,7 @@
 
 use super::{Exit, GateSpec};
 use crate::{
-    driver::{DriverEvent, Failure, InstanceHandle, PromptKey, SessionRef},
+    driver::{DriverEvent, Failure, InstanceHandle, PromptKey, Replay, SessionRef},
     tracker::{Bead, Change, TrackerError},
 };
 use serde::{Deserialize, Serialize};
@@ -103,13 +103,13 @@ pub enum Msg {
         attempt: u32,
         session: SessionRef,
     },
-    /// The launch of an attempt sends again the prompt the daemon died under, which the harness never got: it is
-    /// the attempt's first prompt now (contracts 6.4).
-    PromptReplayed {
+    /// The launch of an attempt resumed its session to check the delivery of the last prompt of the attempt before:
+    /// `replay` is what the harness gave of the session. The reply is `{"send": {"key", "text"}}`, the prompt the
+    /// launch sends first, or `{"send": null}`: nothing goes, the delivery is disputed (contracts 6.4).
+    Resumed {
         run: String,
         attempt: u32,
-        key: PromptKey,
-        text: String,
+        replay: Replay,
     },
     /// `send_prompt` of the attempt returned for prompt `key`.
     PromptSent {
@@ -216,6 +216,14 @@ pub enum Msg {
         run: String,
         attempt: u32,
     },
+    /// The operator's choice on the disputed delivery of a prompt of `run`, seen at `attempt`. The reply is
+    /// `{"answer": "accepted"|"stale_attempt"|"run_terminal"|"not_disputed"}`, or `{"answer": "already_resolved",
+    /// "choice"}` with the choice made before and not applied yet (contracts 6.4).
+    Delivery {
+        run: String,
+        attempt: u32,
+        choice: Choice,
+    },
     /// The operator answers the permission request `request` of the session of `run` at `attempt`: `option` selects
     /// one of its options, `None` declines it. The reply is `{"answer": "accepted"|"stale_attempt"|"run_terminal"|
     /// "already_answered"|"unknown_request"|"unknown_option"}` (contracts 6.1).
@@ -235,6 +243,16 @@ pub enum Unsent {
     Send,
     /// Takes back the input loop-manager still holds and hands the run back now.
     Withdraw,
+}
+
+/// The operator's choice on a disputed delivery (contracts 6.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Choice {
+    /// The harness got the prompt: the reconcile prompt goes.
+    Delivered,
+    /// The harness did not: the prompt goes again with its key.
+    Resend,
 }
 
 /// The outcome an agent declares (contracts 1.3 `Outcome`).

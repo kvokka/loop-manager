@@ -126,14 +126,6 @@ pub struct Replayed {
     pub text: String,
 }
 
-/// Whether a session's transcript exists and holds the prompt with a given key. Whether the prompt was answered
-/// does not matter: a resumed session never has a turn in flight, so a delivered prompt is reconciled either way.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Transcript {
-    Missing,
-    Present { delivered: bool },
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Health {
     Ok,
@@ -291,7 +283,7 @@ pub trait Driver: Send + Sync {
         session: &'a SessionPart,
     ) -> BoxFuture<'a, Result<SessionRef, Failure>>;
     /// `replay`: asks the agent for the whole history of the session and gives back its user messages; else
-    /// `Replay::default()`.
+    /// `Replay::default()`. A session the harness does not have fails with `transcript_divergence` (invariant 17).
     fn resume_session<'a>(
         &'a self,
         instance: &'a InstanceHandle,
@@ -318,6 +310,12 @@ pub trait Driver: Send + Sync {
     fn retains_prompts(&self) -> bool {
         false
     }
+    /// The exact texts of the user messages the harness adds to a session by itself, which a replay gives among the
+    /// prompts (claude's note of a cancelled turn): no prompt of loop-manager's, so the delivery check passes them
+    /// over after its anchor.
+    fn replay_markers(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// Answers the permission request `request` of `instance`: `Some(option)` selects that option, `None` declines
     /// (the harness's own `reject_once`, else the `cancelled` outcome). A request already answered or withdrawn:
     /// nothing.
@@ -339,13 +337,6 @@ pub trait Driver: Send + Sync {
     fn stop_background<'a>(&'a self, instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()>;
     /// Detaches the session from its instance; the transcript stays, so the session can be resumed later.
     fn close_session<'a>(&'a self, instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()>;
-
-    fn transcript<'a>(
-        &'a self,
-        instance: &'a InstanceHandle,
-        session: &'a SessionRef,
-        key: PromptKey,
-    ) -> BoxFuture<'a, Result<Transcript, Failure>>;
     /// What the agent of the running instance `instance` said of itself: `{name, version, protocol}` of an ACP agent;
     /// `None` for a harness that says nothing, or an instance not running in this daemon.
     fn agent(&self, _instance: &str) -> Option<Value> {

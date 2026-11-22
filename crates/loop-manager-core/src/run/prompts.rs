@@ -4,7 +4,10 @@
 //! operator takes it back or the attempt ends, from `intent` or `sent` when the harness dropped it. A state never goes
 //! back.
 
-use crate::{Error, Tx, driver::PromptKey};
+use crate::{
+    Error, Tx,
+    driver::{PromptKey, Replay, Replayed},
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -40,29 +43,35 @@ pub(super) fn in_turn(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<bool, Erro
     )?)
 }
 
-/// Records the decision to send prompt `n` of the attempt; a decision taken again (after a crash) replaces it. The
-/// history gets the record `prompt` (docs/design/event-model.md, "History").
+/// Records the decision to send prompt `n` of the attempt, of `source` (`lm`, or `operator` for an operator's prompt
+/// sent again); a decision taken again replaces it. The history gets the record `prompt`
+/// (docs/design/event-model.md, "History").
 pub(super) fn intent(
     tx: &mut Tx<'_>,
-    run: &str,
-    attempt: u32,
-    n: u32,
+    (run, attempt, n): (&str, u32, u32),
     key: PromptKey,
     text: &str,
+    source: &str,
 ) -> Result<(), Error> {
     let key = key.0.to_string();
     tx.sql().execute(
-        "INSERT INTO prompts (run, attempt, n, key, text, state) VALUES (?1, ?2, ?3, ?4, ?5, 'intent') \
-         ON CONFLICT (run, attempt, n) DO UPDATE SET key = ?4, text = ?5, state = 'intent'",
-        params![run, attempt, n, key, text],
+        "INSERT INTO prompts (run, attempt, n, key, text, source, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'intent') \
+         ON CONFLICT (run, attempt, n) DO UPDATE SET key = ?4, text = ?5, source = ?6, state = 'intent', \
+         message_id = NULL",
+        params![run, attempt, n, key, text, source],
     )?;
     record(
         tx,
         run,
         attempt,
         "prompt",
-        json!({ "key": key, "source": "lm", "text": text }),
+        json!({ "key": key, "source": source, "text": text }),
     )
+}
+
+/// The key a delivery record keeps as text.
+pub(super) fn key(text: &str) -> PromptKey {
+    PromptKey(uuid::Uuid::parse_str(text).unwrap_or_default())
 }
 
 /// Moves the prompt `key` of the attempt on to `state` (`sent` or `acked`); a prompt that moves gets the history
@@ -268,8 +277,8 @@ pub(super) fn first(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<Option<Strin
     Ok(key)
 }
 
-/// The last prompt the attempt before `attempt` left unsettled, `(n, key, text)`, when the daemon died under it: the
-/// resumed session's transcript tells whether the harness ever got it.
+/// The last prompt the attempt before `attempt` left unsettled, `(n, key, text)`, when the daemon died under it: a new
+/// session sends a remark of it after the step's prompt.
 pub(super) fn unsettled(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<Option<(u32, String, String)>, Error> {
     let found = tx
         .sql()
@@ -283,3 +292,97 @@ pub(super) fn unsettled(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<Option<(
         .optional()?;
     Ok(found)
 }
+
+/// The last prompt of `attempt` in `intent` or `sent`, `(n, key, text, source)`: one the harness may or may not have
+/// got.
+pub(super) fn undelivered(
+    tx: &Tx<'_>,
+    run: &str,
+    attempt: u32,
+) -> Result<Option<(u32, String, String, String)>, Error> {
+    let found = tx
+        .sql()
+        .query_row(
+            "SELECT n, key, text, source FROM prompts WHERE run = ?1 AND attempt = ?2 AND state IN ('intent', 'sent') \
+             ORDER BY n DESC LIMIT 1",
+            params![run, attempt],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    Ok(found)
+}
+
+/// `(key, text, source)` of prompt `n` of `attempt`.
+pub(super) fn at(conn: &Connection, run: &str, attempt: u32, n: u32) -> Result<(String, String, String), Error> {
+    Ok(conn.query_row(
+        "SELECT key, text, source FROM prompts WHERE run = ?1 AND attempt = ?2 AND n = ?3",
+        params![run, attempt, n],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?)
+}
+
+/// The id of the message of the last prompt of `session` (as `attempts.session` holds it) the harness named: of any
+/// run, since a run may continue the session of another.
+pub(super) fn anchor(tx: &Tx<'_>, session: &str) -> Result<Option<String>, Error> {
+    let found = tx
+        .sql()
+        .query_row(
+            "SELECT p.message_id FROM prompts p JOIN attempts a ON a.run = p.run AND a.n = p.attempt \
+             WHERE a.session = ?1 AND p.message_id IS NOT NULL ORDER BY a.started_ms DESC, a.n DESC, p.n DESC LIMIT 1",
+            [session],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(found)
+}
+
+/// What a replay tells of the delivery of a prompt (contracts 6.4).
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// The harness inserted it, as the message `message_id`.
+    Delivered { message_id: String },
+    /// The harness never got it.
+    NotDelivered,
+    /// The replay does not tell, `why`.
+    Unknown { why: &'static str },
+}
+
+/// The messages of `replay` after the last one with the id `anchor`, all of them with no anchor; `None` when the
+/// anchor is not there.
+pub(super) fn after<'a>(replay: &'a Replay, anchor: Option<&str>) -> Option<&'a [Replayed]> {
+    match anchor {
+        Some(anchor) => (replay.messages.iter().rposition(|m| m.id == anchor)).map(|at| &replay.messages[at + 1..]),
+        None => Some(&replay.messages),
+    }
+}
+
+/// The rules of the delivery check (contracts 6.4) for the prompt of `text`, from the replay of its session: `anchor`
+/// is the message of the last prompt of the session the harness named, `retains` whether the harness keeps the user
+/// messages of a session, `markers` the texts of the ones it adds by itself.
+pub(super) fn verdict(replay: &Replay, anchor: Option<&str>, retains: bool, markers: &[&str], text: &str) -> Verdict {
+    let unknown = |why| Verdict::Unknown { why };
+    // A local command of the agent may be kept nowhere.
+    if text.trim_start().starts_with('/') {
+        return unknown("command");
+    }
+    if !replay.complete {
+        return unknown("replay_incomplete");
+    }
+    let Some(tail) = after(replay, anchor) else {
+        return unknown("anchor_missing");
+    };
+    if anchor.is_none() && !retains {
+        return unknown("no_anchor");
+    }
+    let mut tail = tail.iter().filter(|m| !markers.contains(&m.text.as_str()));
+    match (tail.next(), tail.next()) {
+        (None, _) => Verdict::NotDelivered,
+        (Some(m), None) if m.text.trim() == text.trim() => Verdict::Delivered {
+            message_id: m.id.clone(),
+        },
+        _ => unknown("unexpected_messages"),
+    }
+}
+
+#[cfg(test)]
+mod tests;

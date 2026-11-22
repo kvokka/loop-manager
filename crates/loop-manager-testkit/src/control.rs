@@ -87,6 +87,12 @@ impl ScriptedDriver {
         self.lock().forgetful = true;
     }
 
+    /// From now on the harness adds user messages of these exact texts to its sessions by itself
+    /// (`Driver::replay_markers`); [`Self::foreign_message`] adds one.
+    pub fn marks_replays(&self, markers: &'static [&'static str]) {
+        self.lock().markers = markers;
+    }
+
     /// A user message of `text` that loop-manager did not send joins the transcript of `session`, as the attempts
     /// table stores it.
     pub fn foreign_message(&self, session: &Value, text: &str) {
@@ -157,7 +163,6 @@ impl ScriptedDriver {
                 held: std::collections::VecDeque::new(),
                 playing: None,
                 in_turn: false,
-                empty: s.empty,
             };
             (*id, session)
         });
@@ -177,8 +182,8 @@ impl ScriptedDriver {
         }
     }
 
-    /// The transcripts no live process holds are gone, as when the harness's files are lost: a resume of one quietly
-    /// gives an empty session, and only the transcript tells (invariant 17).
+    /// The transcripts no live process holds are gone, as when the harness's files are lost: a resume of one fails
+    /// with `transcript_divergence` (invariant 17).
     pub fn lose_transcripts(&self) {
         self.lock().sessions.retain(|_, s| !s.instance.is_empty());
     }
@@ -187,7 +192,7 @@ impl ScriptedDriver {
     pub fn has_transcript(&self, session: &Value) -> bool {
         session["session"]
             .as_u64()
-            .is_some_and(|id| self.lock().sessions.get(&id).is_some_and(|s| !s.empty))
+            .is_some_and(|id| self.lock().sessions.contains_key(&id))
     }
 
     /// The token of attempt `attempt` of `run`, as the agent of the attempt would find it in its environment.

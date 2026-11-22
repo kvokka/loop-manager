@@ -12,9 +12,9 @@ impl RunHandler {
     /// attempt), else a new one; its deadline is the step's timeout, unless the child is manual.
     pub(super) fn start_formula(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
         Self::run_attempt(tx, &mut row, "formula")?;
-        // A child an operator holds keeps the step timeout off until Continue (contracts 6.1), and the deadline of
-        // the state before (a park) goes.
-        if Self::holds_manual(tx, &row.id)? {
+        // A child an operator holds, or whose delivery is disputed, keeps the step timeout off until Continue or the
+        // choice (contracts 6.1, 6.4), and the deadline of the state before (a park) goes.
+        if Self::holds_still(tx, &row.id)? {
             tx.clear_deadline(&row.deadline("state"))?;
         } else {
             let timeout_ms = row.timeout_ms.unwrap_or(super::render::DRAIN_TIMEOUT_MS);

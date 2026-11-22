@@ -4,9 +4,7 @@
 use loop_manager_acp::Acp;
 use loop_manager_contract::{
     config::{EffectiveConfig, Hook, Layer, Mcp, Skill, Sourced},
-    driver::{
-        Driver, DriverEvent, Normalized, PromptKey, Replay, Replayed, SessionPlan, SessionState, StopReason, Transcript,
-    },
+    driver::{Driver, DriverEvent, Normalized, PromptKey, Replay, Replayed, SessionPlan, SessionState, StopReason},
 };
 use loop_manager_testkit::{
     anthropic::{Provider, Reply},
@@ -121,12 +119,8 @@ async fn until(
     panic!("no expected event in {seen:?}");
 }
 
-/// One turn; `edit` changes the config first. The events, the transcript and the bodies of the model requests.
-async fn turn(
-    plan: Vec<Reply>,
-    dir: &Path,
-    edit: impl FnOnce(&mut EffectiveConfig),
-) -> (Vec<Normalized>, Transcript, Vec<Value>) {
+/// One turn; `edit` changes the config first. The events and the bodies of the model requests.
+async fn turn(plan: Vec<Reply>, dir: &Path, edit: impl FnOnce(&mut EffectiveConfig)) -> (Vec<Normalized>, Vec<Value>) {
     let provider = Provider::start(plan).await;
     let driver = driver(dir);
     let workdir = dir.join("rig");
@@ -144,18 +138,17 @@ async fn turn(
         .await
         .unwrap();
     let seen = until(&mut events, |e| matches!(e, Normalized::TurnEnded { .. })).await;
-    let transcript = driver.transcript(&instance, &session, key).await.unwrap();
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
     until(&mut events, |e| matches!(e, Normalized::Exited { .. })).await;
     let requests = provider.requests().into_iter().map(|r| r.body).collect();
-    (seen, transcript, requests)
+    (seen, requests)
 }
 
-/// The prompt the agent answered is in the session: the transcript is present, the prompt delivered.
+/// The prompt the agent answered is acknowledged with the id of its message, and its turn completes.
 #[tokio::test]
 async fn a_reply_is_acked_and_completed() {
     let dir = tempfile::tempdir().unwrap();
-    let (seen, transcript, _) = turn(vec![Reply::Text("OK".into())], dir.path(), |_| {}).await;
+    let (seen, _) = turn(vec![Reply::Text("OK".into())], dir.path(), |_| {}).await;
     let key = PromptKey::new("r1", 1, 1);
     let acked = |e: &Normalized| matches!(e, Normalized::PromptAcked { key: k, message_id: Some(_) } if *k == key);
     assert!(seen.iter().any(acked), "{seen:?}");
@@ -166,7 +159,6 @@ async fn a_reply_is_acked_and_completed() {
             stop_reason: StopReason::Completed
         })
     );
-    assert_eq!(transcript, Transcript::Present { delivered: true });
 }
 
 /// The hook runs (its marker file), the model is offered the skill through the plugin and the tool of the MCP server.

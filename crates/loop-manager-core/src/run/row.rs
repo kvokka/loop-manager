@@ -51,11 +51,13 @@ pub(super) struct Row {
     pub(super) deferred: Option<String>,
     /// A Continue waits for the harness to take the operator's input in (contracts 6.1).
     pub(super) returning: bool,
+    /// The delivery of a prompt the resume could not settle, as JSON (`delivery.rs`).
+    pub(super) disputed: Option<String>,
 }
 
 const COLUMNS: &str = "id, project, rig, formula, agent, inputs, correlation, depth, parent_run, workdir, state, \
     class, attempt, prompt, timeout_ms, config, next, created_ms, started_ms, bead, bead_data, step, as_agent, \
-    step_kind, step_attempt, manual, manual_ms, deferred, handing_back";
+    step_kind, step_attempt, manual, manual_ms, deferred, handing_back, disputed";
 
 impl Row {
     pub(super) fn load(tx: &Tx<'_>, run: &str) -> Result<Self, Error> {
@@ -96,6 +98,7 @@ impl Row {
                 manual_ms: r.get(26)?,
                 deferred: r.get(27)?,
                 returning: r.get(28)?,
+                disputed: r.get(29)?,
             })
         })
         .optional()

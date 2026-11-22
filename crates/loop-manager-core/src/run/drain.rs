@@ -40,9 +40,9 @@ impl RunHandler {
         Self::run_attempt(tx, &mut row, "drain")?;
         let dedupe = format!("sync:drain:{}:{}", row.id, row.attempt);
         tx.effect(&tracker_key(&row.project), &dedupe, &sync(tx, &row.project)?)?;
-        // A child an operator holds keeps the step timeout off until Continue (contracts 6.1), and the deadline of
-        // the state before (a park) goes.
-        if Self::holds_manual(tx, &row.id)? {
+        // A child an operator holds, or whose delivery is disputed, keeps the step timeout off until Continue or the
+        // choice (contracts 6.1, 6.4), and the deadline of the state before (a park) goes.
+        if Self::holds_still(tx, &row.id)? {
             tx.clear_deadline(&row.deadline("state"))?;
         } else {
             let timeout_ms = row.timeout_ms.unwrap_or(DRAIN_TIMEOUT_MS);

@@ -9,7 +9,7 @@ use loop_manager_contract::{
     driver::{
         Capabilities, Driver, DriverEvent, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized,
         ProcessPart, PromptKey, Replay, Replayed, SessionPart, SessionPlan, SessionRef, SessionState, Source, Split,
-        StopReason, Transcript,
+        StopReason,
     },
 };
 use serde_json::{Value, json};
@@ -67,6 +67,8 @@ struct State {
     partial: bool,
     /// Set by [`ScriptedDriver::forgets_prompts`].
     forgetful: bool,
+    /// Set by [`ScriptedDriver::marks_replays`].
+    markers: &'static [&'static str],
     /// How many messages were inserted into any session: the number of the next id.
     inserted: u64,
     /// How many times each key was inserted into a session.
@@ -112,8 +114,6 @@ struct Session {
     playing: Option<JoinHandle<()>>,
     /// A turn is in flight: from a prompt or a response until `turn.ended`.
     in_turn: bool,
-    /// The resume of a lost transcript made this session: it is empty, whatever the core asked for.
-    empty: bool,
 }
 
 /// A user message of a session: its id, the key of the prompt that inserted it (none for one loop-manager did not
@@ -301,7 +301,6 @@ impl Driver for ScriptedDriver {
                 held: VecDeque::new(),
                 playing: None,
                 in_turn: false,
-                empty: false,
             },
         );
         drop(state);
@@ -310,8 +309,8 @@ impl Driver for ScriptedDriver {
     }
 
     /// Moves a session onto `instance`; its transcript survives the old process, like a harness's does. A session
-    /// with no transcript resumes too, empty, as the worst harness would have it. A replay gives the messages of the
-    /// session, complete unless [`ScriptedDriver::partial_replays`].
+    /// with no transcript fails with `transcript_divergence`, as an agent that does not have it answers. A replay gives
+    /// the messages of the session, complete unless [`ScriptedDriver::partial_replays`].
     fn resume_session<'a>(
         &'a self,
         instance: &'a InstanceHandle,
@@ -328,14 +327,9 @@ impl Driver for ScriptedDriver {
             Ok(id) => id,
             Err(e) => return ready(Err(e)),
         };
-        let s = state.sessions.entry(id).or_insert_with(|| Session {
-            instance: String::new(),
-            messages: Vec::new(),
-            held: VecDeque::new(),
-            playing: None,
-            in_turn: false,
-            empty: true,
-        });
+        let Some(s) = state.sessions.get_mut(&id) else {
+            return ready(Err(Failure::new(FailureKind::TranscriptDivergence, Source::Adapter)));
+        };
         s.instance = instance.id.clone();
         // A new process has no turn in flight and holds nothing.
         s.in_turn = false;
@@ -443,6 +437,10 @@ impl Driver for ScriptedDriver {
         !self.lock().forgetful
     }
 
+    fn replay_markers(&self) -> &'static [&'static str] {
+        self.lock().markers
+    }
+
     fn answer_permission<'a>(
         &'a self,
         _instance: &'a InstanceHandle,
@@ -481,25 +479,6 @@ impl Driver for ScriptedDriver {
             }
         }
         ready(())
-    }
-
-    fn transcript<'a>(
-        &'a self,
-        _instance: &'a InstanceHandle,
-        session: &'a SessionRef,
-        key: PromptKey,
-    ) -> BoxFuture<'a, Result<Transcript, Failure>> {
-        let state = self.lock();
-        let found = session_id(session)
-            .ok()
-            .and_then(|id| state.sessions.get(&id))
-            .filter(|s| !s.empty);
-        ready(Ok(match found {
-            None => Transcript::Missing,
-            Some(s) => Transcript::Present {
-                delivered: s.messages.iter().any(|m| m.key == Some(key)),
-            },
-        }))
     }
 }
 

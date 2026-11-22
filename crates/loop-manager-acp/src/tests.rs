@@ -453,34 +453,6 @@ async fn a_cancelled_prompt_is_dropped_and_another_error_is_a_failure() {
     }
 }
 
-/// The prompt the agent answered is delivered, also to the driver of the next daemon on the same state; a prompt it
-/// never answered is not, and neither is any once the session is closed.
-#[tokio::test]
-async fn the_transcript_knows_the_last_prompt_the_agent_answered_across_a_restart() {
-    let state = tempfile::tempdir().unwrap();
-    let mut peer = connected(state.path()).await;
-    let session = SessionRef(json!({ "session_id": "s/1" }));
-    let (sent, never) = (PromptKey::new("r1", 1, 1), PromptKey::new("r1", 1, 2));
-    let handle = peer.handle.clone();
-    let delivered = async |driver: &Acp, key| match driver.transcript(&handle, &session, key).await.unwrap() {
-        Transcript::Present { delivered } => delivered,
-        Transcript::Missing => panic!("the session is there"),
-    };
-    assert!(!delivered(&peer.driver, sent).await);
-    (peer.driver)
-        .send_prompt(&handle, &session, "Do the task.", sent)
-        .await
-        .unwrap();
-    peer.prompt().await.respond(schema::PromptResponse::new("m1")).unwrap();
-    assert_eq!(peer.event().await, named(sent, "m1"));
-    assert!(delivered(&peer.driver, sent).await);
-    let next = driver(state.path(), None);
-    assert!(delivered(&next, sent).await, "the record outlives the daemon");
-    assert!(!delivered(&next, never).await);
-    peer.driver.close_session(&handle, &session).await;
-    assert!(!delivered(&next, sent).await);
-}
-
 /// The answer the agent got, as JSON.
 async fn answer(
     asked: tokio::task::JoinHandle<Result<schema::RequestPermissionResponse, agent_client_protocol::Error>>,

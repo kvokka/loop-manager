@@ -333,8 +333,8 @@ impl RunHandler {
     pub(super) fn on_deadline(&mut self, tx: &mut Tx<'_>, run: &str, what: &str) -> Result<(), Error> {
         let row = Row::load(tx, run)?;
         // A manual run's deadlines were removed at its takeover, and Continue arms them afresh: one that still fires
-        // is stale (contracts 6.1).
-        if !row.live() || row.manual {
+        // is stale (contracts 6.1). So is one of an attempt that holds a disputed session for the choice (6.4).
+        if !row.live() || row.manual || (row.disputed_open() && attempt_live(&row.state)) {
             return Ok(());
         }
         let stall = |kind| Failure::new(kind, Source::Core);

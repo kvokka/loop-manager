@@ -68,6 +68,7 @@ impl Reader {
             view["manual"]["stop"] = json!(stop.then_some("pending"));
         }
         view["permissions"] = json!(super::permissions::open(&conn, id, row.attempt)?);
+        view["disputed"] = super::delivery::view(&conn, id)?;
         view["project"] = json!(row.project);
         view["rig"] = json!(row.rig);
         view["correlation"] = json!(row.correlation);
@@ -133,14 +134,16 @@ impl Reader {
             })?;
         // A run in a step with no process (drain, formula, await) loses no work to a restart, so a drain does not wait
         // for it. Nor for a manual run once its work in flight is over — the event that would move it waits in its
-        // slot, or the hooks of its decision are done: it stands for the operator, however long (contracts 6.1).
+        // slot, or the hooks of its decision are done: it stands for the operator, however long (contracts 6.1). Nor
+        // for one whose delivery is disputed: it stands for the operator's choice, which a restart keeps (6.4).
         let active: i64 = conn.query_row(
             &format!(
                 "SELECT COUNT(*) FROM runs \
                  WHERE (state IN ('preparing', 'starting', 'running', 'finishing') \
                  OR (state = 'interrupted' AND waiting IS NOT NULL)) AND NOT {} \
                  AND (manual = 0 OR (deferred IS NULL AND (waiting IS NULL \
-                 OR EXISTS (SELECT 1 FROM effects WHERE key = 'hooks:' || runs.id))))",
+                 OR EXISTS (SELECT 1 FROM effects WHERE key = 'hooks:' || runs.id)))) \
+                 AND NOT (disputed IS NOT NULL AND json_extract(disputed, '$.choice') IS NULL)",
                 super::drain::NO_PROCESS
             ),
             [],
