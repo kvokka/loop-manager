@@ -1648,6 +1648,114 @@
         }
       }
     },
+    "/v1/runs/{id}/continue": {
+      "post": {
+        "summary": "Hands a manual run back: every budget of the run starts afresh, then the event deferred while it was manual is\napplied once, in the same attempt (docs/design/contracts.md 6.1).",
+        "operationId": "hand_back",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Control"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{id}/finish": {
       "post": {
         "summary": "The finisher: the agent declares the outcome of its attempt (contracts 6.3); the reply is\n`{\"answer\": \"accepted\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
@@ -2020,6 +2128,114 @@
           },
           "409": {
             "description": "`rejected`: the run does not wait on that step, or the outcome is over its limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/takeover": {
+      "post": {
+        "summary": "Takes the run over for the operator: its orchestration stands until Continue — no step, retry or timeout of its\nown moves it, nor the timeout of a parent step that waits for it — while the work in flight goes on and is\nrecorded (docs/design/contracts.md 6.1).",
+        "operationId": "takeover",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Control"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
             "content": {
               "application/json": {
                 "schema": {
@@ -2641,6 +2857,33 @@
           }
         }
       },
+      "Control": {
+        "type": "object",
+        "description": "The answer to a takeover or a Continue (docs/design/contracts.md 6.1).",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),\n`run_terminal`, or for a Continue `not_manual`."
+          }
+        }
+      },
+      "ControlRun": {
+        "type": "object",
+        "required": [
+          "attempt"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt of the run the client saw (`attempt` of the run view).",
+            "minimum": 0
+          }
+        }
+      },
       "CreateRun": {
         "type": "object",
         "required": [
@@ -3148,6 +3391,26 @@
           }
         }
       },
+      "Manual": {
+        "type": "object",
+        "description": "A run an operator holds (docs/design/contracts.md 6.1).",
+        "required": [
+          "since"
+        ],
+        "properties": {
+          "deferred": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,\n`prepare`, `decision` or `check`."
+          },
+          "since": {
+            "type": "string",
+            "description": "Since when."
+          }
+        }
+      },
       "OnRig": {
         "type": "object",
         "required": [
@@ -3369,7 +3632,8 @@
           "inputs",
           "steps",
           "attempts",
-          "usage"
+          "usage",
+          "control"
         ],
         "properties": {
           "agent": {
@@ -3411,6 +3675,10 @@
             ],
             "description": "Set once `failed`: `agent`, `check`, `hollow_done` or `infrastructure`."
           },
+          "control": {
+            "type": "string",
+            "description": "`lm`, or `manual` while an operator holds the run (docs/design/contracts.md 6.1)."
+          },
           "correlation": {
             "type": "string"
           },
@@ -3445,6 +3713,17 @@
           },
           "inputs": {
             "type": "object"
+          },
+          "manual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Manual",
+                "description": "Set while `control` is `manual`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "outcome": {
             "oneOf": [
@@ -3518,7 +3797,7 @@
               "string",
               "null"
             ],
-            "description": "What a queued run waits for: `concurrency`, `writers` (its rig's `max_writers`), `gate` or `daemon_stopping`."
+            "description": "What a queued run waits for: `manual` (the operator holds it), `concurrency`, `writers` (its rig's\n`max_writers`), `gate` or `daemon_stopping`."
           },
           "workdir": {
             "type": "string"

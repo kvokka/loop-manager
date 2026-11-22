@@ -59,7 +59,7 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
 formulas, packs, addons (list), config check, explain and reload; runs
-(start, list, state, live view, history, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
+(start, list, state, live view, history, cancel, finish, resolve, takeover, continue); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
 account); events; daemon status, drain and planned restart.
 
@@ -118,6 +118,12 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   waiting on an `await` step. The `step` field names the current step of each run, and the state of a run
   gives the outcomes of the steps it went through as `steps`. A bridge that may send an outcome twice sets `--key`:
   without a key, a late repeat could resolve the step again after a round brought the run back to it.
+- `loop-manager run takeover <run> --attempt <n>` (`POST /v1/runs/{id}/takeover`) and `loop-manager run continue
+  <run> --attempt <n>` (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the
+  operator and hand it back ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's `attempt` as last
+  seen: a run at another attempt answers `stale_attempt` and nothing changes. They print the answer (`accepted`,
+  `stale_attempt`, `run_terminal`, or `not_manual` for a Continue of a run not taken over) and exit 1 unless it is
+  `accepted`.
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
@@ -183,7 +189,7 @@ How a history record becomes updates:
 | `subagent` | the same, with the ids under `<attempt>-<child session>-`, `_meta` `{"loop-manager/subagent": <child session>}`, and the first text chunk of each of its messages headed `[subagent] ` |
 | `prompt` | a `user_message_chunk` of its text, `messageId` `prompt-<key>` |
 | `exec_output` | its text as a `tool_call_content_chunk` of an `execute` tool call that a `tool_call_update` (`in_progress`, title `<step> (exec)`) opens at the attempt's first output: id `exec-<attempt>`, or `exec-<attempt>-<n>` for output after that call ended. The call ends at the next boundary record: `failed` at an `attempt_end` with a failure, an `outcome` `fail` or a `run` not passed, else `completed` |
-| `step`, `attempt`, `attempt_end`, `outcome`, `run`, `truncated` | an `agent_message_chunk` notice line of its own (`messageId` `lm-<n>`), such as `— step build (ai) —`, `— attempt 2: resume on claude —`, `— attempt 2 failed: rate_limited —`, `— outcome pass: done —`, `— run cancelled (cancel) —` |
+| `step`, `attempt`, `attempt_end`, `outcome`, `control`, `run`, `truncated` | an `agent_message_chunk` notice line of its own (`messageId` `lm-<n>`), such as `— step build (ai) —`, `— attempt 2: resume on claude —`, `— attempt 2 failed: rate_limited —`, `— outcome pass: done —`, `— taken over by an operator —`, `— handed back to loop-manager —`, `— run cancelled (cancel) —` |
 | any other kind | nothing |
 
 The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
@@ -205,9 +211,13 @@ permission requests).
   with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
   bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).
-- Joining a live session and handing control over to a human are not in the first release: it has no operation, no
-  state and no stub for them, and the driver interface has none either
-  ([contracts](../design/contracts.md#41-shape)).
+- A human takes a run over (`loop-manager run takeover`, `POST /v1/runs/{id}/takeover`) and hands it back
+  (`loop-manager run continue`, `POST /v1/runs/{id}/continue`). While it is manual (`control: "manual"` in its
+  state), nothing of loop-manager moves it: no next step, retry, policy decision or timeout, nor the timeout of a
+  parent step that waits for it; what was already running goes on and is recorded, and the event that would have
+  moved it shows as `manual.deferred`. Continue gives every budget back whole and applies that event once, in the same
+  attempt ([contracts 6.1](../design/contracts.md#61-states)). Leaving the client changes nothing: the mode belongs to
+  the run, in the state, and outlives a daemon restart.
 
 ## Verified by
 

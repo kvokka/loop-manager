@@ -94,6 +94,7 @@ all of them share.
   | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`) |
   | `exec_output` | the command of an exec step, or a step's check script, writes to its stdout or stderr: written by the runner of the command as the output comes, not by a transaction | `stream` (`stdout`, `stderr`), `text` (the output, invalid UTF-8 replaced) |
   | `outcome` | the finisher's outcome is accepted, or a step without a session (exec, drain, formula, await) has its outcome | `result`, `summary`, `data` |
+  | `control` | an operator takes the run over, or hands it back ([contracts 6.1](contracts.md#61-states)) | `control` (`manual`, `lm`) |
   | `run` | the run is terminal | `state`, `class`, `reason` |
   | `truncated` | the run went over `[history] max_run_bytes` | `max_run_bytes` |
 

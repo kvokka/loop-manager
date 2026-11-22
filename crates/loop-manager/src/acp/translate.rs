@@ -35,7 +35,7 @@ impl Translator {
                 text(record, "text"),
             )],
             "exec_output" => self.exec_output(record, attempt),
-            "step" | "attempt" | "attempt_end" | "outcome" | "run" | "truncated" => {
+            "step" | "attempt" | "attempt_end" | "outcome" | "control" | "run" | "truncated" => {
                 let mut updates = Vec::from_iter(self.close_exec(record));
                 let id = format!("lm-{}", record["n"].as_u64().unwrap_or(0));
                 updates.push(text_chunk(
@@ -164,6 +164,10 @@ fn notice(record: &Value) -> String {
             },
         },
         "outcome" => format!("outcome {}: {}", text(record, "result"), text(record, "summary")),
+        "control" => match text(record, "control") {
+            "manual" => "taken over by an operator".to_owned(),
+            _ => "handed back to loop-manager".to_owned(),
+        },
         "run" => match record["reason"].as_str() {
             Some(reason) => format!("run {} ({reason})", text(record, "state")),
             None => format!("run {}", text(record, "state")),

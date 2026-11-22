@@ -44,11 +44,16 @@ pub(super) struct Row {
     /// The step that ran last, as `step`, `agent`, `step_kind` and `step_attempt`, while the run skips the steps
     /// after it; only in memory, between leaving that step and the next one that runs.
     pub(super) ran: Option<(String, String, String, u32)>,
+    /// An operator holds the run (since `manual_ms`): its orchestration stands (contracts 6.1).
+    pub(super) manual: bool,
+    pub(super) manual_ms: Option<i64>,
+    /// The event that would have moved the run while it was manual, as JSON (`manual.rs`).
+    pub(super) deferred: Option<String>,
 }
 
 const COLUMNS: &str = "id, project, rig, formula, agent, inputs, correlation, depth, parent_run, workdir, state, \
     class, attempt, prompt, timeout_ms, config, next, created_ms, started_ms, bead, bead_data, step, as_agent, \
-    step_kind, step_attempt";
+    step_kind, step_attempt, manual, manual_ms, deferred";
 
 impl Row {
     pub(super) fn load(tx: &Tx<'_>, run: &str) -> Result<Self, Error> {
@@ -85,6 +90,9 @@ impl Row {
                 step_kind: r.get(23)?,
                 step_attempt: r.get(24)?,
                 ran: None,
+                manual: r.get(25)?,
+                manual_ms: r.get(26)?,
+                deferred: r.get(27)?,
             })
         })
         .optional()
@@ -102,12 +110,17 @@ impl Row {
     /// `RunView` of contracts 1.3; the generation is the attempt number.
     pub(super) fn view(&self) -> Value {
         let agent = (!self.exec()).then_some(&self.agent);
+        let manual = self.manual.then(|| {
+            let deferred = (self.deferred.as_deref()).and_then(|d| serde_json::from_str::<Value>(d).ok());
+            json!({ "since": self.manual_ms.map(rfc3339_ms), "deferred": deferred.map(|d| d["event"].clone()) })
+        });
         json!({
             "id": self.id, "formula": self.formula, "step": self.step, "agent": agent, "step_kind": self.step_kind,
             "step_attempt": self.step_attempt, "state": self.state, "class": self.class, "attempt": self.attempt,
             "generation": self.attempt,
             "bead": self.bead, "workdir": self.workdir, "depth": self.depth, "parent_run": self.parent_run,
             "created_at": rfc3339_ms(self.created_ms), "started_at": self.started_ms.map(rfc3339_ms),
+            "control": if self.manual { "manual" } else { "lm" }, "manual": manual,
         })
     }
 

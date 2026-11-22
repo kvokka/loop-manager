@@ -15,6 +15,9 @@ impl RunHandler {
     /// Renders the prompt of the step `row` enters and asks the `run.preparing` hooks; a prompt that shows the
     /// comments or the parents of the run's bead reads them first.
     pub(super) fn render_and_prepare(&mut self, tx: &mut Tx<'_>, row: Row) -> Result<(), Error> {
+        if row.manual {
+            return Self::defer(tx, &row, &super::manual::Deferred::Prepare);
+        }
         let shows =
             row.step_kind == "ai" && (self.config.prompt(&row.project, &row.agent)).is_ok_and(Prompt::shows_lineage);
         let Some(bead) = row.bead.as_ref().filter(|_| shows) else {
@@ -33,6 +36,9 @@ impl RunHandler {
 
     /// Renders the prompt and asks the `run.preparing` hooks.
     fn render_now(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
+        if row.manual {
+            return Self::defer(tx, &row, &super::manual::Deferred::Prepare);
+        }
         let prepared = self.render(tx, &row);
         let (prompt, timeout_ms, config) = match prepared {
             Ok(Some(p)) => p,

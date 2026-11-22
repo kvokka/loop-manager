@@ -11,7 +11,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 /// A closure as a decision or the operator asks for it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GateSpec {
     pub key: String,
     /// `None`: until removed by hand.

@@ -37,6 +37,15 @@ impl RunHandler {
         if !Self::checking(tx, &row, attempt)? {
             return Ok(());
         }
+        if row.manual {
+            let check = super::manual::Deferred::Check {
+                attempt,
+                exit,
+                stdout: stdout.to_owned(),
+                stderr: stderr.to_owned(),
+            };
+            return Self::defer(tx, &row, &check);
+        }
         let (said, code) = match exit {
             Exit::Code(0) => return self.advance(tx, row, None),
             Exit::SpawnFailed(text) => {

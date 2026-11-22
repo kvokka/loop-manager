@@ -92,6 +92,24 @@ pub enum RunCommand {
         #[arg(long = "key")]
         idempotency: Option<String>,
     },
+    /// Take a run over: its orchestration stands until `run continue` while its work in flight goes on. Prints
+    /// `accepted`, or `stale_attempt` when the run is at another attempt than `--attempt`, or `run_terminal`.
+    Takeover(Control),
+    /// Hand a run taken over back: its budgets start afresh and what it stood still for goes on, in the same attempt.
+    /// Prints `accepted`, `stale_attempt`, `run_terminal` or `not_manual`.
+    Continue(Control),
+}
+
+/// A takeover or a Continue of a run.
+#[derive(clap::Args)]
+pub struct Control {
+    id: String,
+    /// The attempt of the run as last seen (`attempt` in `run show`).
+    #[arg(long)]
+    attempt: u32,
+    /// The idempotency key: a repeat with the same key gets the first answer.
+    #[arg(long = "key")]
+    idempotency: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -220,12 +238,8 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
         } => {
             let body = json!({ "reason": reason.unwrap_or_default() });
             let path = run_path(&id, "/cancel");
-            print(
-                json,
-                &client
-                    .request("POST", &path, Some(&body), idempotency.as_deref())
-                    .await?,
-            );
+            let reply = client.request("POST", &path, Some(&body), idempotency.as_deref());
+            print(json, &reply.await?);
         }
         RunCommand::Resolve {
             id,
@@ -244,8 +258,24 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             let reply = client.request("POST", &path, Some(&body), idempotency.as_deref());
             print(json, &reply.await?);
         }
+        RunCommand::Takeover(control) => return self::control(client, json, "/takeover", control).await,
+        RunCommand::Continue(control) => return self::control(client, json, "/continue", control).await,
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// A takeover or a Continue: exits 0 when it was accepted, 1 when it was refused.
+async fn control(client: &Client, json: bool, action: &str, control: Control) -> Result<ExitCode, ClientError> {
+    let body = json!({ "attempt": control.attempt });
+    let path = run_path(&control.id, action);
+    let reply = client.request("POST", &path, Some(&body), control.idempotency.as_deref());
+    let reply = reply.await?;
+    print(json, &reply);
+    Ok(if reply["answer"] == "accepted" {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 pub(super) async fn gate(client: &Client, json: bool, command: GateCommand) -> Result<(), ClientError> {

@@ -70,7 +70,8 @@ impl RunHandler {
     /// cancelled too; the step then fails with `stopped_on` and `not_started` besides. A restart starts a new
     /// attempt, not a new entry; a round does.
     fn pass(&mut self, tx: &mut Tx<'_>, row: Row, under: &BTreeMap<String, Vec<String>>) -> Result<(), Error> {
-        let Some(root) = row.bead.clone().filter(|_| row.state == "running") else {
+        // A manual run gives out nothing; Continue reads the tracker again for it (contracts 6.1).
+        let Some(root) = row.bead.clone().filter(|_| row.state == "running" && !row.manual) else {
             return Ok(());
         };
         // A read asked before this attempt began does not know the root and decides nothing.

@@ -46,7 +46,8 @@ pub(crate) struct Run {
     started_at: Option<String>,
     #[schema(value_type = Object)]
     inputs: Map<String, Value>,
-    /// What a queued run waits for: `concurrency`, `writers` (its rig's `max_writers`), `gate` or `daemon_stopping`.
+    /// What a queued run waits for: `manual` (the operator holds it), `concurrency`, `writers` (its rig's
+    /// `max_writers`), `gate` or `daemon_stopping`.
     waiting_for: Option<String>,
     /// The closed gate a run waiting for a gate, or parked, waits on (the oldest closure of its keys).
     gate: Option<Gate>,
@@ -59,6 +60,20 @@ pub(crate) struct Run {
     attempts: Vec<Attempt>,
     /// The tokens of every attempt of the run.
     usage: Usage,
+    /// `lm`, or `manual` while an operator holds the run (docs/design/contracts.md 6.1).
+    control: String,
+    /// Set while `control` is `manual`.
+    manual: Option<Manual>,
+}
+
+/// A run an operator holds (docs/design/contracts.md 6.1).
+#[derive(ToSchema)]
+pub(crate) struct Manual {
+    /// Since when.
+    since: String,
+    /// The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,
+    /// `prepare`, `decision` or `check`.
+    deferred: Option<String>,
 }
 
 /// The tokens the harness reported (docs/design/contracts.md 4.3 `usage`).
@@ -153,6 +168,14 @@ pub(crate) struct Switched {
 #[derive(ToSchema)]
 pub(crate) struct Finished {
     /// `accepted`, `stale_attempt`, `run_terminal` or `invalid`.
+    answer: String,
+}
+
+/// The answer to a takeover or a Continue (docs/design/contracts.md 6.1).
+#[derive(ToSchema)]
+pub(crate) struct Control {
+    /// `accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),
+    /// `run_terminal`, or for a Continue `not_manual`.
     answer: String,
 }
 

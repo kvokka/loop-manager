@@ -3,6 +3,7 @@
 
 use super::{
     RunHandler,
+    manual::Deferred,
     row::{Row, attempts},
 };
 use crate::{
@@ -317,8 +318,13 @@ impl RunHandler {
         }
     }
 
-    /// Ends the current attempt with `failure` and asks for a decision on it (`interrupted`).
-    pub(super) fn attempt_failed(&mut self, tx: &mut Tx<'_>, mut row: Row, failure: Failure) -> Result<(), Error> {
+    /// Ends the current attempt with `failure` and asks for a decision on it (`interrupted`). A manual run's attempt
+    /// ends as well and the decision waits for Continue; one whose turn ended with a declared outcome is not failed:
+    /// its session settles that turn (contracts 6.1).
+    pub(super) fn attempt_failed(&mut self, tx: &mut Tx<'_>, row: Row, failure: Failure) -> Result<(), Error> {
+        if row.manual && Self::settled_with_outcome(tx, &row)? {
+            return Self::defer(tx, &row, &Deferred::Settled);
+        }
         let harness: Option<String> = tx
             .sql()
             .query_row(
@@ -333,6 +339,14 @@ impl RunHandler {
         Self::learn_keys(tx, &row, account, None)?;
         let failure = super::failure_json(&failure);
         self.end_attempt(tx, &row, Some(&failure))?;
+        if row.manual {
+            return Self::defer(tx, &row, &Deferred::Failed);
+        }
+        self.interrupt(tx, row, &failure)
+    }
+
+    /// The attempt of `row` ended with `failure`: the run asks the policy (`interrupted`).
+    pub(super) fn interrupt(&mut self, tx: &mut Tx<'_>, mut row: Row, failure: &Value) -> Result<(), Error> {
         row.set_state(tx, "interrupted", failure["kind"].as_str())?;
         let attempts = attempts(tx.sql(), &row.id)?;
         let agent_failures: Vec<Value> = {
@@ -425,6 +439,9 @@ impl RunHandler {
             self.end_child(tx, &row)?;
         }
         self.let_go_bead(tx, &row, state, reason)?;
+        if row.manual {
+            self.thaw(tx, &row)?;
+        }
         let usage = super::row::usage(tx.sql(), &row.id)?;
         let data = match state {
             "passed" => json!({ "run": row.view(), "outcome": outcome, "usage": usage }),

@@ -109,8 +109,9 @@ impl RunHandler {
             // attempt's failure queues its own under the same key.
             tx.sql()
                 .execute("DELETE FROM effects WHERE key = ?1", [format!("hooks:{id}")])?;
+            // A manual run's failure waits for Continue (contracts 6.1).
+            interrupted += u32::from(!row.manual);
             self.attempt_failed(tx, row, Failure::new(FailureKind::DaemonCrash, Source::Core))?;
-            interrupted += 1;
         }
         tx.emit(&Event {
             kind: "daemon.started".to_owned(),
@@ -134,7 +135,7 @@ impl RunHandler {
             let mut stmt = tx.sql().prepare(&format!(
                 "SELECT r.id, MAX(?1, MIN(e.next_at_ms)) + {} FROM runs r \
                  JOIN effects e ON e.key = 'hooks:' || r.id, json_each(e.payload, '$.hooks') h \
-                 WHERE r.waiting IS NOT NULL GROUP BY r.id",
+                 WHERE r.waiting IS NOT NULL AND r.manual = 0 GROUP BY r.id",
                 super::decide::queued()
             ))?;
             let rows = stmt.query_map([tx.now_ms()], |r| Ok((r.get(0)?, r.get(1)?)))?;

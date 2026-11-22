@@ -66,12 +66,14 @@ elsewhere `run` is the envelope's run id. Examples: `bead.labels` and `bead.epic
 Shared objects:
 
 - `RunView`:
-  `{id, formula, step, agent, step_kind: "ai"|"exec"|"drain"|"formula"|"await", state, class, attempt, generation, bead, workdir, depth, parent_run, created_at, started_at}`.
+  `{id, formula, step, agent, step_kind: "ai"|"exec"|"drain"|"formula"|"await", state, class, attempt, generation, bead, workdir, depth, parent_run, created_at, started_at, control: "lm"|"manual", manual}`.
   `step` is the name of the formula step the run is at (6.1), and of an ended run the step that ran last (the steps
   it skipped after it do not count); `agent` and `step_kind` are of that step, `agent` is null
   for a step other than `ai`, `class` is null until `failed`, `bead` is the bead id or null, `depth` is the chain
   depth of 6.1 (0 for a run started by hand), `parent_run` the run whose event triggered it or whose session started
-  it. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
+  it. `control` is `manual` while an operator holds the run (6.1), and `manual` is then `{since, deferred}`: since when,
+  and the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`, or null); `manual`
+  is null under `lm`. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`{input_tokens, output_tokens}`, summed
   over every attempt) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the
@@ -101,7 +103,7 @@ Observed events (addons and clients read them and cannot change what happens):
 | `instance.starting`, `instance.ready`, `instance.degraded`, `instance.stopped` | `{instance: {id, harness, fingerprint, pid, pgid}, reason}`; `pid`/`pgid` null before spawn, `reason` null except `stopped` (`idle`, `config`, `cancel`, `shutdown`, `recovery`, `operator`) and `degraded` (the health text); `instance.ready` with `reason: null` comes again when a degraded instance is well |
 | `instance.failed` | `{instance, failure: Failure}` |
 | `service.starting`, `service.ready`, `service.stopped`, `service.failed` | same as `instance.*` with `service: {id, name, scope, pid, pgid}` instead of `instance` |
-| `run.queued` | `{run: RunView, waiting_for: "concurrency"\|"writers"\|"gate"\|"daemon_stopping"\|null, gate}` (`writers`: a place in its rig, `max_writers`, 6.1); re-emitted when the reason changes |
+| `run.queued` | `{run: RunView, waiting_for: "manual"\|"concurrency"\|"writers"\|"gate"\|"daemon_stopping"\|null, gate}` (`manual`: an operator holds it; `writers`: a place in its rig, `max_writers`, 6.1); re-emitted when the reason changes |
 | `run.started` | `{run}`; once per run, when it first leaves `queued` |
 | `run.awaiting` | `{run, deadline}`; the run entered an `await` step and waits for its outcome from outside until `deadline` (6.3) |
 | `run.step_skipped` | `{run, step}`; the `if` of the step the run entered does not match, the run goes on without it (6.1) |
@@ -112,6 +114,8 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.passed` | `{run, outcome: Outcome, usage}` |
 | `run.failed` | `{run, class: "agent"\|"check"\|"hollow_done"\|"infrastructure", reason, outcome, usage}`; `outcome` null unless the agent declared one |
 | `run.cancelled` | `{run, reason, usage}` |
+| `run.taken_over` | `{run}`; an operator took the run over (6.1): its orchestration stands until `run.handed_back` |
+| `run.handed_back` | `{run, deferred}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
 | `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the harness or the adapter denied the agent a tool (4.3) and nothing waits on it: `tool` and `tool_use_id` are the harness's (codex: the server request's method and `itemId`), `input` the tool input (null when the harness does not tell it; codex: the request's `params`), `reason` its reason or null |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
@@ -781,6 +785,41 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   another new one. Attempt numbers run on across the steps of the run, so the token of
   an attempt of an earlier step is stale.
 
+Manual mode. An operator takes a run over (`POST /v1/runs/{id}/takeover`, `loop-manager run takeover <id> --attempt
+<n>`) and hands it back (`POST /v1/runs/{id}/continue`, `loop-manager run continue`). It is no state of its own: the
+run keeps its state, its work in flight keeps its course, and `control` of the `RunView` is `manual`
+([invariant 21](invariants.md)).
+
+- Each command carries `attempt`, the attempt of the run the client saw, and goes through the single writer with its
+  `Idempotency-Key`. The answer is `{"answer": ...}`: `accepted`; `stale_attempt` when the run is at another attempt
+  (nothing changes); `run_terminal`; for a Continue of a run that is not manual, `not_manual`. Of two Continues at
+  once one is accepted and the other gets `not_manual`. A takeover of a manual run is accepted and changes nothing. An
+  unknown run is `not_found`.
+- The takeover commits, with the history record `control` and `run.taken_over`, before anything else happens. The
+  run's deadlines go (`state`, silence, `decide`); the scheduler passes a manual run over (a queued one waits with
+  `waiting_for = "manual"`), and a started one keeps its slot and its place in its rig. Up the chain of `parent_run`,
+  while the parent is `running` in the `formula` or `drain` step that started the run, the parent's step timeout goes
+  too. Other runs, the siblings under a drain among them, go on.
+- While the run is manual its orchestration stands, and the work in flight is accounted as ever: prompt acks, the end
+  of the turn, usage, the history, the finisher's outcome (stored in the attempt; the session's background is not
+  stopped), the outcome of an exec command or of a child, an attempt failure (the attempt ends with it, its session and
+  instance are stopped). The one event that would move the run waits in the state instead: the settled turn
+  (`settled`), the failed attempt (`failed`), the outcome of a step with no session (`outcome`), the prompt of the step
+  about to render (`prepare`), a hook's decision (`decision`), the end of a step check script (`check`). There is one
+  slot: a later event replaces an earlier one, but a turn that ended with a declared outcome stays `settled` when its
+  process fails after. A drain step gives out no bead; a deadline that still fires is dropped.
+- Continue, in one transaction: the mode goes, with the history record `control` and `run.handed_back`, and every
+  budget of the run's state starts whole: `queued` — `queue_timeout`; `parked` — `park_timeout`, or the gate's `until`
+  if later; `preparing` and `starting` — `start_timeout`; `running` — the step `timeout`, and the silence budget in an
+  `ai` turn; a decision awaited — the hook deadline from now (3.3), and between turns the step timeout waits whole for
+  the next prompt; `finishing` with its step check script — the step timeout plus the margin; `interrupted` with its
+  decision taken — the next attempt at once. Each parent up the chain that waits in a `formula` or `drain` step gets
+  its whole step timeout back while no live child of it is manual or holds a manual run below it. Then the deferred
+  event is applied once, by the handler it would have met, in the same attempt: an outcome accepted while manual
+  moves the run to `finishing` once. With nothing deferred, what stood still goes on: a drain step reads its tracker
+  again, and the commands a session left after its declared outcome are stopped.
+- A cancel ends a manual run as any run; a parent that waited for it gets its whole step timeout back, as on Continue.
+
 Ceilings of the core (invariant 16): 20 failed attempts per run (the attempts of every step together), not counting the
 attempts whose `auth_required`, `billing` or `quota_exhausted` failure the decision parked on the run's own `account:`
 gate, closed by it (a wait on the account does not spend the ceiling; the attempt is marked
@@ -836,6 +875,8 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `parked` | every key of the run open, a concurrency slot free (in creation order with the queue) | `starting` (`then` of the park decision); `run.resumed` | new attempt |
 | `preparing`, `interrupted` | an attempt would start while a key of the run is closed (by anyone, invariant 18), the daemon is stopping, or the run's agent has as many other started runs as its `max_runs` (a step with no agent, drain or exec, has no such limit) | `parked` (`then`: `new_session` from `preparing`, the decided kind from `interrupted`) | — |
 | any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the bead |
+| any non-terminal | takeover at the current `attempt` (6.1) | the same state, manual | `run.taken_over`; the deadlines of the run and of the parents waiting for it go; nothing else |
+| any non-terminal, manual | Continue at the current `attempt` (6.1) | where the deferred event leads, in the same attempt | `run.handed_back`; whole budgets, then the deferred event |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its
 bead. A bead the run
@@ -884,6 +925,7 @@ How the finisher behaves, on the transitions of 6.2:
 | turn ended, no background work, no outcome | `run.turn_ended_without_outcome`; with no addon decision `failed{hollow_done}` |
 | a `run.finishing` hook returned a remark | the remark goes to the agent as the next prompt in the same session and attempt; the declared outcome is cleared; the token stays valid |
 | a `run.finishing` hook vetoed | `failed{check}` with the hook's reason |
+| finisher called while the run is manual (6.1) | the outcome is stored, the session's background is not stopped; Continue then moves the run to `finishing` once |
 | finisher with the token of a stale attempt | refused with an explicit error (`stale_attempt`); the state does not change |
 | daemon unreachable at the call | the command retries for a bounded time and fails (exit 75); after the daemon restarts, the run goes the `interrupted` way |
 
@@ -916,7 +958,8 @@ for it is not.
   (3.1). Runs with a live attempt — `starting`, `running` in a turn — → `interrupted` with `daemon_crash` (not a run
   waiting in an `await` step: its attempt and deadline stay, and a deadline passed while the daemon was down fires at
   start) (a `drain` attempt too: its next attempt gives no bead its entry of the step gave out), the launches, prompts
-  and deciding hooks they still had queued dropped, and the command of an exec step killed by its
+  and deciding hooks they still had queued dropped (a manual run stays manual: its failure waits in its deferred slot
+  for Continue instead of going to the policy, and none of its deadlines acts before Continue, 6.1), and the command of an exec step killed by its
   `LOOP_MANAGER_INSTANCE` marker (random per attempt) before any later attempt runs it. A run that waits for a decision
   on a deciding event keeps its state and waits for the same decision (3.4): `preparing`, `interrupted` waiting for the
   policy, `finishing`, and `running` after a turn that ended without an outcome; `finishing` with a step check script

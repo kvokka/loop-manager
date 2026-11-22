@@ -35,15 +35,7 @@ impl RunHandler {
             .filter_map(|h| h["timeout_ms"].as_i64())
             .collect();
         // The deciding hooks of the run run in order under one key: those queued ahead run first (contracts 3.3).
-        let ahead: Option<i64> = tx.sql().query_row(
-            &format!(
-                "SELECT MAX(?2, MIN(e.next_at_ms)) + {} FROM effects e, json_each(e.payload, '$.hooks') h \
-                 WHERE e.key = ?1",
-                queued()
-            ),
-            params![format!("hooks:{}", row.id), tx.now_ms()],
-            |r| r.get(0),
-        )?;
+        let ahead = Self::hooks_due(tx, &row.id)?;
         // The hooks of a failed attempt wait first for the death of the process it stopped (contracts 3.1).
         let grace = if kind == "run.attempt_failed" && !Self::stopped(tx, &row.id)?.is_null() {
             GRACE_MS
@@ -65,6 +57,20 @@ impl RunHandler {
         tx.set_deadline(&row.deadline("decide"), at)
     }
 
+    /// When the deciding hooks of `run` still queued are all done if they take their whole time; `None`: none is
+    /// queued.
+    pub(super) fn hooks_due(tx: &Tx<'_>, run: &str) -> Result<Option<i64>, Error> {
+        Ok(tx.sql().query_row(
+            &format!(
+                "SELECT MAX(?2, MIN(e.next_at_ms)) + {} FROM effects e, json_each(e.payload, '$.hooks') h \
+                 WHERE e.key = ?1",
+                queued()
+            ),
+            params![format!("hooks:{run}"), tx.now_ms()],
+            |r| r.get(0),
+        )?)
+    }
+
     pub(super) fn decide(&mut self, tx: &mut Tx<'_>, run: &str, seq: i64, decision: Decision) -> Result<(), Error> {
         let row = Row::load(tx, run)?;
         let waiting: Option<i64> = tx
@@ -72,6 +78,9 @@ impl RunHandler {
             .query_row("SELECT waiting FROM runs WHERE id = ?1", [run], |r| r.get(0))?;
         if waiting != Some(seq) {
             return Err(rejected(format!("`{run}` does not wait for a decision on event {seq}")));
+        }
+        if row.manual {
+            return Self::defer(tx, &row, &super::manual::Deferred::Decision { seq, decision });
         }
         self.apply(tx, row, Some(decision).filter(|d| *d != Decision::Abstain))
     }

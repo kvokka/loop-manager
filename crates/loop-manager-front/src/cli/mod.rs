@@ -26,6 +26,8 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("run watch", "GET", "/v1/runs/{id}/history"),
     ("run cancel", "POST", "/v1/runs/{id}/cancel"),
     ("run resolve", "POST", "/v1/runs/{id}/resolve"),
+    ("run takeover", "POST", "/v1/runs/{id}/takeover"),
+    ("run continue", "POST", "/v1/runs/{id}/continue"),
     ("finish", "POST", "/v1/runs/{id}/finish"),
     ("gate list", "GET", "/v1/gates"),
     ("gate close", "POST", "/v1/gates"),

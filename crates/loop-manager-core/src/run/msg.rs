@@ -185,6 +185,18 @@ pub enum Msg {
         token: String,
         outcome: Outcome,
     },
+    /// The operator takes `run` over at `attempt`, the attempt the client saw: its orchestration stands until
+    /// [`Msg::Continue`]; the reply is `{"answer": "accepted"|"stale_attempt"|"run_terminal"}` (contracts 6.1).
+    Takeover {
+        run: String,
+        attempt: u32,
+    },
+    /// The operator hands `run` back at `attempt`: fresh budgets, then the deferred event; the reply is
+    /// `{"answer": "accepted"|"stale_attempt"|"run_terminal"|"not_manual"}` (contracts 6.1).
+    Continue {
+        run: String,
+        attempt: u32,
+    },
 }
 
 /// The outcome an agent declares (contracts 1.3 `Outcome`).
@@ -220,8 +232,8 @@ pub struct Create {
     pub continue_from: Option<String>,
 }
 
-/// The decisions of contracts 3.2 the run machine applies.
-#[derive(Clone, Debug, PartialEq)]
+/// The decisions of contracts 3.2 the run machine applies; one that comes while the run is manual waits in the state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Decision {
     /// Every hook on the event finished without a decision: the "no addon decision" outcome, at once (3.3).
     Abstain,

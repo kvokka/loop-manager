@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 25;
+const VERSION: i32 = 26;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -42,6 +42,8 @@ INSERT INTO consumers (name, seq) VALUES ('journal', 0);
 -- the step of the formula it is at (a drain step has no agent, and its state is read in SQL); `as_agent` is the
 -- agent the `agent:` label of its bead names for its ai steps; `round`, `remarks` and `back_from` (a JSON array of
 -- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before.
+-- `manual` (since `manual_ms`): an operator holds the run and its orchestration stands; `deferred` is the JSON of the
+-- one event that would have moved it meanwhile, applied when it is handed back (contracts 6.1).
 CREATE TABLE runs (
     n INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -79,7 +81,10 @@ CREATE TABLE runs (
     remarks TEXT,
     step_attempt INTEGER NOT NULL DEFAULT 1,
     step_remarks TEXT,
-    back_from TEXT
+    back_from TEXT,
+    manual INTEGER NOT NULL DEFAULT 0,
+    manual_ms INTEGER,
+    deferred TEXT
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);

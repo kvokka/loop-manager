@@ -1,8 +1,9 @@
-//! Runs: start a formula, list, state, cancel, the finisher (docs/api/frontends.md, contracts 6).
+//! Runs: start a formula, list, state, cancel, the finisher, takeover and Continue (docs/api/frontends.md,
+//! contracts 6).
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Failed, Finished, Keyed, Run, Started},
+    replies::{Control, Failed, Finished, Keyed, Run, Started},
 };
 use axum::{
     Json,
@@ -209,5 +210,46 @@ pub(crate) async fn finish(
         token: body.token,
         outcome: body.outcome,
     };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ControlRun {
+    /// The attempt of the run the client saw (`attempt` of the run view).
+    attempt: u32,
+}
+
+/// Takes the run over for the operator: its orchestration stands until Continue — no step, retry or timeout of its
+/// own moves it, nor the timeout of a parent step that waits for it — while the work in flight goes on and is
+/// recorded (docs/design/contracts.md 6.1).
+#[utoipa::path(post, path = "/v1/runs/{id}/takeover", request_body = ControlRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Control),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn takeover(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(ControlRun { attempt }): Body<ControlRun>,
+) -> Reply {
+    let msg = Msg::Takeover { run, attempt };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+/// Hands a manual run back: every budget of the run starts afresh, then the event deferred while it was manual is
+/// applied once, in the same attempt (docs/design/contracts.md 6.1).
+#[utoipa::path(post, path = "/v1/runs/{id}/continue", request_body = ControlRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Control),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn hand_back(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(ControlRun { attempt }): Body<ControlRun>,
+) -> Reply {
+    let msg = Msg::Continue { run, attempt };
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }

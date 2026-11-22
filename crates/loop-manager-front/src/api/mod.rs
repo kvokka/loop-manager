@@ -100,6 +100,8 @@ fn router() -> OpenApiRouter<Arc<Api>> {
         .routes(routes!(runs::cancel))
         .routes(routes!(runs::resolve))
         .routes(routes!(runs::finish))
+        .routes(routes!(runs::takeover))
+        .routes(routes!(runs::hand_back))
         .routes(routes!(gates::list, gates::close))
         .routes(routes!(gates::open))
         .routes(routes!(triggers::fire))

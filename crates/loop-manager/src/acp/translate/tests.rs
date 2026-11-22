@@ -172,6 +172,14 @@ fn each_boundary_is_a_notice_line_of_the_agent() {
             "attempt 1 ended",
         ),
         (
+            record(4, 1, "control", json!({ "control": "manual" })),
+            "taken over by an operator",
+        ),
+        (
+            record(4, 1, "control", json!({ "control": "lm" })),
+            "handed back to loop-manager",
+        ),
+        (
             record(
                 5,
                 1,

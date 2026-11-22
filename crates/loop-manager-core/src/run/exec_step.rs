@@ -102,7 +102,7 @@ impl RunHandler {
             row.attempt.to_string()
         };
         tx.effect(&format!("exec:{}", row.id), &dedupe, &payload)?;
-        tx.set_deadline(&row.deadline("state"), tx.now_ms() + timeout_ms + LOST_SLACK_MS)
+        tx.set_deadline(&row.deadline("state"), command_due(tx.now_ms(), &row))
     }
 
     pub(super) fn exec_done(
@@ -166,18 +166,32 @@ impl RunHandler {
         row.set_state(tx, "running", None)
     }
 
-    /// The step of a run with no session declared `outcome`: the run asks the hooks on `run.finishing`.
-    pub(super) fn step_done(&mut self, tx: &mut Tx<'_>, mut row: Row, outcome: &Outcome) -> Result<(), Error> {
+    /// The step of a run with no session declared `outcome`: the run asks the hooks on `run.finishing`; a manual run
+    /// keeps the outcome for Continue.
+    pub(super) fn step_done(&mut self, tx: &mut Tx<'_>, row: Row, outcome: &Outcome) -> Result<(), Error> {
         tx.sql().execute(
             "UPDATE attempts SET outcome = ?3 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, json!(outcome).to_string()],
         )?;
         row.record(tx, "outcome", json!(outcome));
+        if row.manual {
+            return Self::defer(tx, &row, &super::manual::Deferred::Outcome);
+        }
+        self.outcome_done(tx, row, outcome)
+    }
+
+    /// The recorded `outcome` of a step with no session moves the run to `finishing`.
+    pub(super) fn outcome_done(&mut self, tx: &mut Tx<'_>, mut row: Row, outcome: &Outcome) -> Result<(), Error> {
         tx.clear_deadline(&row.deadline("state"))?;
         row.set_state(tx, "finishing", None)?;
         let data = json!({ "run": row.view(), "outcome": outcome, "remarks": 0 });
         self.deciding(tx, row, "run.finishing", data)
     }
+}
+
+/// When the command of `row` started at `now_ms`, or its check script, counts as lost.
+pub(super) fn command_due(now_ms: i64, row: &Row) -> i64 {
+    now_ms + row.timeout_ms.unwrap_or(super::render::EXEC_STEP_TIMEOUT_MS) + LOST_SLACK_MS
 }
 
 /// The running commands of exec steps by `<run>:<attempt>`, for `stop_exec`.

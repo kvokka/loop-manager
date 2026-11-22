@@ -67,6 +67,10 @@ impl RunHandler {
     /// stops them, and the session's idle without background then moves the run to `finishing`
     /// (docs/design/contracts.md 6).
     pub(super) fn stop_background(tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
+        // What a manual run's session left running is the operator's (contracts 6.1).
+        if row.manual {
+            return Ok(());
+        }
         let found: Option<(String, String, String)> = tx
             .sql()
             .query_row(

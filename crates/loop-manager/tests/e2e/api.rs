@@ -122,6 +122,44 @@ async fn a_run_is_cancelled_and_bad_requests_get_json_errors() {
 }
 
 #[tokio::test]
+async fn a_run_is_taken_over_and_handed_back_over_the_api() {
+    let d = Daemon::start(|_| {}).await;
+    let run = d.create("slow", None).await;
+    let attempt = d.until_state(&run, "running").await["attempt"].clone();
+    let (take, hand) = (format!("/v1/runs/{run}/takeover"), format!("/v1/runs/{run}/continue"));
+    let answer = |reply: Result<Value, ClientError>| reply.unwrap()["answer"].clone();
+    assert_eq!(
+        answer(d.post(&take, json!({ "attempt": attempt }), None).await),
+        "accepted"
+    );
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(
+        (&view["control"], &view["state"]),
+        (&json!("manual"), &json!("running"))
+    );
+    assert_eq!(
+        answer(d.post(&hand, json!({ "attempt": 0 }), None).await),
+        "stale_attempt"
+    );
+    let body = json!({ "attempt": attempt });
+    assert_eq!(answer(d.post(&hand, body.clone(), Some("c-1")).await), "accepted");
+    assert_eq!(
+        answer(d.post(&hand, body.clone(), Some("c-1")).await),
+        "accepted",
+        "the first answer"
+    );
+    assert_eq!(answer(d.post(&hand, body, None).await), "not_manual");
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["control"], "lm");
+    match d.post("/v1/runs/nope/takeover", json!({ "attempt": 0 }), None).await {
+        Err(ClientError::Api { status: 404, error }) => assert_eq!(error["code"], "not_found"),
+        other => panic!("{other:?}"),
+    }
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn a_rotated_away_seq_is_an_explicit_gap() {
     // The journal as rotation leaves it: its oldest event is 5.
     let d = Daemon::start(|dir| {

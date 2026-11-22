@@ -15,6 +15,7 @@ mod gates;
 mod hooks;
 mod lineage;
 mod machine;
+mod manual;
 mod msg;
 mod prompts;
 mod queue;
@@ -146,6 +147,8 @@ impl Handler for RunHandler {
         match msg {
             Msg::Create(create) => return self.create(tx, create),
             Msg::Finish { run, token, outcome } => return self.finish(tx, &run, &token, &outcome),
+            Msg::Takeover { run, attempt } => return self.takeover(tx, &run, attempt),
+            Msg::Continue { run, attempt } => return self.hand_back(tx, &run, attempt),
             Msg::Fire { project, rig, trigger } => return self.fire_by_hand(tx, &project, &rig, &trigger),
             Msg::SwitchTrigger {
                 project,

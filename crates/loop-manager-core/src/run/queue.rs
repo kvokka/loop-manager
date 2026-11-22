@@ -219,11 +219,15 @@ impl RunHandler {
         Ok(())
     }
 
-    /// Why a queued or parked run cannot start yet, `None` when it can: the daemon is stopping, a gate of the run is
-    /// closed (with the closure), the orchestrator or its agent has as many started runs as allowed
-    /// (docs/design/contracts.md 6; a parked run, or one in a step with no process, holds no slot), or a queued run
-    /// would be one writer too many in its rig's directory (`max_writers`; a parked run already holds its place).
+    /// Why a queued or parked run cannot start yet, `None` when it can: an operator holds it (contracts 6.1), the
+    /// daemon is stopping, a gate of the run is closed (with the closure), the orchestrator or its agent has as many
+    /// started runs as allowed (docs/design/contracts.md 6; a parked run, or one in a step with no process, holds no
+    /// slot), or a queued run would be one writer too many in its rig's directory (`max_writers`; a parked run already
+    /// holds its place).
     fn blocker(&self, tx: &Tx<'_>, row: &Row) -> Result<Option<(&'static str, Value)>, Error> {
+        if row.manual {
+            return Ok(Some(("manual", Value::Null)));
+        }
         if self.stopping.is_some() {
             return Ok(Some(("daemon_stopping", Value::Null)));
         }

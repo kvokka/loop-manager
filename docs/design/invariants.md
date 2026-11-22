@@ -35,6 +35,7 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 | 18 | An operator hold beats automation: a pause or cancel by a human is a record in the state read by every automatic decision | contracts 6.2, 7 |
 | 19 | A worktree has one owner and is removed only when its commits are reachable from refs (the `worktree` addon) | `loop-manager-addons/src/worktree.rs` |
 | 20 | An event is a reason to re-read the state; resync is mandatory; ambiguity means zero effects and a loud `resync.diverged` (a repeated or skipped driver `seq` included) | [event model](event-model.md) |
+| 21 | Manual mode: while an operator holds a run, its orchestration stands — no step, retry, policy decision or timeout of its own, nor the timeout of a parent step that waits for it, moves it — while the work in flight goes on and is accounted; on Continue every budget starts whole and an outcome given meanwhile is consumed once, in the same attempt | contracts 6.1 |
 
 How they are checked: the deterministic chaos stand (`loop-manager-testkit/tests/chaos`) plays seeded sequences of
 commands, harness behaviour, policy hooks, operator actions, lost and repeated deliveries and daemon crashes, and
@@ -63,7 +64,8 @@ At daemon start ([contracts](contracts.md) 6.4 has the exact state rules):
    daemon starts; a hook that runs again may start before the old process is gone, so hooks are idempotent.
 3. Runs with a live attempt — `starting`, `running` in a turn — move to `interrupted` with the attempt failure
    `daemon_crash`, the deciding hooks they still had queued dropped (after the sweep of item 2); the policy decides
-   what follows. A run waiting for a decision on a deciding
+   what follows. A run an operator holds stays manual: its failure waits for Continue in its deferred slot instead,
+   and none of its deadlines acts before Continue (invariant 21). A run waiting for a decision on a deciding
    event (`preparing`, `interrupted`, `finishing`, `running` after a turn without an outcome) keeps waiting for it:
    its hooks run again, the declared outcome and an exec command's result stand. A step check script that was running in `finishing` is killed by its marker and runs again, the repeat counter untouched. A `remark` or `continue` then
    fails the attempt with `daemon_crash`, as the session it needs is gone (contracts 3.4, 6.4). A run goes on from

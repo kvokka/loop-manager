@@ -2,7 +2,9 @@
 //! events of the current attempt, cancel and the deadlines of 6.1.
 
 use super::{
-    RunHandler, rejected,
+    RunHandler,
+    manual::Deferred,
+    rejected,
     row::{Row, attempts},
 };
 use crate::{
@@ -140,8 +142,10 @@ impl RunHandler {
             .query_row("SELECT waiting IS NOT NULL FROM runs WHERE id = ?1", [&row.id], |r| {
                 r.get(0)
             })?;
+        // Nor does a manual one: its deadlines are armed afresh on Continue (contracts 6.1).
+        let frozen = waits || row.manual;
         let silence = |tx: &mut Tx<'_>, row: &Row, ms: i64| {
-            if waits {
+            if frozen {
                 return Ok(());
             }
             tx.set_deadline(&row.deadline("silence"), tx.now_ms().saturating_add(ms))
@@ -163,6 +167,9 @@ impl RunHandler {
                     return Ok(());
                 }
                 row.set_state(tx, "running", None)?;
+                if row.manual {
+                    return Ok(());
+                }
                 let timeout = row.timeout_ms.unwrap_or(super::render::AI_STEP_TIMEOUT_MS);
                 tx.set_deadline(&row.deadline("state"), tx.now_ms().saturating_add(timeout))?;
                 silence(tx, &row, w.silence_ms)
@@ -243,6 +250,10 @@ impl RunHandler {
             3 => "failed",
             _ => "completed",
         };
+        // The turn stays ended: Continue settles it, once.
+        if row.manual {
+            return Self::defer(tx, &row, &Deferred::Settled);
+        }
         let (outcome, prompts): (Option<String>, i64) = tx.sql().query_row(
             "UPDATE attempts SET turn_ended = 0 WHERE run = ?1 AND n = ?2 RETURNING outcome, prompts",
             params![row.id, attempt],
@@ -282,7 +293,9 @@ impl RunHandler {
 
     pub(super) fn on_deadline(&mut self, tx: &mut Tx<'_>, run: &str, what: &str) -> Result<(), Error> {
         let row = Row::load(tx, run)?;
-        if !row.live() {
+        // A manual run's deadlines were removed at its takeover, and Continue arms them afresh: one that still fires
+        // is stale (contracts 6.1).
+        if !row.live() || row.manual {
             return Ok(());
         }
         let stall = |kind| Failure::new(kind, Source::Core);
