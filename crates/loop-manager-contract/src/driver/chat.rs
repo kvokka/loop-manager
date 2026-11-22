@@ -8,6 +8,8 @@ use std::path::PathBuf;
 pub struct ChatLog {
     pub path: PathBuf,
     pub entries: fn(&Value) -> Vec<ChatEntry>,
+    /// The `PromptKey` of a record that is the user message of a loop-manager prompt, as a hyphenated UUID.
+    pub prompt: fn(&Value) -> Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

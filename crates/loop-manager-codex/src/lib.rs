@@ -376,6 +376,7 @@ impl Driver for Codex {
         Ok(loop_manager_contract::driver::chat::ChatLog {
             path,
             entries: chat::entries,
+            prompt: chat::prompt,
         })
     }
 

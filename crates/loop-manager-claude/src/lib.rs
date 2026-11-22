@@ -316,6 +316,7 @@ impl Driver for Claude {
         Ok(loop_manager_contract::driver::chat::ChatLog {
             path: transcript_path(&session.0, &part::host_dir()),
             entries: chat::entries,
+            prompt: chat::prompt,
         })
     }
 
@@ -347,8 +348,8 @@ fn transcript(session: &Value, key: PromptKey, host: &Path) -> Transcript {
         return Transcript::Missing;
     };
     let records: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
-    let key = key.0.to_string();
-    let delivered = records.iter().any(|r| r["type"] == "user" && r["uuid"] == key.as_str());
+    let key = Some(key.0.to_string());
+    let delivered = records.iter().any(|r| chat::prompt(r) == key);
     Transcript::Present { delivered }
 }
 

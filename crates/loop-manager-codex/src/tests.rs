@@ -116,3 +116,19 @@ async fn a_resume_refused_past_the_unload_wait_fails() {
     let resumes = std::fs::read_to_string(dir.path().join("resumes")).unwrap();
     assert!(resumes.lines().count() > 1, "{resumes}");
 }
+
+#[test]
+fn the_chat_log_finds_the_prompt_key_of_a_user_record() {
+    let key = PromptKey::new("r", 1, 1).0.to_string();
+    // A record codex 0.171.0 wrote to a rollout for a prompt with `clientUserMessageId`.
+    let user = json!({ "timestamp": "2026-09-20T12:39:49.812Z", "ordinal": 9, "type": "event_msg",
+        "payload": { "type": "item_completed", "thread_id": "01a0bed4-3aac-7d23-b163-097426d0d25f",
+            "turn_id": "01a0bed4-6f68-7c02-8782-076d256bd64e",
+            "item": { "type": "UserMessage", "id": "01a0bed4-7534-7823-aa5b-779842698f81", "client_id": key,
+                "content": [{ "type": "text", "text": "hi", "text_elements": [] }] },
+            "started_at_ms": 1_789_907_989_812_u64, "completed_at_ms": 1_789_907_989_812_u64 } });
+    assert_eq!(chat::prompt(&user), Some(key));
+    let assistant = json!({ "timestamp": "2026-09-20T12:39:51.002Z", "type": "response_item",
+        "payload": { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "hello" }] } });
+    assert_eq!(chat::prompt(&assistant), None);
+}

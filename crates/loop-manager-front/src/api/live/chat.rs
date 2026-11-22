@@ -2,8 +2,9 @@
 //! journal writes wake it when the run changes session or ends.
 
 use super::{Api, Event, Infallible, mpsc};
-use loop_manager_core::driver::chat::ChatLog;
+use loop_manager_core::driver::chat::{ChatEntry, ChatLog};
 use notify::{EventKind, RecursiveMode, Watcher};
+use serde_json::Value;
 use std::{io, path::PathBuf};
 use tokio::{
     fs::File,
@@ -48,9 +49,9 @@ async fn follow(state: &Api, run: &str, mut attempt: u32, tx: &Sender) -> io::Re
                 .cloned()
                 .ok_or_else(|| io::Error::other("unknown session harness"))?;
             let reference = row.session.clone();
-            let next = tokio::task::spawn_blocking(move || Tail::new(driver.chat_log(&reference)?)).await??;
+            let log = tokio::task::spawn_blocking(move || driver.chat_log(&reference)).await??;
             session = Some(row.session);
-            tail = Some(next);
+            tail = Some(Tail::new(log));
         }
         if let Some(current) = tail.as_mut() {
             current.drain(tx, terminal).await?;
@@ -76,29 +77,124 @@ async fn follow(state: &Api, run: &str, mut attempt: u32, tx: &Sender) -> io::Re
 }
 
 async fn changed(tail: &mut Option<Tail>) -> io::Result<()> {
-    let Some(tail) = tail else {
-        return std::future::pending().await;
-    };
-    tail.changed.changed().await.map_err(io::Error::other)?;
-    if let Some(error) = tail.changed.borrow_and_update().as_ref() {
-        return Err(io::Error::other(error.clone()));
+    match tail {
+        Some(tail) => tail.changed().await,
+        None => std::future::pending().await,
     }
-    Ok(())
 }
 
-struct Tail {
+/// One session's transcript through one byte cursor. The watcher is made on the first read of a live session.
+pub(crate) struct Tail {
     log: ChatLog,
-    watcher: notify::RecommendedWatcher,
-    watched: PathBuf,
-    changed: watch::Receiver<Option<String>>,
+    watch: Option<Watch>,
     reader: Option<BufReader<File>>,
     line: Vec<u8>,
 }
 
+struct Watch {
+    watcher: notify::RecommendedWatcher,
+    watched: PathBuf,
+    changed: watch::Receiver<Option<String>>,
+}
+
 impl Tail {
-    fn new(log: ChatLog) -> io::Result<Self> {
+    pub(crate) fn new(log: ChatLog) -> Self {
+        Self {
+            log,
+            watch: None,
+            reader: None,
+            line: Vec::new(),
+        }
+    }
+
+    /// Resolves when the transcript or a directory on its path changes; never before the first live read.
+    pub(crate) async fn changed(&mut self) -> io::Result<()> {
+        let Some(watch) = self.watch.as_mut() else {
+            return std::future::pending().await;
+        };
+        watch.changed.changed().await.map_err(io::Error::other)?;
+        if let Some(error) = watch.changed.borrow_and_update().as_ref() {
+            return Err(io::Error::other(error.clone()));
+        }
+        Ok(())
+    }
+
+    /// A new session can be bound before even its project directory exists. Watch the closest existing
+    /// ancestor first, then descend, checking for newly created directories after each watch is installed.
+    /// Returns whether the file itself is watched.
+    fn watch_file(&mut self) -> io::Result<bool> {
+        let watch = match &mut self.watch {
+            Some(watch) => watch,
+            None => self.watch.insert(Watch::new(self.log.path.clone())?),
+        };
+        while watch.watched != self.log.path {
+            let mut nearest = self.log.path.as_path();
+            while !nearest.try_exists()? {
+                nearest = nearest
+                    .parent()
+                    .ok_or_else(|| io::Error::other("missing transcript root"))?;
+            }
+            if nearest == watch.watched {
+                break;
+            }
+            watch
+                .watcher
+                .watch(nearest, RecursiveMode::NonRecursive)
+                .map_err(io::Error::other)?;
+            if !watch.watched.as_os_str().is_empty() {
+                watch.watcher.unwatch(&watch.watched).map_err(io::Error::other)?;
+            }
+            watch.watched = nearest.to_owned();
+        }
+        Ok(watch.watched == self.log.path)
+    }
+
+    /// The next complete record: its prompt key and its entries. `None` when no complete record is left; in an
+    /// ended session the last line is complete without its newline, and a missing file is an error.
+    pub(crate) async fn next(&mut self, ended: bool) -> io::Result<Option<(Option<String>, Vec<ChatEntry>)>> {
+        if self.reader.is_none() {
+            let file = if ended {
+                File::open(&self.log.path).await.map_err(|e| match e.kind() {
+                    io::ErrorKind::NotFound => io::Error::other("the session ended without a readable transcript"),
+                    _ => e,
+                })?
+            } else if self.watch_file()? {
+                File::open(&self.log.path).await?
+            } else {
+                return Ok(None);
+            };
+            self.reader = Some(BufReader::new(file));
+        }
+        let reader = self.reader.as_mut().expect("the transcript is open");
+        reader.read_until(b'\n', &mut self.line).await?;
+        if self.line.is_empty() || (!ended && !self.line.ends_with(b"\n")) {
+            return Ok(None);
+        }
+        let record: Value =
+            serde_json::from_slice(&self.line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        self.line.clear();
+        Ok(Some(((self.log.prompt)(&record), (self.log.entries)(&record))))
+    }
+
+    async fn drain(&mut self, tx: &Sender, ended: bool) -> io::Result<()> {
+        while let Some((_, entries)) = self.next(ended).await? {
+            for entry in entries {
+                let event = Event::default()
+                    .event("chat")
+                    .json_data(entry)
+                    .map_err(io::Error::other)?;
+                tx.send(Ok(event))
+                    .await
+                    .map_err(|_| io::Error::other("reader disconnected"))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Watch {
+    fn new(path: PathBuf) -> io::Result<Self> {
         let (wake, changed) = watch::channel(None);
-        let path = log.path.clone();
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
             Ok(e)
                 if !matches!(e.kind, EventKind::Access(_))
@@ -113,70 +209,10 @@ impl Tail {
         })
         .map_err(io::Error::other)?;
         Ok(Self {
-            log,
             watcher,
             watched: PathBuf::new(),
             changed,
-            reader: None,
-            line: Vec::new(),
         })
-    }
-
-    /// A new session can be bound before even its project directory exists. Watch the closest existing
-    /// ancestor first, then descend, checking for newly created directories after each watch is installed.
-    fn watch_file(&mut self) -> io::Result<()> {
-        while self.watched != self.log.path {
-            let mut nearest = self.log.path.as_path();
-            while !nearest.try_exists()? {
-                nearest = nearest
-                    .parent()
-                    .ok_or_else(|| io::Error::other("missing transcript root"))?;
-            }
-            if nearest == self.watched {
-                break;
-            }
-            self.watcher
-                .watch(nearest, RecursiveMode::NonRecursive)
-                .map_err(io::Error::other)?;
-            if !self.watched.as_os_str().is_empty() {
-                self.watcher.unwatch(&self.watched).map_err(io::Error::other)?;
-            }
-            self.watched = nearest.to_owned();
-        }
-        Ok(())
-    }
-
-    async fn drain(&mut self, tx: &Sender, ended: bool) -> io::Result<()> {
-        if self.reader.is_none() {
-            self.watch_file()?;
-            if self.watched != self.log.path {
-                return if ended {
-                    Err(io::Error::other("the session ended without a readable transcript"))
-                } else {
-                    Ok(())
-                };
-            }
-            self.reader = Some(BufReader::new(File::open(&self.log.path).await?));
-        }
-        let reader = self.reader.as_mut().expect("the transcript is open");
-        loop {
-            reader.read_until(b'\n', &mut self.line).await?;
-            if self.line.is_empty() || (!ended && !self.line.ends_with(b"\n")) {
-                return Ok(());
-            }
-            let record =
-                serde_json::from_slice(&self.line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            self.line.clear();
-            for entry in (self.log.entries)(&record) {
-                let event = Event::default()
-                    .event("chat")
-                    .json_data(entry)
-                    .map_err(io::Error::other)?;
-                tx.send(Ok(event))
-                    .await
-                    .map_err(|_| io::Error::other("reader disconnected"))?;
-            }
-        }
     }
 }
 

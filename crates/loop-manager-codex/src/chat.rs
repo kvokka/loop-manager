@@ -23,12 +23,23 @@ pub(super) fn saved(home: &Path, thread: &str) -> io::Result<PathBuf> {
     ))
 }
 
-pub(super) fn entries(record: &Value) -> Vec<ChatEntry> {
+/// `send_prompt` gives the `PromptKey` as `clientUserMessageId`; the rollout keeps it as the user item's `client_id`,
+/// as `thread/read` (`transcript`) gives it as the `userMessage` item's `clientId`.
+pub(super) fn prompt(record: &Value) -> Option<String> {
+    user(record)?["client_id"].as_str().map(str::to_owned)
+}
+
+fn user(record: &Value) -> Option<&Value> {
     let payload = &record["payload"];
-    if record["type"] == "event_msg" && payload["type"] == "item_completed" && payload["item"]["type"] == "UserMessage"
-    {
-        return texts(&payload["item"]).map(|text| ChatEntry::User { text }).collect();
+    (record["type"] == "event_msg" && payload["type"] == "item_completed" && payload["item"]["type"] == "UserMessage")
+        .then(|| &payload["item"])
+}
+
+pub(super) fn entries(record: &Value) -> Vec<ChatEntry> {
+    if let Some(item) = user(record) {
+        return texts(item).map(|text| ChatEntry::User { text }).collect();
     }
+    let payload = &record["payload"];
     if record["type"] != "response_item" {
         return Vec::new();
     }
