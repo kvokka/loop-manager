@@ -87,7 +87,7 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, agent: &str) -> Da
 async fn the_history_of_a_run_replays_and_follows_a_running_tool() {
     let provider = Provider::start(vec![Reply::Turn(vec![
         Reply::Bash(super::chat::command()),
-        Reply::Text("Готово.".into()),
+        Reply::Text("Done é.".into()),
     ])])
     .await;
     super::chat::history(&daemon(&provider).await).await;

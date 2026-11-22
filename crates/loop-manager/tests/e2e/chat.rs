@@ -82,13 +82,13 @@ pub(super) async fn check(d: &Daemon, tool: &str) {
         assert!(user["text"].as_str().unwrap().contains("Build web."));
         assert_eq!(call["id"], result["id"]);
         assert!(result["output"].to_string().contains("accepted"));
-        assert_eq!(assistant["text"], "Готово.");
+        assert_eq!(assistant["text"], "Done é.");
     }
 
     let replay = cli().output().await.unwrap();
     assert!(replay.status.success(), "{}", String::from_utf8_lossy(&replay.stderr));
     let text = String::from_utf8(replay.stdout).unwrap();
-    for label in ["User\n", "Tool result [", "Assistant\nГотово."] {
+    for label in ["User\n", "Tool result [", "Assistant\nDone é."] {
         assert_eq!(text.matches(label).count(), 1, "{text}");
     }
 }
@@ -142,7 +142,7 @@ pub(super) async fn history(d: &Daemon) {
         // `accepted`, the finisher's answer, in base64.
         let output = of("terminal").iter().any(|t| t["output"]["data"] == "YWNjZXB0ZWQ=");
         assert!(output, "{records:#?}");
-        assert_eq!(of("assistant")[0]["content"]["text"], "Готово.", "{records:#?}");
+        assert_eq!(of("assistant")[0]["content"]["text"], "Done é.", "{records:#?}");
     }
     assert_eq!(records.last().unwrap()["state"], "passed");
 

@@ -58,7 +58,7 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, inherit_host: bool
 async fn watch_chat_replays_and_follows_a_running_tool() {
     let provider = Provider::start(vec![Reply::Turn(vec![
         Reply::Command(super::chat::command()),
-        Reply::Text("Готово.".into()),
+        Reply::Text("Done é.".into()),
     ])])
     .await;
     super::chat::check(&daemon(&provider).await, "exec_command").await;
