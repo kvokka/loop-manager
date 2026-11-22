@@ -114,7 +114,7 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "10",
-        title: "a codex quota with a reset time closes the account gate; both runs of the account pass after it",
+        title: "a codex quota closes the account gate for quota_wait_s; both runs of the account pass after it",
         launch: Launch::Ci,
         run: |env| Box::pin(c10_quota::run(env)),
     },
@@ -126,7 +126,7 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "13",
-        title: "codex agents of one process part share an app-server, of two get two; lazy start, idle stop",
+        title: "three codex runs get three adapter processes; each starts after its run is queued and stops after it",
         launch: Launch::Ci,
         run: |env| Box::pin(c13_instances::run(env)),
     },

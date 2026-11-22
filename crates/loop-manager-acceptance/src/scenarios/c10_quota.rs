@@ -1,5 +1,6 @@
-//! Criterion 10 for codex: a usage limit with a reset time closes the gate of the account; a second run of the
-//! same account does not start while it is closed; at the reset both runs pass without a human.
+//! Criterion 10 for codex: a usage limit closes the gate of the account for the policy's `quota_wait_s` (codex
+//! names no reset time); a second run of the same account does not start while it is closed; when it opens both
+//! runs pass without a human.
 
 use super::codex_agent;
 use crate::{
@@ -11,11 +12,11 @@ use loop_manager_testkit::openai::{Provider, Reply};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 
-/// When the fake's quota resets after the first request.
-const RESET: Duration = Duration::from_secs(10);
+/// When the fake's quota says it resets: far ahead, and never reaches loop-manager through codex.
+const RESET: Duration = Duration::from_secs(3 * 3600);
+/// `default-policy` keeps the account gate this long after the failure (`quota_wait_s`, set below; default 30 min).
+const WAIT: Duration = Duration::from_secs(10);
 const WITHIN: Duration = Duration::from_secs(60);
-/// `default-policy` keeps the account gate this long past the reset (`quota_margin_s`, set below; default 60).
-const MARGIN: Duration = Duration::from_secs(1);
 
 pub(crate) async fn run(env: Arc<Env>) -> String {
     let finish = format!("{} finish pass --summary built", env.loop_manager.display());
@@ -29,16 +30,13 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
             shop.join("loop-manager.toml"),
             format!(
                 "[rigs.web]\npath = \"web\"\n[rigs.api]\npath = \"api\"\n\
-                 [builtin.default-policy]\nquota_margin_s = {}\n",
-                MARGIN.as_secs()
+                 [builtin.default-policy]\nquota_wait_s = {}\n",
+                WAIT.as_secs()
             ),
         );
         write(shop.join("api/.keep"), "");
     })
     .await;
-    let before = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
     let first = d.create("dev").await;
     // The policy closes the gate after the failure, by a hook: wait for both.
     let seen = d
@@ -56,14 +54,14 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
         .iter()
         .find(|g| g["key"].as_str().is_some_and(|k| k.starts_with("account:")));
     let gate = gate.unwrap_or_else(|| panic!("no account gate in {gates}"));
-    let (until, limited) = check_reset(before, &failed.1, gate);
+    let (until, limited) = check_wait(&failed.1, gate);
 
     let body = json!({ "project": "shop", "rig": "api", "formula": "dev" });
     let second = d.post("/v1/runs", body).await.unwrap()["run"]
         .as_str()
         .unwrap()
         .to_owned();
-    d.until_state(&first, "passed", RESET + MARGIN + WITHIN).await;
+    d.until_state(&first, "passed", WAIT + WITHIN).await;
     d.until_state(&second, "passed", WITHIN).await;
 
     // What the daemon did, from its journal: the times are its own, not when this test happened to look.
@@ -98,7 +96,7 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     );
     assert!(
         first_launches[1] >= opened,
-        "the first run again only after the reset: {seen:?}"
+        "the first run again only after the gate opened: {seen:?}"
     );
     assert!(!second_launches.is_empty(), "the second run launched: {seen:?}");
     assert!(
@@ -113,25 +111,18 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     )
 }
 
-fn check_reset(before: Duration, failed: &Value, gate: &Value) -> (i64, i64) {
+fn check_wait(failed: &Value, gate: &Value) -> (i64, i64) {
     let failure = &failed["data"]["failure"];
+    assert!(failure["retry_at"].is_null(), "codex names no reset: {failure}");
     let until = gate["until"].as_str().and_then(parse_rfc3339_ms);
-    let until = until.unwrap_or_else(|| panic!("the gate opens at the reset: {gate}"));
+    let until = until.unwrap_or_else(|| panic!("the gate has a time to open: {gate}"));
     let limited = parse_rfc3339_ms(failed["ts"].as_str().unwrap()).unwrap();
-    // The fake resets at `floor(request, 1 s) + RESET`, and the request falls between `before` and `limited`:
-    // bounds on whole seconds hold whatever the fraction of a second or the delay of the failure.
-    let reset = failure["retry_at"].as_str().and_then(parse_rfc3339_ms);
-    let reset = reset.unwrap_or_else(|| panic!("the failure names the reset: {failure}"));
+    // The policy counts the wait from the failure it decides on; a few seconds of slack cover a later hook.
     let ms = |d: Duration| i64::try_from(d.as_millis()).unwrap();
-    let low = i64::try_from(before.as_secs()).unwrap() * 1000 + ms(RESET);
+    let wait = limited + ms(WAIT);
     assert!(
-        (low..=limited + ms(RESET)).contains(&reset),
-        "the reset of the provider: {low} <= {reset} <= {limited} + {RESET:?}"
-    );
-    assert_eq!(
-        until,
-        reset + ms(MARGIN),
-        "the gate holds until the reset and the margin: {gate}"
+        (wait..=wait + 5000).contains(&until),
+        "the gate holds for quota_wait_s from the failure: {limited} + {WAIT:?} <= {until}: {gate}"
     );
     (until, limited)
 }

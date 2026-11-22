@@ -127,29 +127,6 @@ async fn kill(d: &mut Daemon) -> Duration {
     }
 }
 
-/// `pid` is a codex process (not a step command) under a codex app-server (itself included) that descends from
-/// `ancestor`.
-fn under_app_server(mut pid: u32, ancestor: u32) -> bool {
-    let codex = fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.starts_with("codex"));
-    let own = fs::read_to_string(format!("/proc/{pid}/cmdline")).is_ok_and(|c| c.contains("app-server"));
-    let mut app_server = false;
-    while pid > 1 {
-        app_server |= fs::read_to_string(format!("/proc/{pid}/cmdline")).is_ok_and(|c| c.contains("app-server"));
-        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
-        // The parent is the second field after the command name, which may hold spaces and parentheses.
-        let after = stat.rsplit_once(')').map_or("", |(_, rest)| rest);
-        pid = after
-            .split_whitespace()
-            .nth(1)
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0);
-        if pid == ancestor {
-            return app_server && (codex || own);
-        }
-    }
-    false
-}
-
 /// The state and command line of each process.
 fn described(pids: &[u32]) -> Vec<String> {
     let read = |pid: u32, file: &str| fs::read_to_string(format!("/proc/{pid}/{file}")).unwrap_or_default();
@@ -316,9 +293,7 @@ async fn settle(d: &Daemon, work: &[String]) -> (usize, usize) {
         );
     }
     assert_eq!(parents, passed, "every passed run fired once");
-    // An app-server the live daemon keeps for reuse until it idles out, with its helpers, is its own, not an orphan.
-    let mut left = steps(d.dir.path(), d.pid());
-    left.retain(|&pid| !under_app_server(pid, d.pid()));
+    let left = steps(d.dir.path(), d.pid());
     assert!(
         left.is_empty(),
         "no process left at the end: {:?}",

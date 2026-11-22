@@ -273,15 +273,15 @@ async fn main() -> ExitCode {
 fn write_report(args: &Args, env: &Env, mut rows: Vec<Row>, started: Instant) -> ExitCode {
     rows.sort_by(|a, b| order(a.criterion).cmp(&order(b.criterion)));
     let mut report = format!(
-        "# loop-manager acceptance spec\n\n- date: {}\n- loop-manager: {}\n- claude: {}\n- codex: {}\n- br: {}\n- host: {}\n- run: {}\n\n\
+        "# loop-manager acceptance spec\n\n- date: {}\n- loop-manager: {}\n- claude-agent-acp: {}\n- codex-acp: {}\n- br: {}\n- host: {}\n- run: {}\n\n\
          <!-- {} id=acceptance-times date={} ver={} env={} src=loop-manager-acceptance note=\"wall time of each row; the \
          scenarios run concurrently, \
          then the checks one by one\" -->\n\
          | criterion | check | result | time | notes |\n|---|---|---|---|---|\n",
         env.date,
         env.version,
-        version_of("claude"),
-        version_of("codex"),
+        version_of("claude-agent-acp"),
+        version_of("codex-acp"),
         version_of("br"),
         env.host,
         if args.ci { "CI subset" } else { "all" },

@@ -19,7 +19,7 @@ model: they run on a developer's machine, on the same request.
 | `mise run acceptance` | every row on the release build, the live-model rows and the live runs of demos 1 to 4 among them | a harness login; for demo 3 a login of `gh` (or `GITHUB_TOKEN`) that may push to its repositories; it spends real tokens and opens real pull requests |
 
 A run writes one report, `target/acceptance/report.md`: a line for every row, run or not, with the date, the version
-of `loop-manager` and the versions of the harnesses. A row that is not run cannot fail, so a green model-free run says
+of `loop-manager` and the versions of the harness adapters (`claude-agent-acp`, `codex-acp`) and br. A row that is not run cannot fail, so a green model-free run says
 nothing of the live-model rows. After the scenarios the same binary runs the rows that live in cargo and the scripts,
 one at a time: the crash tests of the adapters (9), the contract tests (11), the stub
 linters (23) and the chaos stand (35). The crash scenario (8) prints its pause seed;
@@ -47,10 +47,10 @@ says otherwise.
 | 7 | The idle daemon with one registered project: RSS ≤ 50 MB; CPU ≤ 1 % of one core on average over 30 seconds | model-free |
 | 8 | `kill -9` of the daemon mid-turn, 20 times. After each: the daemon takes commands within 30 s; every run reaches a terminal state exactly once; no trigger firing is lost or doubled; no orphan processes | model-free on the scripted driver; 5 repeats on the real harnesses are live |
 | 9 | `kill -9` of the harness mid-tool: the failure is typed within 1 s, the run is resumed and reaches its outcome | model-free |
-| 10 | A codex quota with a reset time on a fake provider: the account gate closes, a second run of the account does not start, after the reset both pass without a human. The claude half is not verified: the reset time comes only with a subscription login, and burning quota for a check is forbidden | model-free |
+| 10 | A codex usage limit on a fake provider: codex names no reset time, so the failure has no `retry_at` and the account gate closes for `quota_wait_s` from the failure; a second run of the account does not start, and after the gate opens both pass without a human. The claude half is not verified: the reset time comes only with a subscription login, and burning quota for a check is forbidden | model-free |
 | 11 | The contract tests of claude and codex pass ([harness updates](harness-updates.md)); the tracker contract tests pass for br ([tracker](design/tracker-br.md)) | model-free |
 | 12 | "Explain config" shows the layer of every value, the host layer as one line. With a stand-in home directory of the harness the same agent works with host inheritance and without it, and the session shows the difference | model-free |
-| 13 | Two agents with different process parts of the codex config get two app-servers, with the same part one; an instance starts lazily and stops after idling | model-free |
+| 13 | Every codex session has an adapter process of its own: three runs of three codex agents, two of them on one provider, get three instances with three processes; none starts before its run is queued, and each stops as `idle` right after its run | model-free |
 | 14 | One HTTP MCP service serves concurrent claude and codex sessions with identity headers; the number of its processes does not grow with the sessions | model-free |
 | 16 | A run with a bead: the daemon takes the claim and holds it through the death of a session and its resume; `failed` returns the bead, `passed` closes it; "the next ready in the epic" under 5 concurrent requests gives each bead to exactly one run; after the set number of failed runs the bead is given out no more; every session has the database path; br holds no bookkeeping records | model-free |
 | 17 | Every operation of the HTTP API has a CLI command; the OpenAPI document matches the code; MCP has five tools | model-free; one row with a real claude session is live |

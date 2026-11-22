@@ -3,9 +3,10 @@
 //! real `claude` against a fake Anthropic API, each run passing by the finisher; a chain ends at the depth limit
 //! (ten hops from a run started by hand).
 //!
-//! The end of a hop is `instance.ready` of B's session: the launch has returned with a process id. The trigger, the
-//! start of B and its launch effect commit in the transaction of A's `run.passed`, so the hop is the effect loop
-//! and the spawn; the time claude itself takes to start up is not part of it.
+//! The end of a hop is `instance.ready` of B's session: B's adapter process is spawned and has answered ACP
+//! `initialize`. The trigger, the start of B and its launch effect commit in the transaction of A's `run.passed`, so
+//! the hop is the effect loop, the spawn and the adapter's start up to that answer; the session, the prompt and the
+//! work of claude come after it.
 
 use super::{MARK, claude_agent};
 use crate::{

@@ -1,18 +1,17 @@
-//! Criterion 13: two codex agents with the same process part share one app-server, an agent with another gets a
-//! second; no instance before the first run needs one, and each stops after its idle time without sessions.
+//! Criterion 13: an ACP harness runs an adapter process per session, so three codex runs (two of one provider, one
+//! of another) get three instances; none starts before a run is queued for it, and each stops as `idle` right after
+//! its run, with no idle wait.
 
 use super::codex_agent;
-use crate::{
-    Env,
-    daemon::{Daemon, write},
-};
+use crate::{Env, daemon::Daemon};
+use loop_manager_core::parse_rfc3339_ms;
 use loop_manager_testkit::openai::{Provider, Reply};
 use serde_json::Value;
-use std::{fs, sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 const WITHIN: Duration = Duration::from_secs(60);
-/// codex's `instance_idle` (contracts 4.5, `[harness.codex] instance_idle_s`, default 60 s), set short here.
-const IDLE: Duration = Duration::from_secs(2);
+/// How soon after its run an instance is stopped: the stop grace (10 s) and a margin, well under any idle wait.
+const STOP: Duration = Duration::from_secs(15);
 
 pub(crate) async fn run(env: Arc<Env>) -> String {
     let finish = format!("{} finish pass --summary built", env.loop_manager.display());
@@ -21,20 +20,10 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     let d = Daemon::start(&env, |root| {
         codex_agent(root, "dev", &shared.base_url());
         codex_agent(root, "ops", &shared.base_url());
-        // Another provider is another process part of codex (contracts 4.6).
         codex_agent(root, "qa", &other.base_url());
-        let idle = format!("instance_idle_s = {}\n", IDLE.as_secs());
-        let config = root.join("config/loop-manager/config.toml");
-        write(&config, fs::read_to_string(&config).unwrap() + &idle);
     })
     .await;
-    let instances = |seen: &[(String, Value)], kind: &str| -> Vec<String> {
-        let of = seen
-            .iter()
-            .filter(|(k, e)| k == kind && e["data"]["instance"]["harness"] == "codex");
-        of.map(|(_, e)| e["data"]["instance"]["id"].as_str().unwrap().to_owned())
-            .collect()
-    };
+    let of_codex = |kind: &str, (k, e): &(String, Value)| k == kind && e["data"]["instance"]["harness"] == "codex";
     // Lazy: the daemon idles a while first, and no instance starts before a run needs one.
     tokio::time::sleep(Duration::from_secs(1)).await;
     let runs = [d.create("dev").await, d.create("ops").await, d.create("qa").await];
@@ -42,23 +31,70 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
         d.until_state(run, "passed", WITHIN).await;
     }
     let seen = d
-        .journal_until(WITHIN + IDLE, |seen| {
-            instances(seen, "instance.stopped").len() >= instances(seen, "instance.ready").len()
-                && !instances(seen, "instance.ready").is_empty()
+        .journal_until(STOP + WITHIN, |seen| {
+            seen.iter().filter(|e| of_codex("instance.stopped", e)).count() >= runs.len()
+                && seen.iter().filter(|e| k_is(e, "run.passed")).count() >= runs.len()
         })
         .await;
-    let first = |kind: &str| seen.iter().position(|(k, _)| k == kind);
-    assert!(
-        first("run.queued") < first("instance.starting"),
-        "an instance before a run: {seen:?}"
+
+    // The k-th instance starts only after the k-th run was queued.
+    let (mut queued, mut starting) = (0, 0);
+    for e in &seen {
+        queued += usize::from(k_is(e, "run.queued"));
+        if of_codex("instance.starting", e) {
+            starting += 1;
+            assert!(starting <= queued, "an instance before its run: {seen:?}");
+        }
+    }
+    let ready: Vec<&Value> = seen
+        .iter()
+        .filter(|e| of_codex("instance.ready", e))
+        .map(|(_, e)| e)
+        .collect();
+    let ids: HashSet<&str> = ready
+        .iter()
+        .filter_map(|e| e["data"]["instance"]["id"].as_str())
+        .collect();
+    let pids: HashSet<i64> = ready
+        .iter()
+        .filter_map(|e| e["data"]["instance"]["pid"].as_i64())
+        .collect();
+    assert_eq!(ready.len(), runs.len(), "an instance per run: {ready:?}");
+    assert_eq!(
+        (ids.len(), pids.len()),
+        (runs.len(), runs.len()),
+        "a process each: {ready:?}"
     );
-    let ready = instances(&seen, "instance.ready");
-    assert_eq!(ready.len(), 2, "one app-server per process part: {ready:?}");
+
     let stopped: Vec<&Value> = seen
         .iter()
-        .filter(|(k, _)| k == "instance.stopped")
+        .filter(|e| of_codex("instance.stopped", e))
         .map(|(_, e)| e)
         .collect();
     assert!(stopped.iter().all(|e| e["data"]["reason"] == "idle"), "{stopped:?}");
-    format!("3 runs on 2 app-servers ({}); both stopped as idle", ready.join(", "))
+    // Sorted, each stop lies within `STOP` of the end of the run it served, whichever that run is.
+    let ts = |e: &Value| parse_rfc3339_ms(e["ts"].as_str().unwrap()).unwrap();
+    let mut stops: Vec<i64> = stopped.iter().map(|e| ts(e)).collect();
+    let mut passes: Vec<i64> = seen
+        .iter()
+        .filter(|e| k_is(e, "run.passed"))
+        .map(|(_, e)| ts(e))
+        .collect();
+    stops.sort_unstable();
+    passes.sort_unstable();
+    let stop = i64::try_from(STOP.as_millis()).unwrap();
+    for (s, p) in stops.iter().zip(&passes) {
+        assert!(
+            *s <= p + stop,
+            "an instance outlived its run by over {STOP:?}: {stops:?} vs {passes:?}"
+        );
+    }
+    format!(
+        "3 runs on 3 instances ({}); each stopped as idle within {STOP:?} of its run",
+        ids.into_iter().collect::<Vec<_>>().join(", ")
+    )
+}
+
+fn k_is((k, _): &(String, Value), kind: &str) -> bool {
+    k == kind
 }

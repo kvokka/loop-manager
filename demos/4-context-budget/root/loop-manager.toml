@@ -11,7 +11,7 @@ path = "../library"
 inherit_host = false                  # only what this config sets reaches the agents; the logins come from the host
 # The permission mode is each harness's own setting: the demo runs unattended.
 [settings.native.claude]
-permission_mode = "bypassPermissions" # claude's `--permission-mode`
+permission_mode = "bypassPermissions" # the permission mode of claude-agent-acp
 [settings.native.codex]
 approval_policy = "never"             # codex's approval policy
 

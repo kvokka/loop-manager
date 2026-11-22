@@ -1,7 +1,7 @@
 //! Criterion 34, on the real `claude` and `codex` against fake providers: two runs at once, each leaving a command
 //! in the background. Run A on rig `web` declares its outcome: its step ends at once and its command is stopped
 //! before it finishes. Run B on rig `api` declares none: its background is waited for, the stop of A's leaves it
-//! alone (with codex both threads share one app-server), and B fails for the missing outcome. A command each run
+//! alone, and B fails for the missing outcome. A command each run
 //! detached from its harness is gone soon after its run ended.
 
 use super::{c04_finisher::events_of, claude_agent, codex_agent};
