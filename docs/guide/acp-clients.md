@@ -7,7 +7,7 @@ reaches the daemon on its API socket and the harnesses keep running under the da
 by method, is in [frontends: ACP](../api/frontends.md#acp).
 
 The client observes: runs are started with `loop-manager run start` (or a trigger), and a prompt from the client is
-refused. Control of a run from the client is not supported yet.
+refused. Control of a run from the client is not supported.
 
 ## The command
 

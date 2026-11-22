@@ -189,7 +189,7 @@ How a history record becomes updates:
 The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
 history, and a client may drop it.
 
-Not supported yet: control of a run from an ACP client (taking over its session, instructions, commands, answers to
+Not supported: control of a run from an ACP client (taking over its session, instructions, commands, answers to
 permission requests).
 
 ## Humans and runs

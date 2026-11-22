@@ -262,7 +262,7 @@ impl Follower {
             match self.daemon.client.stream(&path).await {
                 Ok(mut events) => loop {
                     let event = tokio::select! {
-                        _ = &mut stop => return Ok(()),
+                        _ = &mut stop => return Self::stopped(responder),
                         event = events.next() => event,
                     };
                     let Ok(Some(event)) = event else { break };
@@ -313,10 +313,16 @@ impl Follower {
                 };
             }
             tokio::select! {
-                _ = &mut stop => return Ok(()),
+                _ = &mut stop => return Self::stopped(responder),
                 () = tokio::time::sleep(RETRY) => {}
             }
         }
+    }
+
+    /// Ends a follower `stop`ped by `session/close` or a later `session/resume`: a resume not answered yet is refused.
+    fn stopped(responder: Option<Responder<schema::ResumeSessionResponse>>) -> Result<()> {
+        let error = "the session was closed or resumed again before its replay was done";
+        responder.map_or(Ok(()), |r| r.respond_with_error(internal(&error)))
     }
 
     /// The current state, then the answer to `session/resume`: the protocol's mark of a replay done.
