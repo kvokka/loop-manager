@@ -1,14 +1,14 @@
 //! TOON (Token-Oriented Object Notation, https://toonformat.dev) text of a JSON value: an agent reads structured data
 //! in it for fewer tokens than in JSON (docs/design/contracts.md 2.3). An encoder only, of the plain forms of the
 //! format (spec 4.4): fields, inline arrays, tables and lists, with the comma and two spaces a level. The keys of an
-//! object come in the order of the value, which is sorted.
+//! object come sorted.
 
 use serde_json::{Map, Value};
 
 /// `value` as TOON, without a final newline.
 pub fn encode(value: &Value) -> String {
     let mut lines = Vec::new();
-    match value {
+    match &crate::sorted(value) {
         Value::Object(fields) => object(&mut lines, fields, 0),
         Value::Array(items) => array(&mut lines, String::new(), items, 0),
         // A decoder discards a byte-order mark at the start of a document.

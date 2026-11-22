@@ -186,7 +186,8 @@ fn mcp(config: &EffectiveConfig) -> Result<Map<String, Value>, Failure> {
 /// environment, not the thread's (experiment 2), so its command exports the attempt environment `vars` first.
 fn hooks(config: &EffectiveConfig, vars: &Map<String, Value>) -> Result<Map<String, Value>, Failure> {
     let quote = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let exports: Vec<String> = (vars.iter())
+    // Sorted, so the command is the same whatever order the map keeps.
+    let exports: Vec<String> = (vars.iter().collect::<std::collections::BTreeMap<_, _>>().into_iter())
         .map(|(k, v)| format!("{k}={}", quote(v.as_str().unwrap_or_default())))
         .collect();
     let export = format!("export {}; ", exports.join(" "));

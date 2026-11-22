@@ -14,6 +14,20 @@ pub mod tracker;
 
 pub use event::{SCHEMA, envelope, parse_rfc3339_ms, rfc3339_ms};
 
+/// `value` with the keys of every object sorted: a `serde_json` map keeps the order of insertion in this build (the ACP
+/// crate turns on `preserve_order`), so text that must be canonical, or read in a stable order, is made of this.
+pub fn sorted(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_unstable();
+            keys.into_iter().map(|k| (k.clone(), sorted(&map[k]))).collect()
+        }
+        serde_json::Value::Array(items) => items.iter().map(sorted).collect(),
+        scalar => scalar.clone(),
+    }
+}
+
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[cfg(test)]

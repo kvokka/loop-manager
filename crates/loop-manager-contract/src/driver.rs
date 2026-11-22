@@ -32,11 +32,10 @@ pub struct Fingerprint(pub String);
 
 impl Fingerprint {
     pub fn of(harness: &str, process: &ProcessPart) -> Self {
-        // `serde_json` maps keep their keys sorted, so the text is canonical.
         let digest = Sha256::new()
             .chain_update(harness.as_bytes())
             .chain_update([0])
-            .chain_update(process.0.to_string().as_bytes())
+            .chain_update(crate::sorted(&process.0).to_string().as_bytes())
             .finalize();
         Self(digest.iter().map(|b| format!("{b:02x}")).collect())
     }
