@@ -104,3 +104,41 @@ loop-manager gate close bead:shop/<bead> --reason "abandoned"
 
 A run that names the bead then waits `queued` and `next_ready` passes it over, until
 `loop-manager gate open bead:shop/<bead>`. To drop the task for good, close the bead in the tracker.
+
+## A prompt whose delivery is disputed
+
+A run need not fail to wait for you. When an attempt fails while its last prompt was on the way (the daemon was killed,
+the agent's process died), the next attempt resumes the session and reads its replay: the agent got the prompt, and
+loop-manager asks it to check the state of the work and go on; or it did not, and the prompt goes again with its key.
+When the replay does not tell, nothing goes to the session and the run waits for your choice, however long: none of
+its timeouts runs, nor the timeout of a parent step that waits for it, and a restart of the daemon keeps the question
+as it is. The other runs go on.
+
+See it in the run's state (`loop-manager run show <run>`): `disputed` names the prompt (`key`, `text`, `source`:
+`lm` or `operator`), the `attempt` that sent it, `why` the replay did not tell (`replay_incomplete`, `anchor_missing`,
+`no_anchor`, `unexpected_messages`, `command` for a text that starts with `/`) and `since` when. The run's history
+(`loop-manager run watch <run> --history`) has a `delivery` record with `outcome: "disputed"`, the same `why` and
+`text`, and `seen`: up to the last five messages the session showed after the last prompt loop-manager knows it got.
+Open the session with the harness's own tools (`session` of the attempt) when that is not enough. An
+[ACP client](acp-clients.md#a-prompt-whose-delivery-is-disputed) shows the same and marks the session
+`requires_action`.
+
+Then choose, with the `attempt` the run shows:
+
+```sh
+loop-manager run delivery <run> delivered --attempt <n>   # the agent has the prompt
+loop-manager run delivery <run> resend --attempt <n>      # it does not
+```
+
+- `delivered`: loop-manager sends a prompt that asks the agent to check the state of the work and continue toward the
+  goal. Choose it when the session shows the prompt, or the work it asked for has begun.
+- `resend`: the same prompt goes again with its key. An agent that keeps the keys of its prompts takes a prompt it has
+  already got as delivered and does not do it twice; one that does not may get it twice, so choose `resend` when the
+  session does not show it.
+
+The attempt that holds the session sends the prompt at once; if none does (the attempt failed in the meantime) the
+next one sends it. The first choice counts: a second one gets `not_disputed`, or `already_resolved` with the choice
+made while no attempt held the session. Until the choice `loop-manager run continue` and `loop-manager run say`
+answer `delivery_disputed` with the prompt, and nothing goes to the session; a run you took over stays taken over
+after the choice, and its turn's end waits for `loop-manager run continue`. Cancelling the run ends the question with
+it; a policy that starts a new session drops it, since the new session knows nothing of the prompt.

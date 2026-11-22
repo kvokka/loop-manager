@@ -232,6 +232,9 @@ fn text(update: &Value) -> &str {
         .unwrap_or_default()
 }
 
+/// The commands `loop-manager acp` offers.
+const COMMANDS: [&str; 4] = ["lm-takeover", "lm-continue", "lm-delivered", "lm-resend"];
+
 /// The names of the commands an `available_commands_update` lists; none for another update.
 fn commands(update: &Value) -> Vec<&str> {
     let commands = update["update"]["availableCommands"].as_array().into_iter().flatten();
@@ -304,7 +307,7 @@ async fn clients_replay_a_running_run_follow_it_live_and_leave_it_running_when_t
         panic!("{again:#?}")
     };
     assert_eq!(state(now), "running", "{again:#?}");
-    assert_eq!(commands(commands_now), ["lm-takeover", "lm-continue"], "{again:#?}");
+    assert_eq!(commands(commands_now), COMMANDS, "{again:#?}");
     let texts: Vec<&str> = again.iter().map(text).collect();
     assert!(texts.contains(&"— attempt 1: new_session on fake —\n"), "{texts:#?}");
     assert!(texts.contains(&"Build web."), "{texts:#?}");
@@ -400,14 +403,14 @@ async fn commands_take_a_run_over_and_hand_it_back_in_the_same_attempt_and_anoth
     // The commands come after the state, with and without a replay; the replay can hold the agent's own states too.
     let at = (replayed.iter().position(|u| !commands(u).is_empty())).unwrap_or_else(|| panic!("{replayed:#?}"));
     assert_eq!(state(&replayed[at - 1]), "running", "{replayed:#?}");
-    assert_eq!(commands(&replayed[at]), ["lm-takeover", "lm-continue"], "{replayed:#?}");
+    assert_eq!(commands(&replayed[at]), COMMANDS, "{replayed:#?}");
     // The session has shown attempt 1 once the tool has printed.
     if !replayed.iter().any(printed) {
         replayed.extend(first.until(printed).await);
     }
     let mut second = Acp::start(&d, &[]).await;
     let now = second.resume(&run, false).await.unwrap();
-    assert_eq!(commands(&now[1]), ["lm-takeover", "lm-continue"], "{now:#?}");
+    assert_eq!(commands(&now[1]), COMMANDS, "{now:#?}");
 
     let (answer, seen) = first.command(&run, "/lm-takeover", Some("k1")).await;
     let echo = seen.iter().find(|u| u["update"]["messageId"] == answer["messageId"]);
@@ -582,6 +585,66 @@ async fn lm_continue_with_an_instruction_unsent_needs_a_choice_and_withdraw_hand
     d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
         .await
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lm_continue_send_hands_the_run_back_once_the_agent_has_taken_the_instruction_in() {
+    // The first turn's tool waits for `go` and ends without an outcome; the turn of the instruction declares a pass.
+    let gate = tempfile::tempdir().unwrap();
+    let (go, seen_once) = (gate.path().join("go"), gate.path().join("seen"));
+    let command = format!(
+        "while [ ! -e {go} ]; do sleep 0.05; done; if [ -e {seen} ]; then {exe} finish pass --summary built; fi; \
+         touch {seen}",
+        go = go.display(),
+        seen = seen_once.display(),
+        exe = common::EXE
+    );
+    let d = daemon(&command).await;
+    let mut events = d.client.events(Some(1)).await.unwrap();
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    shown(&d, &mut acp, &run).await;
+    let (_, mut seen) = acp.command(&run, "check the docs", None).await;
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(view["manual"]["unsent"][0]["state"], "queued", "{view:#}");
+    let (_, sent) = acp.command(&run, "/lm-continue send", None).await;
+    assert!(
+        text(sent.last().unwrap()).starts_with(
+            "— /lm-continue send accepted: the run goes back to loop-manager once the agent has taken the instructions in"
+        ),
+        "{sent:#?}"
+    );
+    seen.extend(sent);
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(
+        (&view["control"], &view["manual"]["returning"]),
+        (&json!("manual"), &json!(true)),
+        "{view:#}"
+    );
+
+    fs::write(&go, "").unwrap();
+    seen.extend(acp.until(|u| text(u).starts_with("— run passed")).await);
+    let echoes = seen.iter().filter(|u| text(u) == "Echo: check the docs").count();
+    assert_eq!(echoes, 1, "{seen:#?}");
+    let back = seen
+        .iter()
+        .filter(|u| text(u) == "— handed back to loop-manager —\n")
+        .count();
+    assert_eq!(back, 1, "{seen:#?}");
+    assert_eq!(control(&d, &run).await.0, "lm");
+    let mut handed_back = 0;
+    loop {
+        let event = tokio::time::timeout(common::WAIT, events.next()).await;
+        let event = event.expect("an event in time").unwrap().expect("the stream goes on");
+        let data: Value = serde_json::from_str(&event.data).unwrap();
+        handed_back += usize::from(event.event == "run.handed_back");
+        if event.event == "run.state_changed" && data["data"]["to"] == "passed" {
+            break;
+        }
+    }
+    assert_eq!(handed_back, 1);
+    drop(acp);
+    crate::acp::gone(&run, &d).await;
 }
 
 /// The updates of `seen` that tell of the run's records: not the state and the commands each resume sends.
@@ -787,4 +850,74 @@ async fn a_permission_request_reaches_no_client_under_loop_manager_and_every_cli
     d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
         .await
         .unwrap();
+}
+
+/// The state a resume sent before the commands, in `seen`.
+fn resumed_state(seen: &[Value]) -> &str {
+    let at = (seen.iter().position(|u| !commands(u).is_empty())).unwrap_or_else(|| panic!("{seen:#?}"));
+    state(&seen[at - 1])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_of_a_disputed_run_sees_the_prompt_waits_for_a_choice_and_settles_it() {
+    // The agent inserts the first prompt and its answer is lost; its replay after the restart is cut short.
+    let store = tempfile::tempdir().unwrap();
+    let marker = store.path().join("held");
+    let args = format!(
+        "\"--store\", \"{}\", \"--hold-after-insert\", \"{}\", \"--partial-replay\"",
+        store.path().display(),
+        marker.display()
+    );
+    let finish = format!("{} finish pass --summary built", common::EXE);
+    let mut d = configured(&finish, "", &args, &[]).await;
+    let run = d.create("build", None).await;
+    let deadline = Instant::now() + common::WAIT;
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "no prompt held");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    crate::delivery::restart(&mut d).await;
+    crate::delivery::disputed(&d, &run).await;
+
+    let mut acp = Acp::start(&d, &[]).await;
+    let seen = acp.resume(&run, true).await.unwrap();
+    let notice = (seen.iter()).find(|u| text(u).starts_with("— the agent may or may not have got the prompt"));
+    assert!(
+        notice.is_some_and(|u| text(u).contains("Build web.") && text(u).contains("/lm-delivered")),
+        "{seen:#?}"
+    );
+    assert_eq!(resumed_state(&seen), "requires_action", "{seen:#?}");
+    // Opened again, the session shows the same, and the dispute stays.
+    let again = acp.resume(&run, false).await.unwrap();
+    assert_eq!(resumed_state(&again), "requires_action", "{again:#?}");
+    assert!(!d.get(&format!("/v1/runs/{run}")).await["disputed"].is_null());
+
+    acp.command(&run, "/lm-takeover", None).await;
+    let (_, seen) = acp.command(&run, "/lm-continue", None).await;
+    let refused = text(seen.last().unwrap());
+    assert!(
+        refused.starts_with("— /lm-continue refused: the agent may or may not have got the prompt")
+            && refused.contains("Build web."),
+        "{seen:#?}"
+    );
+    let (_, mut seen) = acp.command(&run, "/lm-delivered", None).await;
+    assert!(
+        text(seen.last().unwrap()).starts_with("— /lm-delivered accepted"),
+        "{seen:#?}"
+    );
+    let settled = |u: &Value| text(u).contains("reached the agent, by an operator");
+    if !seen.iter().any(settled) {
+        seen.extend(acp.until(settled).await);
+    }
+    if !seen.iter().any(|u| state(u) == "running") {
+        acp.until(|u| state(u) == "running").await;
+    }
+    let (_, seen) = acp.command(&run, "/lm-continue", None).await;
+    assert!(
+        text(seen.last().unwrap()).starts_with("— /lm-continue accepted"),
+        "{seen:#?}"
+    );
+    d.until_state(&run, "passed").await;
+    drop(acp);
+    crate::acp::gone(&run, &d).await;
 }

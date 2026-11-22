@@ -88,7 +88,7 @@ async fn an_acp_agent_of_the_config_runs_a_step_through_the_finisher_and_is_gone
 }
 
 /// A process per session: none of the run's outlives it.
-async fn gone(run: &str, d: &Daemon) {
+pub(crate) async fn gone(run: &str, d: &Daemon) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !of_run(run, d.dir.path()).is_empty() {
         assert!(

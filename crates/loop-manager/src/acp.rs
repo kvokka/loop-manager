@@ -1,8 +1,9 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an ACP v2 agent over stdio for an outside client, and a client of
 //! the daemon's API. Its sessions are the daemon's runs: listed, replayed from their history and followed as the
-//! history grows. A prompt is one of the commands `/lm-takeover` and `/lm-continue` or else an instruction to the run's
-//! agent, sent to the daemon with the attempt the session shows; `session/cancel` is the operator's Stop. A manual
-//! run's permission requests are put to the client; closing a session leaves the run as it is.
+//! history grows. A prompt is one of the commands `/lm-takeover`, `/lm-continue`, `/lm-delivered` and `/lm-resend` or
+//! else an instruction to the run's agent, sent to the daemon with the attempt the session shows; `session/cancel` is
+//! the operator's Stop. A manual run's permission requests are put to the client; closing a session leaves the run as
+//! it is.
 
 mod permissions;
 mod translate;
@@ -45,7 +46,7 @@ struct Daemon {
 }
 
 /// The commands a prompt may be: the name, what it does, the operation of the run in the API.
-const COMMANDS: [(&str, &str, &str); 2] = [
+const COMMANDS: [(&str, &str, &str); 4] = [
     (
         "lm-takeover",
         "Take the run over: nothing of loop-manager moves it until /lm-continue; any other prompt is an instruction \
@@ -57,6 +58,17 @@ const COMMANDS: [(&str, &str, &str); 2] = [
         "Hand the run back to loop-manager, in the same attempt; with instructions the agent has not taken yet, \
          `send` hands it back once they are in, `withdraw` takes them back",
         "continue",
+    ),
+    (
+        "lm-delivered",
+        "The agent got the prompt whose delivery is disputed: loop-manager asks it to check the state of the work and \
+         go on",
+        "delivery",
+    ),
+    (
+        "lm-resend",
+        "The agent did not get the prompt whose delivery is disputed: loop-manager sends it again with its key",
+        "delivery",
     ),
 ];
 
@@ -273,8 +285,7 @@ async fn command(
         .collect();
     let text = text.trim();
     let (operation, mut body) = match parse(text) {
-        Ok(Some((operation, None))) => (operation, json!({})),
-        Ok(Some((operation, Some(unsent)))) => (operation, json!({ "unsent": unsent })),
+        Ok(Some(command)) => command,
         Ok(None) => ("instruct", json!({ "text": text })),
         Err(error) => return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, error)),
     };
@@ -356,9 +367,9 @@ fn notice(id: &str, line: &str) -> Value {
         "content": { "type": "text", "text": format!("— {line} —\n") } })
 }
 
-/// The command `text` is: the operation of the run and the choice of `/lm-continue send|withdraw`; `None` for an
-/// instruction; an error for a command with words it does not take.
-fn parse(text: &str) -> std::result::Result<Option<(&'static str, Option<&str>)>, String> {
+/// The command `text` is: the operation of the run and its body without the attempt; `None` for an instruction; an
+/// error for a command with words it does not take.
+fn parse(text: &str) -> std::result::Result<Option<(&'static str, Value)>, String> {
     let mut words = text.split_whitespace();
     let first = words.next().and_then(|w| w.strip_prefix('/'));
     let Some(&(name, _, operation)) = COMMANDS.iter().find(|(name, ..)| first == Some(*name)) else {
@@ -366,11 +377,13 @@ fn parse(text: &str) -> std::result::Result<Option<(&'static str, Option<&str>)>
     };
     let rest: Vec<&str> = words.collect();
     match (name, rest.as_slice()) {
-        (_, []) => Ok(Some((operation, None))),
-        ("lm-continue", [choice @ ("send" | "withdraw")]) => Ok(Some((operation, Some(choice)))),
+        ("lm-delivered", []) => Ok(Some((operation, json!({ "choice": "delivered" })))),
+        ("lm-resend", []) => Ok(Some((operation, json!({ "choice": "resend" })))),
+        (_, []) => Ok(Some((operation, json!({})))),
+        ("lm-continue", [choice @ ("send" | "withdraw")]) => Ok(Some((operation, json!({ "unsent": choice })))),
         _ => Err(format!(
-            "`/{name}` takes no `{}`: `/lm-takeover`, `/lm-continue`, `/lm-continue send` and `/lm-continue withdraw` \
-             are the commands",
+            "`/{name}` takes no `{}`: `/lm-takeover`, `/lm-continue`, `/lm-continue send`, `/lm-continue withdraw`, \
+             `/lm-delivered` and `/lm-resend` are the commands",
             rest.join(" ")
         )),
     }
@@ -393,6 +406,14 @@ fn answered(what: &str, reply: &Value, attempt: u32) -> String {
             "the instruction is sent to the agent; the run is taken over until /lm-continue".into()
         }
         ("Stop", "accepted") => "Stop accepted: the run is taken over until /lm-continue".into(),
+        ("/lm-delivered", "accepted") => {
+            "/lm-delivered accepted: the agent is asked to check the state of the work and go on (by the next attempt \
+             when none holds the session now)"
+                .into()
+        }
+        ("/lm-resend", "accepted") => "/lm-resend accepted: the prompt goes to the agent again with its key (by the \
+             next attempt when none holds the session now)"
+            .into(),
         (_, "accepted") => format!("{what} accepted: loop-manager goes on with the run in the same attempt"),
         (_, "returning") => {
             format!("{what} accepted: the run goes back to loop-manager once the agent has taken the instructions in")
@@ -415,6 +436,23 @@ fn answered(what: &str, reply: &Value, attempt: u32) -> String {
         (_, "nothing_to_stop") => "Stop: nothing to stop, no turn is in flight and no command runs; the run is taken \
              over until /lm-continue"
             .into(),
+        (_, "delivery_disputed") => {
+            let held = match what {
+                "the instruction" => "; the run is taken over until /lm-continue",
+                _ => "",
+            };
+            format!(
+                "{what} refused: the agent may or may not have got the prompt \"{}\"; nothing goes to its session \
+                 until /lm-delivered (it got it: the agent is asked to check the state of the work and go on) or \
+                 /lm-resend (it did not: the prompt goes again){held}",
+                reply["disputed"]["text"].as_str().unwrap_or_default()
+            )
+        }
+        (_, "not_disputed") => format!("{what} refused: the delivery of no prompt of the run is disputed"),
+        (_, "already_resolved") => format!(
+            "{what} is not taken: `{}` was chosen before, and the next attempt applies it",
+            reply["choice"].as_str().unwrap_or_default()
+        ),
         (_, "already_answered") => {
             format!("{what} is not taken: the request was answered elsewhere, or the agent took it back")
         }
@@ -512,7 +550,8 @@ impl Follower {
                     match event.event.as_str() {
                         "caught_up" => {
                             if let Some(responder) = responder.take() {
-                                self.answer(responder, "running")?;
+                                let state = self.state().await;
+                                self.answer(responder, state)?;
                             }
                             self.ask_open(&mut open).await?;
                         }
@@ -551,6 +590,14 @@ impl Follower {
                                     open.remove(&(attempt, text(&record, "id")));
                                 }
                                 "attempt_end" => open.retain(|(of, _), _| *of != attempt),
+                                // A dispute opened or settled changes what the run waits for.
+                                "delivery" if responder.is_none() => {
+                                    let state = match record["outcome"] == "disputed" {
+                                        true => "requires_action",
+                                        false => "running",
+                                    };
+                                    self.send(json!({ "sessionUpdate": "state_update", "state": state }))?;
+                                }
                                 _ => {}
                             }
                         }
@@ -589,6 +636,15 @@ impl Follower {
     fn stopped(responder: Option<Responder<schema::ResumeSessionResponse>>) -> Result<()> {
         let error = "the session was closed or resumed again before its replay was done";
         responder.map_or(Ok(()), |r| r.respond_with_error(internal(&error)))
+    }
+
+    /// The state of a live run: `requires_action` while the delivery of a prompt waits for the operator's choice, else
+    /// `running`.
+    async fn state(&self) -> &'static str {
+        match self.daemon.get(&run_path(&self.run, "")).await {
+            Ok(view) if !view["disputed"].is_null() => "requires_action",
+            _ => "running",
+        }
     }
 
     /// The current state and the commands, then the answer to `session/resume`: the protocol's mark of a replay done.

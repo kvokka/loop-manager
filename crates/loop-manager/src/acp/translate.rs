@@ -55,6 +55,14 @@ impl Translator {
                     &format!("— {} —\n", self.operator(record, attempt)),
                 )]
             }
+            "delivery" => {
+                let id = format!("lm-{}", record["n"].as_u64().unwrap_or(0));
+                vec![text_chunk(
+                    "agent_message_chunk",
+                    &id,
+                    &format!("— {} —\n", delivery(record)),
+                )]
+            }
             _ => Vec::new(),
         }
     }
@@ -216,6 +224,29 @@ fn notice(record: &Value) -> String {
         _ => format!(
             "history truncated at {} bytes: only steps and attempts follow",
             record["max_run_bytes"]
+        ),
+    }
+}
+
+/// The notice line of what became of a prompt the harness may or may not have got before an attempt failed.
+fn delivery(record: &Value) -> String {
+    let key = text(record, "key");
+    let by = match text(record, "by") {
+        "operator" => ", by an operator",
+        _ => "",
+    };
+    match text(record, "outcome") {
+        "delivered" => {
+            format!("prompt {key} reached the agent{by}: it is asked to check the state of the work and go on")
+        }
+        "not_delivered" => format!("prompt {key} did not reach the agent{by}: it goes again with its key"),
+        "dropped" => format!("the disputed prompt {key} is dropped with its session: a new session starts"),
+        _ => format!(
+            "the agent may or may not have got the prompt \"{}\" ({}): nothing goes to its session until \
+             /lm-delivered (it got it: the agent is asked to check the state of the work and go on) or /lm-resend (it \
+             did not: the prompt goes again)",
+            text(record, "text"),
+            text(record, "why")
         ),
     }
 }

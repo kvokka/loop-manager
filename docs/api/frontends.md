@@ -51,7 +51,8 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
 formulas, packs, addons (list), config check, explain and reload; runs
-(start, list, state, live view, history, cancel, finish, resolve, takeover, instruct, continue); triggers (list, enable, disable, fire by hand);
+(start, list, state, live view, history, cancel, finish, resolve, takeover, instruct, stop, permission, delivery,
+continue); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
 account); events; daemon status, drain and planned restart.
 
@@ -111,16 +112,19 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `loop-manager run takeover <run> --attempt <n>` (`POST /v1/runs/{id}/takeover`), `loop-manager run say <run>
   --attempt <n> <text>` (`POST /v1/runs/{id}/instruct`), `loop-manager run stop <run> --attempt <n>` (`POST
   /v1/runs/{id}/stop`), `loop-manager run permit <run> --attempt <n> --request <id> (--option <id> | --decline)`
-  (`POST /v1/runs/{id}/permission`) and `loop-manager run continue <run> --attempt <n> [--unsent send|withdraw]`
+  (`POST /v1/runs/{id}/permission`), `loop-manager run delivery <run> delivered|resend --attempt <n>` (`POST
+  /v1/runs/{id}/delivery`) and `loop-manager run continue <run> --attempt <n> [--unsent send|withdraw]`
   (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the operator, send its agent an
-  instruction, stop its turn or command, answer a permission request of its session and hand it back
-  ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's
+  instruction, stop its turn or command, answer a permission request of its session, choose on a prompt whose
+  delivery is disputed and hand it back ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's
   `attempt` as last seen: a run at another attempt answers `stale_attempt` and nothing changes. They print the answer
   (`accepted`, with the instruction's `key` and `state`; `returning` for a Continue that waits for the instructions
   to go in; `stale_attempt`, `run_terminal`, `no_live_session` for an instruction to a step with no live AI session,
   `nothing_to_stop` for a Stop with no turn in flight and no command running, `already_answered`, `unknown_request`
-  or `unknown_option` for an answer, `not_manual` for a Continue of a run not taken over, `unsent_input` with the
-  instructions not yet taken in) and exit 1 unless it is `accepted` or `returning`.
+  or `unknown_option` for an answer, `not_disputed` or `already_resolved` with the `choice` made before for a choice
+  on a delivery, `delivery_disputed` with the prompt (`disputed: {key, text}`) for a Continue or an instruction while
+  a delivery is disputed, `not_manual` for a Continue of a run not taken over, `unsent_input` with the instructions
+  not yet taken in) and exit 1 unless it is `accepted` or `returning`.
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
@@ -157,8 +161,8 @@ client (T3 Code, Zed, any ACP client), started by the client, locally or over `s
 process; it reaches the daemon on its API socket (`--socket`, else `LOOP_MANAGER_SOCKET`, else the XDG default, as
 every command does), and the harnesses stay with the daemon. Logs go to stderr. One ACP session is one run: the
 session id is the run id, across steps, attempts and harnesses. The command lists runs, replays their history and
-follows it, takes a run over, instructs its agent, stops it, answers its permission requests and hands it back
-([Humans and runs](#humans-and-runs)).
+follows it, takes a run over, instructs its agent, stops it, answers its permission requests, chooses on a prompt
+whose delivery is disputed and hands it back ([Humans and runs](#humans-and-runs)).
 
 - `initialize`: protocol version 2 only; a client that asks for version 1 gets `-32022`. The capabilities are the
   baseline `session` (`{}`); `agentInfo` is `loop-manager` and the binary's version.
@@ -168,16 +172,18 @@ follows it, takes a run over, instructs its agent, stops it, answers its permiss
   the start or end of the run's last attempt (else the run's start or creation).
 - `session/resume` of a run id: `replayFrom: {"type": "start"}` sends every record of the run's history
   ([History of a run](#http-api)) from the first as `session/update` notifications; without `replayFrom` nothing of
-  the past is sent. Then a `state_update` gives the current state (`running` while the run lives, `idle` once it
-  ended), an `available_commands_update` the commands below (`{"type": "command", "name": "lm-takeover", …}`), and
+  the past is sent. Then a `state_update` gives the current state (`running` while the run lives, `requires_action`
+  while a delivery of the run is disputed, `idle` once it ended), an `available_commands_update` the commands below (`{"type": "command", "name": "lm-takeover", …}`), and
   the answer follows: the protocol's mark that the replay is done. The records written afterwards follow
   as they come, until `session/close`, the client leaving, or the run's end, after which an `idle` `state_update`
-  comes. A broken history stream (a restart of the daemon, a dropped connection) is opened again every second from
+  comes. A live `delivery` record is followed by a `state_update`: `requires_action` when it opens a dispute, else
+  `running`. A broken history stream (a restart of the daemon, a dropped connection) is opened again every second from
   the record after the last one read: no hole, no repeat. An unknown run is `-32002`; another replay cursor is
   `-32602`.
 - `session/prompt` is a command when its text, trimmed, is `/lm-takeover` (`POST /v1/runs/{id}/takeover`),
   `/lm-continue` (`POST /v1/runs/{id}/continue`), `/lm-continue send` or `/lm-continue withdraw` (the same with
-  `unsent`); a command with other words after it is `-32602`. Any other text is an instruction to the run's agent
+  `unsent`), `/lm-delivered` or `/lm-resend` (`POST /v1/runs/{id}/delivery` with `choice` `delivered` or `resend`); a
+  command with other words after it is `-32602`. Any other text is an instruction to the run's agent
   (`POST /v1/runs/{id}/instruct`), which takes a run under loop-manager over. The request's `attempt` is the attempt
   the session has shown: of the last `attempt` record of the run's history the process has read for it, kept after
   `session/close`; a daemon whose run is at another attempt answers `stale_attempt` and changes nothing. The client's
@@ -185,7 +191,8 @@ follows it, takes a run over, instructs its agent, stops it, answers its permiss
   session): a repeat makes no second instruction. Once the daemon answered, the session gets the command as a
   `user_message_chunk` (`messageId` `lm-key-<key>`, or `lm-command-<n>` without a key) and the answer as an
   `agent_message_chunk` notice line (`messageId` `<that id>-reply`): `accepted`, `returning`, or a refusal
-  (`stale_attempt`, `run_terminal`, `not_manual`, `unsent_input` naming both choices) with what to do. An instruction
+  (`stale_attempt`, `run_terminal`, `not_manual`, `unsent_input` naming both choices, `delivery_disputed` with the
+  prompt's text and both choices, `not_disputed`, `already_resolved` with the choice made before) with what to do. An instruction
   taken has no echo of its own: the history's `prompt` record shows it, and its `messageId` is `prompt-<key>`; its
   notice says whether loop-manager holds it for the end of the turn or sent it, and an instruction refused
   (`no_live_session` among the refusals) is echoed as a command is. An error reply of the daemon is a notice line too,
@@ -224,6 +231,7 @@ How a history record becomes updates:
 | `exec_output` | its text as a `tool_call_content_chunk` of an `execute` tool call that a `tool_call_update` (`in_progress`, title `<step> (exec)`, or `<step> (check)` for the output of a check script) opens at the attempt's first output: id `exec-<attempt>`, or `exec-<attempt>-<n>` for output after that call ended. The call ends at the next boundary record: `failed` at an `attempt_end` with a failure, an `outcome` `fail` or a `run` not passed, else `completed` |
 | `step`, `attempt`, `attempt_end`, `outcome`, `control`, `run`, `truncated` | an `agent_message_chunk` notice line of its own (`messageId` `lm-<n>`), such as `— step build (ai) —`, `— attempt 2: resume on claude —`, `— attempt 2 failed: rate_limited —`, `— outcome pass: done —`, `— taken over by an operator —`, `— handed back to loop-manager —`, `— run cancelled (cancel) —` |
 | `permission`, `permission_answer`, `stop` | a notice line the same way, without ending an `execute` tool call: `— permission asked: <tool> —`; `— permission <tool>: <option's name>, by an operator —`, `…: declined by an operator —`, `…: declined by loop-manager —` (the policy), `…: taken back by the agent —` (`<tool>` is the request's id when its `permission` record was not read); `— Stop sent to the agent: the turn ends when the harness stops it —` (`target` `turn`), `— Stop: the step's command is stopped; its outcome waits for /lm-continue —` (`command`) |
+| `delivery` | a notice line the same way: `— prompt <key> reached the agent: it is asked to check the state of the work and go on —` (`delivered`), `— prompt <key> did not reach the agent: it goes again with its key —` (`not_delivered`), each with `, by an operator` after `agent` when the operator chose, `— the disputed prompt <key> is dropped with its session: a new session starts —` (`dropped`), and for `disputed` `— the agent may or may not have got the prompt "<text>" (<why>): nothing goes to its session until /lm-delivered (…) or /lm-resend (…) —` |
 | any other kind | nothing |
 
 The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
@@ -267,13 +275,22 @@ history, and a client may drop it.
 - The permission requests of the session of a manual run wait for the human: the run's state lists them as
   `permissions`, and `loop-manager run permit <id> --attempt <n> --request <r> --option <o>` (or `--decline`; `POST
   /v1/runs/{id}/permission`) answers one, once. On Continue the policy declines those left open.
+- A prompt the agent may or may not have got when its attempt failed, and that the replay of the resumed session does
+  not settle, waits for the human: the run's state shows it as `disputed` (`{key, text, source, attempt, why,
+  since}`), its history has a `delivery` record with what the replay showed, and nothing of the run moves meanwhile,
+  nor the timeout of a parent step that waits for it. `loop-manager run delivery <id> delivered|resend --attempt <n>`
+  (`POST /v1/runs/{id}/delivery`, `/lm-delivered` or `/lm-resend`) chooses, once: `delivered` sends a prompt that
+  asks the agent to check the state of the work and go on, `resend` sends the same prompt again with its key. Until
+  then a Continue and an instruction answer `delivery_disputed` and nothing goes to the session
+  ([recovery](../guide/recovery.md#a-prompt-whose-delivery-is-disputed)).
 
 ## Verified by
 
 - Integration tests on the real daemon: `crates/loop-manager/tests/e2e/api.rs`, `cli.rs`, `mcp.rs`; the live view and
   `run watch` on the real claude (`crates/loop-manager/tests/e2e/claude.rs`); `run watch --history` arriving while a
   tool runs (`crates/loop-manager/tests/e2e/chat.rs`); `loop-manager acp` under the ACP SDK's client, on the `acp-agent` fixture
-  (`crates/loop-manager/tests/e2e/acp_client.rs`).
+  (`crates/loop-manager/tests/e2e/acp_client.rs`); the check of a delivery after a restart of the daemon and the
+  choices on a dispute, on the same fixture (`crates/loop-manager/tests/e2e/delivery.rs`).
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.
 

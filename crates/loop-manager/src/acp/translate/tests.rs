@@ -290,3 +290,38 @@ fn a_permission_request_its_answer_and_a_stop_are_notices() {
         assert_eq!(t.record(&record), vec![notice(n, line)]);
     }
 }
+
+#[test]
+fn what_became_of_a_prompt_whose_delivery_was_checked_is_a_notice() {
+    let mut t = Translator::default();
+    let delivery = |outcome: &str, by: &str| json!({ "key": "lm:run_1:1:2", "outcome": outcome, "by": by });
+    let mut disputed = delivery("disputed", "replay");
+    disputed["why"] = json!("replay_incomplete");
+    disputed["text"] = json!("Build web.");
+    disputed["seen"] = json!([{ "id": "m1", "text": "Build web." }]);
+    let lines = [
+        (
+            record(3, 2, "delivery", delivery("delivered", "replay")),
+            "prompt lm:run_1:1:2 reached the agent: it is asked to check the state of the work and go on".to_owned(),
+        ),
+        (
+            record(4, 2, "delivery", delivery("not_delivered", "operator")),
+            "prompt lm:run_1:1:2 did not reach the agent, by an operator: it goes again with its key".to_owned(),
+        ),
+        (
+            record(5, 2, "delivery", delivery("dropped", "lm")),
+            "the disputed prompt lm:run_1:1:2 is dropped with its session: a new session starts".to_owned(),
+        ),
+        (
+            record(6, 2, "delivery", disputed),
+            "the agent may or may not have got the prompt \"Build web.\" (replay_incomplete): nothing goes to its \
+             session until /lm-delivered (it got it: the agent is asked to check the state of the work and go on) or \
+             /lm-resend (it did not: the prompt goes again)"
+                .to_owned(),
+        ),
+    ];
+    for (record, line) in lines {
+        let n = record["n"].as_u64().unwrap();
+        assert_eq!(t.record(&record), vec![notice(n, &line)]);
+    }
+}

@@ -1756,6 +1756,114 @@
         }
       }
     },
+    "/v1/runs/{id}/delivery": {
+      "post": {
+        "summary": "The operator's choice on the prompt whose delivery a resumed session could not settle (`disputed` of the run\nview): the first choice is the one. The attempt that holds the session sends the chosen prompt at once; with no\nattempt holding it, the next attempt applies the choice. A manual run stays manual (docs/design/contracts.md 6.4).",
+        "operationId": "delivery",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chosen"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{id}/finish": {
       "post": {
         "summary": "The finisher: the agent declares the outcome of its attempt (contracts 6.3); the reply is\n`{\"answer\": \"accepted\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
@@ -3161,6 +3269,26 @@
           }
         }
       },
+      "Chosen": {
+        "type": "object",
+        "description": "The answer to the operator's choice on a disputed delivery (docs/design/contracts.md 6.4).",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`; `stale_attempt`, `run_terminal`, `not_disputed` (no delivery of the run is disputed) or\n`already_resolved` (a choice was made before and waits for the next attempt)."
+          },
+          "choice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "With `already_resolved`: the choice made, `delivered` or `resend`."
+          }
+        }
+      },
       "CloseGate": {
         "type": "object",
         "required": [
@@ -3217,7 +3345,18 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),\n`run_terminal`, or for a Continue `not_manual`, `returning` (`unsent: send`: the run goes back once the\nharness has taken the operator's input in) or `unsent_input` (that input waits and no `unsent` was given:\nnothing changed)."
+            "description": "`accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),\n`run_terminal`, or for a Continue `not_manual`, `returning` (`unsent: send`: the run goes back once the\nharness has taken the operator's input in), `unsent_input` (that input waits and no `unsent` was given:\nnothing changed) or `delivery_disputed` (the delivery of a prompt waits for the operator's choice: nothing\nchanged)."
+          },
+          "disputed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DisputedPrompt",
+                "description": "With `delivery_disputed`: the prompt."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "unsent": {
             "type": [
@@ -3350,6 +3489,85 @@
             "description": "`drain` or `restart` from the moment a drain begins; null while the daemon runs on."
           },
           "version": {
+            "type": "string"
+          }
+        }
+      },
+      "DeliveryChoice": {
+        "type": "string",
+        "description": "The operator's choice on a disputed delivery.",
+        "enum": [
+          "delivered",
+          "resend"
+        ]
+      },
+      "DeliveryRun": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "choice"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt of the run the client saw (`attempt` of the run view).",
+            "minimum": 0
+          },
+          "choice": {
+            "$ref": "#/components/schemas/DeliveryChoice"
+          }
+        }
+      },
+      "Disputed": {
+        "type": "object",
+        "description": "A prompt whose delivery is disputed: the harness may or may not have got it (docs/design/contracts.md 6.4).",
+        "required": [
+          "key",
+          "text",
+          "source",
+          "attempt",
+          "why",
+          "since"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt that sent it.",
+            "minimum": 0
+          },
+          "key": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`lm` or `operator`: who wrote the prompt."
+          },
+          "text": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string",
+            "description": "Why the replay of the session did not settle it: `replay_incomplete`, `anchor_missing`, `no_anchor`,\n`unexpected_messages` or `command` (a local command of the agent may be kept nowhere)."
+          }
+        }
+      },
+      "DisputedPrompt": {
+        "type": "object",
+        "description": "The disputed prompt a refusal names.",
+        "required": [
+          "key",
+          "text"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "text": {
             "type": "string"
           }
         }
@@ -3760,7 +3978,18 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`; `stale_attempt`, `run_terminal` or `no_live_session` (no AI session of the step lives: nothing\nwas sent, the run is manual)."
+            "description": "`accepted`; `stale_attempt`, `run_terminal`, `no_live_session` (no AI session of the step lives: nothing\nwas sent, the run is manual) or `delivery_disputed` (the delivery of the session's last prompt waits for the\noperator's choice: nothing was sent, the run is manual)."
+          },
+          "disputed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DisputedPrompt",
+                "description": "With `delivery_disputed`: the prompt."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "key": {
             "type": [
@@ -4211,6 +4440,17 @@
           "depth": {
             "type": "integer",
             "format": "int64"
+          },
+          "disputed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Disputed",
+                "description": "The prompt whose delivery a resumed session could not settle while no choice is made on it, else null: the\nrun stands for the operator's choice (docs/design/contracts.md 6.4)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "formula": {
             "type": "string"

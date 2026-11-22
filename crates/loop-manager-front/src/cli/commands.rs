@@ -130,6 +130,24 @@ pub enum RunCommand {
         #[arg(long)]
         decline: bool,
     },
+    /// Choose on the prompt whose delivery is disputed (`disputed` in `run show`): `delivered` sends a prompt that asks
+    /// the agent to check the state of the work and go on, `resend` sends the same prompt again with its key. Prints
+    /// `accepted`, or `stale_attempt`, `run_terminal`, `not_disputed` or `already_resolved` with the choice made
+    /// before.
+    Delivery {
+        #[command(flatten)]
+        control: Control,
+        #[arg(value_enum)]
+        choice: DeliveryChoice,
+    },
+}
+
+/// The operator's choice on a disputed delivery.
+#[derive(Clone, Copy, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryChoice {
+    Delivered,
+    Resend,
 }
 
 /// What a Continue does with the instructions the harness has not taken in.
@@ -140,7 +158,8 @@ pub enum UnsentChoice {
     Withdraw,
 }
 
-/// A takeover, a Continue, an instruction, a Stop or an answer to a permission request of a run.
+/// A takeover, a Continue, an instruction, a Stop, an answer to a permission request or a choice on a disputed
+/// delivery of a run.
 #[derive(clap::Args)]
 pub struct Control {
     id: String,
@@ -216,16 +235,8 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             key,
         } => {
             let inputs: Map<String, Value> = inputs.iter().map(|i| input(i)).collect();
-            // The session the command runs in, as the finisher finds it.
-            let parent = match (
-                std::env::var("LOOP_MANAGER_RUN"),
-                std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN"),
-            ) {
-                (Ok(run), Ok(token)) => json!({ "run": run, "token": token }),
-                _ => Value::Null,
-            };
             let body = json!({ "project": project, "rig": rig, "formula": formula, "inputs": inputs,
-                "continue_from": continue_from, "parent": parent });
+                "continue_from": continue_from, "parent": parent() });
             let reply = client.request("POST", "/v1/runs", Some(&body), key.as_deref()).await?;
             match reply["run"].as_str() {
                 _ if json => print(json, &reply),
@@ -303,8 +314,22 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             let body = json!({ "request": request, "option": option });
             return self::control(client, json, "/permission", control, body).await;
         }
+        RunCommand::Delivery { control, choice } => {
+            return self::control(client, json, "/delivery", control, json!({ "choice": choice })).await;
+        }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The session the command runs in, as the finisher finds it; null outside one.
+fn parent() -> Value {
+    match (
+        std::env::var("LOOP_MANAGER_RUN"),
+        std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN"),
+    ) {
+        (Ok(run), Ok(token)) => json!({ "run": run, "token": token }),
+        _ => Value::Null,
+    }
 }
 
 /// `run resolve`: the outcome of the await step `step` of run `id`.

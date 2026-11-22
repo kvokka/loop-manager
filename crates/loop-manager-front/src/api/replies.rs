@@ -67,6 +67,31 @@ pub(crate) struct Run {
     /// The permission requests of the live attempt that wait for the operator's answer, oldest first; under
     /// loop-manager the policy answers each at once, so none waits.
     permissions: Vec<PermissionRequest>,
+    /// The prompt whose delivery a resumed session could not settle while no choice is made on it, else null: the
+    /// run stands for the operator's choice (docs/design/contracts.md 6.4).
+    disputed: Option<Disputed>,
+}
+
+/// A prompt whose delivery is disputed: the harness may or may not have got it (docs/design/contracts.md 6.4).
+#[derive(ToSchema)]
+pub(crate) struct Disputed {
+    key: String,
+    text: String,
+    /// `lm` or `operator`: who wrote the prompt.
+    source: String,
+    /// The attempt that sent it.
+    attempt: u32,
+    /// Why the replay of the session did not settle it: `replay_incomplete`, `anchor_missing`, `no_anchor`,
+    /// `unexpected_messages` or `command` (a local command of the agent may be kept nowhere).
+    why: String,
+    since: String,
+}
+
+/// The disputed prompt a refusal names.
+#[derive(ToSchema)]
+pub(crate) struct DisputedPrompt {
+    key: String,
+    text: String,
 }
 
 /// A permission request of a session (docs/design/contracts.md 4.3).
@@ -216,23 +241,39 @@ pub(crate) struct Finished {
 pub(crate) struct Control {
     /// `accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),
     /// `run_terminal`, or for a Continue `not_manual`, `returning` (`unsent: send`: the run goes back once the
-    /// harness has taken the operator's input in) or `unsent_input` (that input waits and no `unsent` was given:
-    /// nothing changed).
+    /// harness has taken the operator's input in), `unsent_input` (that input waits and no `unsent` was given:
+    /// nothing changed) or `delivery_disputed` (the delivery of a prompt waits for the operator's choice: nothing
+    /// changed).
     answer: String,
     /// With `unsent_input`: the operator's prompts the harness has not taken in.
     unsent: Option<Vec<UnsentInput>>,
+    /// With `delivery_disputed`: the prompt.
+    disputed: Option<DisputedPrompt>,
 }
 
 /// The answer to an instruction (docs/design/contracts.md 6.1).
 #[derive(ToSchema)]
 pub(crate) struct Instructed {
-    /// `accepted`; `stale_attempt`, `run_terminal` or `no_live_session` (no AI session of the step lives: nothing
-    /// was sent, the run is manual).
+    /// `accepted`; `stale_attempt`, `run_terminal`, `no_live_session` (no AI session of the step lives: nothing
+    /// was sent, the run is manual) or `delivery_disputed` (the delivery of the session's last prompt waits for the
+    /// operator's choice: nothing was sent, the run is manual).
     answer: String,
     /// With `accepted`: the prompt's key (docs/design/contracts.md 6.4).
     key: Option<String>,
     /// With `accepted`: `queued` (loop-manager holds it for the turn's end) or `intent` (it goes to the session now).
     state: Option<String>,
+    /// With `delivery_disputed`: the prompt.
+    disputed: Option<DisputedPrompt>,
+}
+
+/// The answer to the operator's choice on a disputed delivery (docs/design/contracts.md 6.4).
+#[derive(ToSchema)]
+pub(crate) struct Chosen {
+    /// `accepted`; `stale_attempt`, `run_terminal`, `not_disputed` (no delivery of the run is disputed) or
+    /// `already_resolved` (a choice was made before and waits for the next attempt).
+    answer: String,
+    /// With `already_resolved`: the choice made, `delivered` or `resend`.
+    choice: Option<String>,
 }
 
 /// The answer to a Stop (docs/design/contracts.md 6.1).

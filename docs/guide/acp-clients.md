@@ -2,12 +2,13 @@
 
 An editor or app that speaks the [Agent Client Protocol](https://agentclientprotocol.com) version 2 can show the runs
 of a loop-manager daemon as its sessions: the list of runs, the history of one from its first step, and what the run
-does as it does it, take a run over, instruct its agent, stop it, answer its permission requests and hand it back. The client starts `loop-manager acp` as its agent, on the
+does as it does it, take a run over, instruct its agent, stop it, answer its permission requests, choose on a prompt
+whose delivery is disputed and hand it back. The client starts `loop-manager acp` as its agent, on the
 same machine or over ssh; the command reaches the daemon on its API socket and the harnesses keep running under the
 daemon. What the command does, method by method, is in [frontends: ACP](../api/frontends.md#acp).
 
-Runs are started with `loop-manager run start` (or a trigger). The client takes a run over and hands it back with two
-commands; any other prompt is an instruction to the run's agent.
+Runs are started with `loop-manager run start` (or a trigger). The client takes a run over, hands it back and chooses
+on a disputed delivery with commands; any other prompt is an instruction to the run's agent.
 
 ## The command
 
@@ -26,8 +27,9 @@ steps and attempts. Asking for a new session gives an error that says how runs a
 
 ## Taking a run over
 
-A session announces two commands (`available_commands_update`), which a client shows in its command menu; a client
-without one types them as the prompt's text:
+A session announces four commands (`available_commands_update`), which a client shows in its command menu; a client
+without one types them as the prompt's text. Two take the run over and hand it back
+([the other two](#a-prompt-whose-delivery-is-disputed) choose on a disputed delivery):
 
 - `/lm-takeover` takes the run over for its operator, as `loop-manager run takeover` does: nothing of loop-manager
   moves it (no next step, retry, policy decision or timeout) while what was already running goes on and is shown.
@@ -90,6 +92,29 @@ given elsewhere (another client, `loop-manager run permit`) cancels them the sam
 its request back, the end of the attempt, or `/lm-continue`, on which the policy declines what is still open. An
 answer that comes too late gets a notice: `— the answer to the permission request is not taken: the request was
 answered elsewhere, or the agent took it back —`.
+
+## A prompt whose delivery is disputed
+
+When an attempt fails (the daemon or the agent died) while its last prompt was on the way, the next attempt resumes the
+session and reads its replay to learn whether the agent got the prompt. Most of the time it tells, and the history
+says what followed: `— prompt <key> reached the agent: it is asked to check the state of the work and go on —` or
+`— prompt <key> did not reach the agent: it goes again with its key —`. When the replay does not tell (it was cut
+short, the agent keeps no user messages, the session shows messages loop-manager did not send), the delivery is
+disputed and the run waits for an operator, with its agent session open and idle:
+
+- the history shows `— the agent may or may not have got the prompt "<text>" (<why>): nothing goes to its session
+  until /lm-delivered (…) or /lm-resend (…) —`, and the session's state is `requires_action`: a client that marks
+  sessions waiting for the user marks this one, live and when it opens the session later;
+- `/lm-delivered` says the agent got it: loop-manager sends a prompt that asks the agent to check the state of the work
+  and go on. `/lm-resend` says it did not: the same prompt goes again with its key, so an agent that has it after all
+  does not take it twice. Either is `loop-manager run delivery`; the first choice from any client counts, and a later
+  one gets `— … refused: the delivery of no prompt of the run is disputed —`, or a notice that names the choice made
+  before, which the next attempt applies. The history then shows the prompt as reached or sent again, by an
+  operator, and the state goes back to `running`;
+- until the choice, `/lm-continue` and an instruction are refused with the prompt's text and both choices, and nothing
+  goes to the session. A run taken over stays taken over after the choice: its turn's end waits for `/lm-continue`.
+
+What each choice means for the work is in [recovery](recovery.md#a-prompt-whose-delivery-is-disputed).
 
 ## Leaving
 

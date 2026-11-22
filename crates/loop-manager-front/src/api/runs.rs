@@ -1,17 +1,17 @@
 //! Runs: start a formula, list, state, cancel, the finisher, takeover, the operator's instructions, Stop, answers to
-//! permission requests and Continue
+//! permission requests, the choice on a disputed delivery and Continue
 //! (docs/api/frontends.md, contracts 6).
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Control, Failed, Finished, Instructed, Keyed, Permitted, Run, Started, Stopped},
+    replies::{Chosen, Control, Failed, Finished, Instructed, Keyed, Permitted, Run, Started, Stopped},
 };
 use axum::{
     Json,
     extract::{Path, Query},
     http::{HeaderMap, StatusCode},
 };
-use loop_manager_core::run::{Create, Msg, Outcome, RunFilter, Unsent};
+use loop_manager_core::run::{Choice, Create, Msg, Outcome, RunFilter, Unsent};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use utoipa::{IntoParams, ToSchema};
@@ -363,5 +363,44 @@ pub(crate) async fn permit(
         request,
         option,
     };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+/// The operator's choice on a disputed delivery.
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DeliveryChoice {
+    /// The harness got the prompt: a prompt that asks the agent to check the state of the work and go on goes instead.
+    Delivered,
+    /// The harness did not get it: the same prompt goes again with the same key.
+    Resend,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct DeliveryRun {
+    /// The attempt of the run the client saw (`attempt` of the run view).
+    attempt: u32,
+    choice: DeliveryChoice,
+}
+
+/// The operator's choice on the prompt whose delivery a resumed session could not settle (`disputed` of the run
+/// view): the first choice is the one. The attempt that holds the session sends the chosen prompt at once; with no
+/// attempt holding it, the next attempt applies the choice. A manual run stays manual (docs/design/contracts.md 6.4).
+#[utoipa::path(post, path = "/v1/runs/{id}/delivery", request_body = DeliveryRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Chosen),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn delivery(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(DeliveryRun { attempt, choice }): Body<DeliveryRun>,
+) -> Reply {
+    let choice = match choice {
+        DeliveryChoice::Delivered => Choice::Delivered,
+        DeliveryChoice::Resend => Choice::Resend,
+    };
+    let msg = Msg::Delivery { run, attempt, choice };
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }

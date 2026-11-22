@@ -19,6 +19,7 @@ mod cli_local;
 mod codex;
 mod context_budget;
 mod dcg;
+mod delivery;
 mod doctor;
 mod doctor_version;
 mod exec_env;

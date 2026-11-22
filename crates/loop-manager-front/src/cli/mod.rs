@@ -30,6 +30,7 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("run say", "POST", "/v1/runs/{id}/instruct"),
     ("run stop", "POST", "/v1/runs/{id}/stop"),
     ("run permit", "POST", "/v1/runs/{id}/permission"),
+    ("run delivery", "POST", "/v1/runs/{id}/delivery"),
     ("finish", "POST", "/v1/runs/{id}/finish"),
     ("gate list", "GET", "/v1/gates"),
     ("gate close", "POST", "/v1/gates"),
