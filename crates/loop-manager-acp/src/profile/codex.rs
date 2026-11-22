@@ -54,6 +54,10 @@ const BILLING_WORDS: &[&str] = &[
     "You hit your spend cap",
 ];
 
+/// The words of the OpenAI API for a model it does not serve (`model_not_found`), which the adapter passes on alone:
+/// the status of a provider's error in the standard shape does not reach the driver.
+const NO_MODEL: &str = "does not exist or you do not have access to it";
+
 /// The role files of a session, their text by path.
 type Roles = Map<String, Value>;
 
@@ -456,17 +460,19 @@ pub(super) fn secrets(part: &Value) -> Vec<String> {
 }
 
 /// The failure of an error of the adapter (docs/design/adapters.md, "Profiles"): the JSON-RPC code first, then the
-/// words of codex the adapter passes on as the message; what none of them names is `unknown` with those words.
+/// words of codex the adapter passes on, as the message or, for a request that failed inside the adapter ("Internal
+/// error"), as `data.details`; what none of them names is `unknown` with those words.
 pub(super) fn classify(code: i32, message: &str, data: Option<&Value>) -> Failure {
     let generic = session::classify(code, message, data);
     if generic.kind != FailureKind::Unknown {
         return generic;
     }
-    let (kind, retried) = kind(code, message).unwrap_or((FailureKind::Unknown, false));
+    let words = data.and_then(|d| d["details"].as_str()).unwrap_or(message);
+    let (kind, retried) = kind(code, words).unwrap_or((FailureKind::Unknown, false));
     let mut failure = Failure::new(kind, Source::Harness);
     failure.raw = generic.raw;
     failure.retried_by_harness = retried;
-    failure.text = (kind == FailureKind::Unknown).then(|| message.to_owned());
+    failure.text = (kind == FailureKind::Unknown).then(|| words.to_owned());
     failure
 }
 
@@ -485,6 +491,8 @@ fn kind(code: i32, message: &str) -> Option<(FailureKind, bool)> {
         Some(FailureKind::ContextOverflow)
     } else if message.starts_with("Selected model is at capacity") {
         Some(FailureKind::Overloaded)
+    } else if message.contains(NO_MODEL) {
+        Some(FailureKind::ConfigError)
     } else {
         None
     };

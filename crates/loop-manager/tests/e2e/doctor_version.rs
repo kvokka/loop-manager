@@ -32,28 +32,29 @@ async fn a_harness_below_its_minimum_warns_and_the_minimum_and_newer_do_not() {
     let dir = tree("");
     let d = dir.path();
     let config = format!(
-        "projects = [\"shop\"]\n[harness.claude]\ncommand = \"{}\"\n[harness.codex]\nbinary = \"{}\"\n",
+        "projects = [\"shop\"]\n[harness.claude]\ncommand = \"{}\"\n[harness.codex]\ncommand = \"{}\"\n",
         d.join("tools/claude").display(),
-        d.join("tools/codex").display()
+        d.join("tools/codex-acp").display()
     );
     fs::write(d.join("config/loop-manager/config.toml"), config).unwrap();
     // Each harness: below its minimum, at it, and above it, with no upper bound.
+    let codex = |v: &str| format!("@agentclientprotocol/codex-acp {v}");
     for [claude, codex] in [
-        ["0.109.0", "codex-cli 0.171.0"],
-        ["0.109.1", "codex-cli 0.170.9"],
-        ["1.0.0", "codex-cli 1.0.0"],
-        ["0.110.0", "codex-cli 0.172.0"],
+        ["0.109.0".into(), codex("2.9.0")],
+        ["0.109.1".into(), codex("2.8.9")],
+        ["1.0.0".into(), codex("3.0.0")],
+        ["0.110.0".into(), codex("2.10.0")],
     ] {
-        adapter(&d.join("tools/claude"), claude);
-        script(&d.join("tools/codex"), &format!("echo '{codex}'"));
+        adapter(&d.join("tools/claude"), &claude);
+        adapter(&d.join("tools/codex-acp"), &codex);
         let (passed, found) = doctor(d);
         assert!(passed, "warnings do not fail: {found:?}");
         let stderr = daemon_stderr(d).await;
-        for (name, out, minimum, below) in [
-            ("claude", claude, "0.109.1", claude == "0.109.0"),
-            ("codex", codex, "0.171.0", codex.ends_with("0.170.9")),
+        for (name, file, out, minimum, below) in [
+            ("claude", "claude", &claude, "0.109.1", claude == "0.109.0"),
+            ("codex", "codex-acp", &codex, "2.9.0", codex.ends_with("2.8.9")),
         ] {
-            let path = d.join("tools").join(name).display().to_string();
+            let path = d.join("tools").join(file).display().to_string();
             let warning = format!("{path} is `{out}`; supported: {minimum} or newer");
             let (level, detail) = level(&found, name);
             if below {

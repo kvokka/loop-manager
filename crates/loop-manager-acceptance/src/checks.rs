@@ -9,7 +9,7 @@ const KILLED_IN_A_COMMAND: &str = "-p loop-manager -E test(/killed_in_a_command_
 pub(crate) const ALL: &[Scenario] = &[
     Scenario {
         criterion: "9",
-        title: "kill -9 of claude and of the codex app-server mid-tool is typed, resumed and reaches its outcome",
+        title: "kill -9 of the claude and of the codex adapter mid-tool is typed, resumed and reaches its outcome",
         launch: Launch::Ci,
         run: |env| Box::pin(tests(env, KILLED_IN_A_COMMAND, 2)),
     },
@@ -50,8 +50,8 @@ pub(crate) const ALL: &[Scenario] = &[
         run: |env| {
             Box::pin(tests(
                 env,
-                "-p loop-manager-acp -p loop-manager-codex -p loop-manager-br -E binary(contract)|test(/^contract::/)|test(/^models::/)",
-                45,
+                "-p loop-manager-acp -p loop-manager-br -E binary(contract)|test(/^(codex::)?(contract|models)::/)",
+                43,
             ))
         },
     },

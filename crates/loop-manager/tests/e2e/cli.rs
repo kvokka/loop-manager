@@ -254,18 +254,16 @@ async fn the_config_from_the_cli_lists_explains_checks_and_reloads() {
         "shop.dev",
         "the daemon keeps its config"
     );
-    // The adapter checks its own settings: claude those of an ACP harness, codex its sessions and idle time
+    // The driver checks the settings of an ACP harness; codex's keys of many sessions in one process are gone
     // (contracts 4.5).
     let claude = CONFIG.replace("command = \"true\"\n", "command = \"true\"\nmax_sessions = 3\n");
     let codex = |extra: &str| format!("{CONFIG}[harness.codex]\n{extra}");
+    let gone = "`harness.codex`: `max_sessions`: the key is gone: an ACP harness runs one process per session";
     for (text, error) in [
         (claude, Some("`harness.claude`: unknown key `max_sessions`")),
-        (
-            codex("max_sessions = 0\n"),
-            Some("`harness.codex`: `max_sessions`: invalid value"),
-        ),
-        (codex("idle = 3\n"), Some("`harness.codex`")),
-        (codex("max_sessions = 3\ninstance_idle_s = 0\n"), None),
+        (codex("max_sessions = 3\n"), Some(gone)),
+        (codex("idle = 3\n"), Some("`harness.codex`: unknown key `idle`")),
+        (codex("command = \"true\"\n"), None),
     ] {
         fs::write(&file, &text).unwrap();
         let out = d.cli(&["config", "check"], &[]);

@@ -5,7 +5,7 @@ use loop_manager_core::config::{Config, EffectiveConfig, Layer, load_for};
 use loop_manager_core::driver::{Adapter, Driver, SessionPlan};
 use std::path::Path;
 
-const ADAPTERS: &[&Adapter] = &[&loop_manager_acp::CLAUDE, &loop_manager_codex::ADAPTER];
+const ADAPTERS: &[&Adapter] = &[&loop_manager_acp::CLAUDE, &loop_manager_acp::CODEX];
 
 const DEMO: &str = "1-planner-executor";
 const PROJECT: &str = "planner-executor";
@@ -90,6 +90,7 @@ fn the_role_prompt_of_a_pack_agent_reaches_both_adapters() {
     let claude = loop_manager_acp::Acp::new("claude", &options, state.path(), None, None).unwrap();
     assert!(delivered(&claude, &effective).contains(needle));
     effective.harness = "codex".into();
-    let codex = loop_manager_codex::Codex::new("codex".into(), state.path().into(), None, 1);
+    let options = toml::toml! { command = "codex-acp" };
+    let codex = loop_manager_acp::Acp::new("codex", &options, state.path(), None, None).unwrap();
     assert!(delivered(&codex, &effective).contains(needle));
 }

@@ -1059,7 +1059,6 @@ dependencies = [
  "loop-manager-acp",
  "loop-manager-addons",
  "loop-manager-br",
- "loop-manager-codex",
  "loop-manager-core",
  "loop-manager-front",
  "loop-manager-testkit",
@@ -1120,21 +1119,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "loop-manager-codex"
-version = "0.0.1"
-dependencies = [
- "loop-manager-contract",
- "loop-manager-testkit",
- "rustix",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "walkdir",
 ]
 
 [[package]]

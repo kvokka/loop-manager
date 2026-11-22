@@ -663,12 +663,6 @@ fn the_failures_of_the_adapter_by_their_code_and_words() {
         (1001, "Connection to Codex was lost.", HarnessCrash, false),
         (
             -32603,
-            "MCP startup failed: required MCP servers failed to initialize: mail",
-            ToolFailure,
-            false,
-        ),
-        (
-            -32603,
             "Quota exceeded. Check your plan and billing details.",
             Billing,
             false,
@@ -683,7 +677,8 @@ fn the_failures_of_the_adapter_by_their_code_and_words() {
         (-32603, "You hit your spend cap for this month.", Billing, false),
         (
             -32603,
-            "You've hit your usage limit. Try again at 5:00 PM.",
+            "You\u{2019}ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try \
+             again at 1:35 PM.",
             QuotaExhausted,
             false,
         ),
@@ -732,6 +727,12 @@ fn the_failures_of_the_adapter_by_their_code_and_words() {
             ConfigError,
             false,
         ),
+        (
+            -32603,
+            "The model `gpt-fake` does not exist or you do not have access to it.",
+            ConfigError,
+            false,
+        ),
         (-32603, "unexpected status 402", Unknown, false),
         (-32603, "unexpected status", Unknown, false),
         (-32603, "something else went wrong", Unknown, false),
@@ -752,6 +753,18 @@ fn the_failures_of_the_adapter_by_their_code_and_words() {
     }
     // The words decide only after the code.
     assert_eq!(classify(-32000, "unexpected status 429", None).kind, AuthRequired);
+}
+
+/// A request that failed inside the adapter is "Internal error" with codex's words in `data.details`.
+#[test]
+fn the_words_of_a_request_that_failed_inside_the_adapter_are_its_details() {
+    let details = "error creating thread: Fatal error: Failed to initialize session: required MCP servers failed to \
+                   initialize: tools: No such file or directory (os error 2)";
+    let failure = classify(-32603, "Internal error", Some(&json!({ "details": details })));
+    assert_eq!(failure.kind, ToolFailure, "{}", failure.raw);
+    assert!(failure.raw.contains("tools: No such file"), "{}", failure.raw);
+    let failure = classify(-32603, "Internal error", Some(&json!({ "details": "boom" })));
+    assert_eq!((failure.kind, failure.text.as_deref()), (Unknown, Some("boom")));
 }
 
 #[test]
@@ -799,8 +812,8 @@ fn the_driver_takes_the_codex_profile_and_refuses_the_keys_of_the_native_one() {
     let built = (crate::CODEX.new)(&setup).unwrap();
     assert_eq!(built.harness(), "codex");
     assert_eq!(built.capabilities(&ProcessPart(Value::Null)).min_version, (2, 9, 0));
-    // The build still drives codex natively: its `[harness.codex]` keeps the keys of the native driver.
-    assert!(!crate::profiled("codex") && crate::profiled("claude"));
+    // Both adapters of the build are profiled: their `[harness.<name>]` takes the keys of an ACP harness.
+    assert!(crate::profiled("codex") && crate::profiled("claude"));
 }
 
 #[test]

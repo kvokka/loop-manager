@@ -11,9 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// A `mise` first on the `PATH` of the daemon under `dir` that finds the claude adapter and its `node` where the real
-/// mise installed them: the daemon resolves claude as under a service manager, which the test's own `HOME` would
-/// hide from the real mise.
+/// A `mise` first on the `PATH` of the daemon under `dir` that finds the claude and codex adapters and their `node`
+/// where the real mise installed them: the daemon resolves them as under a service manager, which the test's own
+/// `HOME` would hide from the real mise.
 pub(super) fn mise(dir: &Path) {
     let which = |tool: &str| {
         let out = common::program("mise").args(["which", tool]).output().unwrap();
@@ -24,11 +24,9 @@ pub(super) fn mise(dir: &Path) {
         );
         String::from_utf8(out.stdout).unwrap().trim().to_owned()
     };
-    let (adapter, node) = (which("claude-agent-acp"), which("node"));
-    let script = format!(
-        "#!/bin/sh\ncase \"$1 $2\" in\n'which claude-agent-acp') echo '{adapter}' ;;\n'which node') echo '{node}' ;;\n\
-         *) exit 1 ;;\nesac\n"
-    );
+    let found =
+        ["claude-agent-acp", "codex-acp", "node"].map(|tool| format!("'which {tool}') echo '{}' ;;\n", which(tool)));
+    let script = format!("#!/bin/sh\ncase \"$1 $2\" in\n{}*) exit 1 ;;\nesac\n", found.concat());
     let path = dir.join("path/mise");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, script).unwrap();
@@ -90,7 +88,7 @@ async fn the_history_of_a_run_replays_and_follows_a_running_tool() {
         Reply::Text("Done é.".into()),
     ])])
     .await;
-    super::chat::history(&daemon(&provider).await).await;
+    super::chat::history(&daemon(&provider).await, "Bash").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -298,7 +296,7 @@ fn of_run(run: &str, dir: &Path) -> Vec<(i32, String)> {
 }
 
 /// The processes whose environment holds `LOOP_MANAGER_INSTANCE=<instance>`.
-fn of_instance(instance: &str) -> Vec<i32> {
+pub(super) fn of_instance(instance: &str) -> Vec<i32> {
     let needle = format!("{}={instance}", loop_manager_core::orphans::INSTANCE_ENV);
     let entries = fs::read_dir("/proc").unwrap().flatten();
     entries
@@ -314,7 +312,7 @@ fn of_instance(instance: &str) -> Vec<i32> {
 }
 
 /// The instance marker in the environment of process `pid`.
-fn instance_of(pid: i32) -> String {
+pub(super) fn instance_of(pid: i32) -> String {
     let env = fs::read(format!("/proc/{pid}/environ")).unwrap();
     let prefix = format!("{}=", loop_manager_core::orphans::INSTANCE_ENV);
     let env = String::from_utf8_lossy(&env);

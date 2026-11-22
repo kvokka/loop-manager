@@ -600,8 +600,7 @@ const MODELS: &[(&str, &str)] = &[
 /// Whether the driver has a profile for harness `name`: then the harness is an adapter of the build, and its
 /// `[harness.<name>]` takes the keys of an ACP harness.
 pub fn profiled(name: &str) -> bool {
-    // The build still lists the native codex driver (`loop-manager-codex`), whose `[harness.codex]` takes `binary`.
-    Profile::own(name).is_some() && name != "codex"
+    Profile::own(name).is_some()
 }
 
 /// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, or that

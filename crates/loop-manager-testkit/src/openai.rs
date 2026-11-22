@@ -69,7 +69,8 @@ pub struct Request {
 }
 
 /// The fake on a free port of 127.0.0.1, serving until dropped. Model requests (`POST …/responses`) take the
-/// plan's replies in order, the last one repeating; every other path gets 404, as the lab fake answered.
+/// plan's replies in order, the last one repeating; a session title request gets a title outside the plan; every
+/// other path gets 404, as the lab fake answered.
 pub struct Provider {
     addr: SocketAddr,
     requests: Arc<Mutex<Vec<Request>>>,
@@ -95,6 +96,10 @@ impl Provider {
                     return error(StatusCode::NOT_FOUND, json!({ "message": "not found" }), &[]);
                 }
                 let body: Value = serde_json::from_slice(&body).unwrap_or_default();
+                if title(&body) {
+                    let text = json!({ "title": "Fake session" }).to_string();
+                    return answer(0, Reply::Text(text), &body).await;
+                }
                 let n = {
                     let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
                     let n = seen.len() + 1;
@@ -126,6 +131,16 @@ impl Drop for Provider {
     fn drop(&mut self) {
         self.server.abort();
     }
+}
+
+/// The request of `codex-acp` for a session title: one request of its own after the first turn of a new session, no
+/// tools, its last message the instruction to title the conversation (docs/harness-updates.md). It gets a title and
+/// is not a model request of the plan.
+fn title(body: &Value) -> bool {
+    let mut input = body["input"].as_array().into_iter().flatten();
+    let last = input.rfind(|i| i["role"] == "user");
+    let text = last.map(|i| &i["content"][0]["text"]).and_then(Value::as_str);
+    body.get("tools").is_none() && text.is_some_and(|t| t.starts_with("Your task is to generate a very short title"))
 }
 
 async fn answer(n: usize, reply: Reply, body: &Value) -> Response {

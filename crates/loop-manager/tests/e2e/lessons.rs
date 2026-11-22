@@ -1,6 +1,7 @@
-//! The addon `addons/lessons` of this repository on a real daemon, with the real `claude` on the fake Anthropic API and
-//! the real `codex app-server` on the fake Responses API: once the agent declared its outcome, the same session is asked
-//! for its lessons, and a useful answer goes on the run's bead once, an empty one nowhere (addons/lessons/README.md).
+//! The addon `addons/lessons` of this repository on a real daemon, with the real claude adapter on the fake Anthropic
+//! API and the real codex adapter on the fake Responses API: once the agent declared its outcome, the same session is
+//! asked for its lessons, and a useful answer goes on the run's bead once, an empty one nowhere
+//! (addons/lessons/README.md).
 
 use crate::common::{self, Daemon};
 use loop_manager_testkit::{anthropic, openai};

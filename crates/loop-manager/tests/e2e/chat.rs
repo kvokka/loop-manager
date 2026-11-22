@@ -1,7 +1,8 @@
-//! A CLI reader arrives while a tool is running, reads its call, then releases it and receives its result: through
-//! the chat of a session, or through the run's history for a harness whose driver keeps no transcript.
+//! A CLI reader arrives while a tool is running, reads its call, then releases it and receives its result, through
+//! the run's history.
 
 use crate::common::{self, Daemon};
+use base64::Engine;
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Stdio, time::Duration};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -46,56 +47,9 @@ agent = "dev"
     (run, cwd)
 }
 
-pub(super) async fn check(d: &Daemon, tool: &str) {
-    // A later connection starts at the second session.
-    let (run, cwd) = started(d).await;
-    let cli = || {
-        let mut cli = tokio::process::Command::from(common::loop_manager());
-        cli.kill_on_drop(true)
-            .args(["run", "watch", &run, "--chat"])
-            .env("LOOP_MANAGER_SOCKET", d.socket());
-        cli
-    };
-    let mut watch = cli().arg("--json").stdout(Stdio::piped()).spawn().unwrap();
-    let mut lines = BufReader::new(watch.stdout.take().unwrap()).lines();
-    let mut entries = Vec::new();
-    tokio::time::timeout(common::WAIT, async {
-        while let Some(line) = lines.next_line().await.unwrap() {
-            let entry: Value = serde_json::from_str(&line).unwrap();
-            if entry["type"] == "tool_call" {
-                assert_eq!(entry["name"], tool);
-                fs::write(cwd.join("chat-release"), "").unwrap();
-            }
-            entries.push(entry);
-        }
-    })
-    .await
-    .expect("chat followed the tool and ended");
-    assert!(watch.wait().await.unwrap().success(), "{entries:?}");
-    let kinds: Vec<_> = entries.iter().map(|e| e["type"].as_str().unwrap()).collect();
-    assert_eq!(
-        kinds,
-        ["user", "tool_call", "tool_result", "assistant"].repeat(2),
-        "{entries:?}"
-    );
-    for [user, call, result, assistant] in entries.as_chunks::<4>().0 {
-        assert!(user["text"].as_str().unwrap().contains("Build web."));
-        assert_eq!(call["id"], result["id"]);
-        assert!(result["output"].to_string().contains("accepted"));
-        assert_eq!(assistant["text"], "Done é.");
-    }
-
-    let replay = cli().output().await.unwrap();
-    assert!(replay.status.success(), "{}", String::from_utf8_lossy(&replay.stderr));
-    let text = String::from_utf8(replay.stdout).unwrap();
-    for label in ["User\n", "Tool result [", "Assistant\nDone é."] {
-        assert_eq!(text.matches(label).count(), 1, "{text}");
-    }
-}
-
-/// [`check`] on the run's history: a reader of `run watch --history` arriving while the tool runs reads its call,
-/// releases it, and follows both sessions to the run's end; a replay prints the same records.
-pub(super) async fn history(d: &Daemon) {
+/// A reader of `run watch --history` arriving while the tool runs reads its call (of the harness's `tool`), releases
+/// it, and follows both sessions to the run's end; a replay prints the same records.
+pub(super) async fn history(d: &Daemon, tool: &str) {
     let (run, cwd) = started(d).await;
     let cli = || {
         let mut cli = tokio::process::Command::from(common::loop_manager());
@@ -131,17 +85,26 @@ pub(super) async fn history(d: &Daemon) {
             let found = records.iter().filter(|r| r["step"] == step && r["kind"] == kind);
             found.map(|r| &r["update"]).collect()
         };
-        assert_eq!(of("user")[0]["content"][0]["text"], "Build web.", "{records:#?}");
+        // A content block, or a list of them.
+        let user = &of("user")[0]["content"];
+        assert_eq!(user.get(0).unwrap_or(user)["text"], "Build web.", "{records:#?}");
         let calls = of("tool_call");
-        assert_eq!(calls[0]["name"], "Bash", "{records:#?}");
+        assert_eq!(calls[0]["name"], tool, "{records:#?}");
         assert!(
             calls.iter().all(|c| c["toolCallId"] == calls[0]["toolCallId"]),
             "{records:#?}"
         );
         assert_eq!(calls.last().unwrap()["status"], "completed", "{records:#?}");
-        // `accepted`, the finisher's answer, in base64.
-        let output = of("terminal").iter().any(|t| t["output"]["data"] == "YWNjZXB0ZWQ=");
-        assert!(output, "{records:#?}");
+        // `accepted`, the finisher's answer: in a chunk of the command's output, or in base64 in its terminal's.
+        let output = |r: &&Value| match r["text"].as_str() {
+            Some(text) => Some(text.to_owned()),
+            None => (r["output"]["data"].as_str())
+                .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
+                .map(|b| String::from_utf8_lossy(&b).into_owned()),
+        };
+        let outputs = [of("terminal"), of("tool_output")].concat();
+        let accepted = outputs.iter().filter_map(output).any(|o| o.trim_end() == "accepted");
+        assert!(accepted, "{records:#?}");
         assert_eq!(of("assistant")[0]["content"]["text"], "Done é.", "{records:#?}");
     }
     assert_eq!(records.last().unwrap()["state"], "passed");

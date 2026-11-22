@@ -61,7 +61,7 @@ pub(crate) fn resolve(adapter: &Adapter, harness: &config::Harness) -> (PathBuf,
 }
 
 /// The adapters of this build: a harness is a row here, and nothing else in the root knows its name.
-const ADAPTERS: &[&Adapter] = &[&loop_manager_acp::CLAUDE, &loop_manager_codex::ADAPTER];
+const ADAPTERS: &[&Adapter] = &[&loop_manager_acp::CLAUDE, &loop_manager_acp::CODEX];
 
 /// The adapter of harness `name`.
 pub(crate) fn adapter(name: &str) -> Option<&'static Adapter> {
@@ -114,7 +114,7 @@ const NO_BINARY: &str = "`binary`: an ACP harness names its agent executable by 
 
 /// What is wrong with `[harness.<name>]`: settings its adapter does not take, or, with no adapter, no ACP agent
 /// `command` or a key the ACP driver does not take.
-fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option<String> {
+pub(crate) fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option<String> {
     let Some(adapter) = adapter(name) else {
         if !harness.options.contains_key("command") {
             let known = ADAPTERS.iter().map(|a| a.name).collect::<Vec<_>>().join(", ");

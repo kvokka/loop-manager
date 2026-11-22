@@ -12,7 +12,7 @@ pub(crate) fn script(path: &Path, body: &str) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// A fake claude adapter at `path` printing `version` for `--version`, else the `acp-agent` fixture.
+/// A fake adapter at `path` printing `version` for `--version`, else the `acp-agent` fixture.
 pub(crate) fn adapter(path: &Path, version: &str) {
     let agent = Path::new(common::EXE).with_file_name("acp-agent");
     let body = format!(
@@ -22,7 +22,8 @@ pub(crate) fn adapter(path: &Path, version: &str) {
     script(path, &body);
 }
 
-/// The XDG tree of the daemon tests with claude at an explicit path and codex where a fake mise says it is.
+/// The XDG tree of the daemon tests with the claude adapter at an explicit path and the codex one where a fake mise
+/// says it is.
 pub(crate) fn tree(extra: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
@@ -36,11 +37,11 @@ pub(crate) fn tree(extra: &str) -> tempfile::TempDir {
     );
     fs::write(d.join("config/loop-manager/config.toml"), config).unwrap();
     adapter(&d.join("tools/claude"), "0.109.1");
-    script(&d.join("tools/codex"), "echo 'codex-cli 0.171.0'");
-    let codex = d.join("tools/codex").display().to_string();
+    adapter(&d.join("tools/codex-acp"), "@agentclientprotocol/codex-acp 2.9.0");
+    let codex = d.join("tools/codex-acp").display().to_string();
     script(
         &d.join("bin/mise"),
-        &format!("[ \"$1 $2\" = 'which codex' ] && echo {codex} && exit 0\nexit 1"),
+        &format!("[ \"$1 $2\" = 'which codex-acp' ] && echo {codex} && exit 0\nexit 1"),
     );
     dir
 }
@@ -114,9 +115,9 @@ fn the_claude_adapter_from_mise_runs_on_the_node_of_mise() {
     let mise = |node: bool| {
         let mut body = format!(
             "[ \"$1 $2\" = 'which claude-agent-acp' ] && echo {} && exit 0\n\
-             [ \"$1 $2\" = 'which codex' ] && echo {} && exit 0\n",
+             [ \"$1 $2\" = 'which codex-acp' ] && echo {} && exit 0\n",
             d.join("tools/claude-agent-acp").display(),
-            d.join("tools/codex").display()
+            d.join("tools/codex-acp").display()
         );
         if node {
             body += &format!(
@@ -158,9 +159,11 @@ fn harnesses_resolve_from_the_config_and_from_mise_and_a_missing_one_fails() {
     assert!(probe == "ok" && detail.contains("ACP protocol 2"), "{found:?}");
     let (codex, path) = level(&found, "codex");
     assert!(
-        codex == "ok" && path.ends_with("tools/codex `codex-cli 0.171.0` (from mise)"),
+        codex == "ok" && path.ends_with("tools/codex-acp `@agentclientprotocol/codex-acp 2.9.0` (from mise)"),
         "{found:?}"
     );
+    let (probe, detail) = level(&found, "codex acp");
+    assert!(probe == "ok" && detail.contains("ACP protocol 2"), "{found:?}");
     assert_eq!(level(&found, "claude login").0, "warning", "no login in the fake home");
     assert_eq!(level(&found, "codex login").0, "warning", "no login in the fake home");
     assert_eq!(level(&found, "state").0, "ok");
@@ -173,11 +176,15 @@ fn harnesses_resolve_from_the_config_and_from_mise_and_a_missing_one_fails() {
         "model_provider = \"proxy\"\n[model_providers.proxy]\nenv_key = \"PATH\"\n",
     )
     .unwrap();
-    fs::remove_file(dir.path().join("tools/codex")).unwrap();
+    fs::remove_file(dir.path().join("tools/codex-acp")).unwrap();
     let (passed, found) = doctor(dir.path());
     assert!(!passed, "a missing harness binary is an error");
     assert_eq!(level(&found, "codex"), ("error", level(&found, "codex").1));
     assert!(level(&found, "codex").1.ends_with("not found"), "{found:?}");
+    assert!(
+        found.iter().all(|f| f.0 != "codex acp"),
+        "no probe of a missing adapter: {found:?}"
+    );
     assert_eq!(level(&found, "claude login").0, "ok");
     assert_eq!(level(&found, "codex login"), ("ok", "PATH is set"));
 

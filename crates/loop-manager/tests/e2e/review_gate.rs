@@ -1,5 +1,5 @@
 //! Demo 3 (`demos/3-review-gate`) without a model and without GitHub: its pack, its project, the scripts of its steps
-//! and its bridge against a real `loop-manager daemon`, the real `codex` on fake Responses APIs, and a fake `gh`
+//! and its bridge against a real `loop-manager daemon`, the real codex adapter on fake Responses APIs, and a fake `gh`
 //! (`fake_gh.sh`) over local remotes. The planner files one bead for the backend, whose coder adds a file, so a
 //! feature has a pull request in the backend and one in the root.
 
@@ -55,7 +55,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// The demo's pack and project under `dir/demo`, each agent that runs on its fake, the repositories as clones of bare
-/// remotes in `dir/remotes`, and the fake `gh` with `loop-manager` in `dir/path`.
+/// remotes in `dir/remotes`, and the fake `gh` with `loop-manager` and a `mise` finding the adapters in `dir/path`.
 fn lay_out(dir: &Path, fakes: &[(&str, &Provider)]) {
     let (src, demo) = (demo_dir(), dir.join("demo"));
     fs::create_dir_all(demo.join("root")).unwrap();
@@ -104,6 +104,7 @@ fn lay_out(dir: &Path, fakes: &[(&str, &Provider)]) {
     fs::write(tools.join("gh"), include_str!("fake_gh.sh")).unwrap();
     run(Command::new("chmod").arg("+x").arg(tools.join("gh")));
     std::os::unix::fs::symlink(common::EXE, tools.join("loop-manager")).unwrap();
+    super::claude::mise(dir);
 }
 
 /// The PATH of the daemon (`common::command`): the test's tools first.
