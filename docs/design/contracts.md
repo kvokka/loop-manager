@@ -482,7 +482,10 @@ Success traps are the adapter's: claude `subtype:"success"` with `is_error:true`
 
 `account(process)` returns the account id the gates use (7): a stable hash of the credential source of the
 process part, never the credential itself; an `env` reference counts as written (`${NAME}`), so the id says where
-the key comes from, not what it is.
+the key comes from, not what it is. For an [ACP harness of the config](adapters.md#acp-v2-harnesses) the hash takes
+the `command`, the names of the `env` keys and their `${NAME}` references, and no literal value: two agents of one
+ACP harness whose keys differ only by a literal value share an account and its gates, so a key of its own account
+is given as a reference.
 
 ### 4.6 Harness specifics the contract relies on
 

@@ -30,6 +30,8 @@ enum Msg {
     ClearDeadline {
         id: &'static str,
     },
+    /// Keeps a history record, then one in a unit that fails.
+    RecordThenFailAUnit,
 }
 
 #[derive(Clone, Default)]
@@ -46,6 +48,8 @@ impl Log {
 
 struct TestHandler {
     fired: Log,
+    /// The kinds of the history records handed over after commit.
+    committed: Log,
 }
 
 impl Handler for TestHandler {
@@ -65,6 +69,21 @@ impl Handler for TestHandler {
             }
             Msg::Deadline { id, at_ms } => tx.set_deadline(id, at_ms).map(|()| Value::Null),
             Msg::ClearDeadline { id } => tx.clear_deadline(id).map(|()| Value::Null),
+            Msg::RecordThenFailAUnit => {
+                tx.record("run_1", 1, "s", "kept", json!({}));
+                let failed = tx.unit(|tx| {
+                    tx.record("run_1", 1, "s", "undone", json!({}));
+                    Err::<(), _>(Error::Rejected("unit".into()))
+                });
+                assert!(failed.is_err());
+                Ok(Value::Null)
+            }
+        }
+    }
+
+    fn committed(&mut self, records: Vec<crate::history::Record>) {
+        for record in records {
+            self.committed.push(record.kind.to_owned(), record.ts_ms);
         }
     }
 
@@ -137,6 +156,7 @@ struct Rig {
     task: tokio::task::JoinHandle<Result<(), Error>>,
     fired: Log,
     calls: Log,
+    committed: Log,
     clock: Clock,
 }
 
@@ -145,7 +165,7 @@ fn rig(db: &Path, clock: Clock, fail_first: usize, hold: Duration) -> Rig {
 }
 
 fn rig_with(db: &Path, clock: Clock, fail_first: usize, hold: Duration, journal: Journal) -> Rig {
-    let (fired, calls) = (Log::default(), Log::default());
+    let (fired, calls, committed) = (Log::default(), Log::default(), Log::default());
     let executor = TestExecutor {
         clock,
         db: db.to_owned(),
@@ -156,7 +176,10 @@ fn rig_with(db: &Path, clock: Clock, fail_first: usize, hold: Duration, journal:
     let (core, task) = start(
         open(db).unwrap(),
         clock,
-        TestHandler { fired: fired.clone() },
+        TestHandler {
+            fired: fired.clone(),
+            committed: committed.clone(),
+        },
         |_| executor,
         journal,
     );
@@ -165,6 +188,7 @@ fn rig_with(db: &Path, clock: Clock, fail_first: usize, hold: Duration, journal:
         task,
         fired,
         calls,
+        committed,
         clock,
     }
 }
@@ -189,6 +213,14 @@ fn count(db: &Path, table: &str) -> i64 {
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
         .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_history_record_of_a_unit_rolled_back_is_not_handed_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(&dir.path().join("state.db"), Clock::managed(T0), 0, Duration::ZERO);
+    r.core.send(None, Msg::RecordThenFailAUnit).await.unwrap();
+    assert_eq!(r.committed.take(), [("kept".to_owned(), T0)]);
 }
 
 #[tokio::test(start_paused = true)]

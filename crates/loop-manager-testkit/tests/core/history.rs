@@ -210,3 +210,25 @@ async fn the_output_of_an_exec_step_is_in_the_history_while_its_command_still_ru
     let end = history(&w, &run).await.pop().unwrap();
     assert_eq!(end["state"], "cancelled", "{end}");
 }
+
+/// `[history] keep_days` at the periodic resync: the file of an ended run older than that goes; 0 keeps it.
+#[tokio::test(start_paused = true)]
+async fn the_resync_removes_ended_histories_past_keep_days_and_zero_keeps_them() {
+    for (days, kept) in [(1, false), (0, true)] {
+        let config = format!(
+            "projects = [\"shop\"]\nbuiltin = {{ default-policy = {{ enabled = false }} }}\n[harness.scripted]\n\
+             [history]\nkeep_days = {days}\n"
+        );
+        let w = world(&[("config.toml", &config)]);
+        let path = w.dir.path().join("history/run_old.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"n\":1,\"kind\":\"run\"}\n").unwrap();
+        let old = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_modified(old).unwrap();
+        // The resync comes 5 min after the start.
+        tokio::time::sleep(Duration::from_secs(301)).await;
+        w.history.flush().await;
+        assert_eq!(path.exists(), kept, "keep_days = {days}");
+    }
+}
