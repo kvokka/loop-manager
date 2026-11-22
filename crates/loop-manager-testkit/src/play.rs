@@ -49,6 +49,20 @@ impl ScriptedDriver {
                     Step::Wait(d) => tokio::time::sleep(d).await,
                     Step::Await(signal) => signal.notified().await,
                     Step::Emit(event) => driver.emit(&instance, Some(&session), event),
+                    Step::Insert => {
+                        let inserted = {
+                            let mut state = driver.lock();
+                            let held = session_id(&session).ok().and_then(|id| state.sessions.get_mut(&id));
+                            held.and_then(|s| {
+                                let key = s.held.pop_front()?;
+                                s.prompts.push(key);
+                                Some(key)
+                            })
+                        };
+                        if let Some(key) = inserted {
+                            driver.emit(&instance, Some(&session), Normalized::PromptAcked { key });
+                        }
+                    }
                     Step::Exit { code, signal } => {
                         driver.exit(&instance, code, signal);
                         return;

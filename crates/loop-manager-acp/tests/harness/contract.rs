@@ -62,10 +62,14 @@ impl Live {
             .unwrap();
     }
 
-    /// Events until `until` holds for one, or `wait` passes; the matching event, if any.
+    /// Events until `until` holds for one, or `wait` passes; the matching event, if any. A permission request is
+    /// declined, as the core's policy does under the LM.
     async fn until(&mut self, wait: Duration, until: impl Fn(&Normalized) -> bool) -> Option<Normalized> {
         let deadline = tokio::time::Instant::now() + wait;
         while let Ok(Some(event)) = tokio::time::timeout_at(deadline, self.events.recv()).await {
+            if let Normalized::PermissionRequested { id, .. } = &event.event {
+                self.driver.answer_permission(&self.instance, id, None).await;
+            }
             self.seen.push(event.event.clone());
             if until(&event.event) {
                 return Some(event.event);
@@ -273,8 +277,8 @@ async fn s11_eof_on_stdin_in_a_turn_ends_the_adapter_and_crashes_the_turn() {
     );
 }
 
-/// A silent provider gives no turn end and no failure: the core's watchdog owns the stall (docs/design/invariants.md);
-/// an interrupt ends the turn as cancelled.
+/// A silent provider gives no turn end and no failure: the core's watchdog owns the stall (docs/design/invariants.md).
+/// A prompt sent in that turn is held, never acknowledged; an interrupt drops it and ends the turn as cancelled.
 #[tokio::test]
 async fn s12_a_silent_provider_ends_nothing_until_an_interrupt_cancels_the_turn() {
     let dir = tempfile::tempdir().unwrap();
@@ -284,14 +288,25 @@ async fn s12_a_silent_provider_ends_nothing_until_an_interrupt_cancels_the_turn(
         .await;
     assert_eq!(ended, None);
     assert!(live.failures().is_empty(), "{:?}", live.seen);
+    let held = PromptKey::new("r1", 1, 2);
+    live.prompt(held, "And this too.").await;
+    let acked = live
+        .until(Duration::from_secs(2), |e| *e == Normalized::PromptAcked { key: held })
+        .await;
+    assert_eq!(acked, None, "{:?}", live.seen);
     live.driver.cancel_turn(&live.instance, &live.session).await.unwrap();
     assert_eq!(live.ended().await, StopReason::Cancelled, "{:?}", live.seen);
+    let dropped = Normalized::PromptDropped { key: held };
+    if !live.seen.contains(&dropped) {
+        live.until(Duration::from_secs(10), |e| *e == dropped).await;
+    }
+    assert!(live.seen.contains(&dropped), "{:?}", live.seen);
     assert!(live.failures().is_empty(), "{:?}", live.seen);
     live.stop().await;
 }
 
-/// A request the config's mode does not allow (`default`) comes to the driver as `session/request_permission`, which
-/// it declines: nothing waits for a person, the model gets the denial and the turn completes.
+/// A request the config's mode does not allow (`default`) comes to the driver as `session/request_permission`, told
+/// as `permission.requested` and declined: the model gets the denial and the turn completes.
 #[tokio::test]
 async fn s13_a_request_the_config_does_not_allow_is_declined_and_the_turn_completes() {
     let dir = tempfile::tempdir().unwrap();
@@ -300,16 +315,25 @@ async fn s13_a_request_the_config_does_not_allow_is_declined_and_the_turn_comple
     assert_eq!(live.ended().await, StopReason::Completed, "{:?}", live.seen);
     assert!(live.failures().is_empty(), "{:?}", live.seen);
     assert!(!live.rig.join("denied").exists());
-    // The tool of a denial is the title of the request: the adapter's title of the command.
+    // The tool of a request is its title: the adapter's title of the command; the agent offers a rejection.
     let denied: Vec<_> = live
         .seen
         .iter()
         .filter_map(|e| match e {
-            Normalized::PermissionDenied { tool, tool_use_id, .. } => Some((tool.as_str(), tool_use_id.is_some())),
+            Normalized::PermissionRequested {
+                tool,
+                tool_use_id,
+                options,
+                ..
+            } => Some((
+                tool.as_str(),
+                tool_use_id.is_some(),
+                options.iter().any(|o| o.kind == "reject_once"),
+            )),
             _ => None,
         })
         .collect();
-    assert_eq!(denied, [("touch denied", true)], "{:?}", live.seen);
+    assert_eq!(denied, [("touch denied", true, true)], "{:?}", live.seen);
     live.stop().await;
 }
 

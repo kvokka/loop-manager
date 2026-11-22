@@ -407,6 +407,11 @@ impl RunHandler {
             let payload = json!({ "op": "stop", "harness": harness, "handle": handle, "session": session });
             tx.effect(&row.id, &format!("stop:{}", row.attempt), &payload)?;
         }
+        // No request of the attempt waits for an answer any more.
+        tx.sql().execute(
+            "DELETE FROM permissions WHERE run = ?1 AND attempt = ?2",
+            params![row.id, row.attempt],
+        )?;
         Self::release_services(tx, &row.id, row.attempt)?;
         match instance {
             Some(id) => Self::release(tx, &id),

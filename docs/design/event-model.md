@@ -90,7 +90,9 @@ all of them share.
   | `attempt` | an attempt starts | `attempt_kind` (`new_session`, `resume`), `harness` (`exec`, `drain`, `formula` and `await` for those steps), `session` (the session it resumes, else `null`) |
   | `attempt_end` | an attempt ends | `failure` (contracts 1.3), `null` when it did not fail |
   | `prompt` | the core decides to send a prompt ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager), `text` |
-  | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`) |
+  | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`, `withdrawn`); `by` with `withdrawn` (`harness`: the harness dropped it before it took it) |
+  | `permission` | the harness asks for a permission | `id`, `tool`, `tool_use_id`, `input`, `options` |
+  | `permission_answer` | a permission request is answered | `id`, `by` (`policy`), `option` (absent: declined) |
   | `exec_output` | the command of an exec step, or a step's check script, writes to its stdout or stderr: written by the runner of the command as the output comes, not by a transaction | `stream` (`stdout`, `stderr`), `text` (the output, invalid UTF-8 replaced), `check: true` for a check script's |
   | `outcome` | the finisher's outcome is accepted, or a step without a session (exec, drain, formula, await) has its outcome | `result`, `summary`, `data` |
   | `control` | an operator takes the run over, or hands it back ([contracts 6.1](contracts.md#61-states)) | `control` (`manual`, `lm`) |

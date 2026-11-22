@@ -39,6 +39,7 @@ mod mcp;
 mod model_gate;
 mod old_instances;
 mod openai;
+mod permissions;
 mod recovery;
 mod restart_decisions;
 mod returns;

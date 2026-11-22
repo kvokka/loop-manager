@@ -157,19 +157,20 @@ async fn a_failure_before_the_ack_ends_the_attempt_at_once() {
     );
 }
 
-/// A denial is told as `run.permission_denied` with what the adapter reported, and nothing waits on it: the turn goes
-/// on to its end (decision 124).
+/// A permission request of a run under the LM is declined at once and told as `run.permission_denied` with what the
+/// adapter reported; nothing waits on it: the turn goes on to its end (decision 124).
 #[tokio::test(start_paused = true)]
-async fn a_denied_permission_is_told_and_the_turn_goes_on() {
+async fn a_permission_request_is_declined_and_told_and_the_turn_goes_on() {
     let w = world(&[]);
     let mut steps = hollow_turn();
-    let denied = Normalized::PermissionDenied {
+    let requested = Normalized::PermissionRequested {
+        id: "p1".into(),
         tool: "Bash".into(),
         tool_use_id: Some("toolu_1".into()),
         input: json!({ "command": "touch a" }),
-        reason: Some("mode".into()),
+        options: Vec::new(),
     };
-    steps.insert(1, Step::Emit(denied));
+    steps.insert(1, Step::Emit(requested));
     w.driver.script(steps);
     let run = w.create().await;
     let events = w.events(&run, Duration::from_millis(200)).await;
@@ -180,9 +181,10 @@ async fn a_denied_permission_is_told_and_the_turn_goes_on() {
             &json!("Bash"),
             &json!("toolu_1"),
             &json!({ "command": "touch a" }),
-            &json!("mode")
+            &json!("loop-manager answers no permission request of a run")
         )
     );
     assert_eq!(told["run"]["id"], run.as_str());
+    assert_eq!(w.driver.permission_answers(), [("p1".to_owned(), None)]);
     assert_eq!(last(&events, "run.failed")["class"], "hollow_done");
 }

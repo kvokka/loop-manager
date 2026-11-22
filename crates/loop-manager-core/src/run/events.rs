@@ -132,6 +132,19 @@ impl RunHandler {
     }
 
     fn attempt_event(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, event: Normalized) -> Result<(), Error> {
+        // In every state of the run: a background tool may ask while it is `finishing` (contracts 4.3).
+        if let Normalized::PermissionRequested {
+            id,
+            tool,
+            tool_use_id,
+            input,
+            options,
+        } = &event
+        {
+            let request = json!({ "id": id, "tool": tool, "tool_use_id": tool_use_id, "input": input,
+                "options": options });
+            Self::permission_requested(tx, run, attempt, id, request)?;
+        }
         let Some(mut row) = Self::current(tx, run, attempt)? else {
             return Ok(());
         };
@@ -150,8 +163,10 @@ impl RunHandler {
             }
             tx.set_deadline(&row.deadline("silence"), tx.now_ms().saturating_add(ms))
         };
-        if let Normalized::PromptAcked { key } = &event {
-            super::prompts::advance(tx, &row.id, attempt, Some(*key), "acked")?;
+        match &event {
+            Normalized::PromptAcked { key } => super::prompts::advance(tx, &row.id, attempt, *key, "acked")?,
+            Normalized::PromptDropped { key } => super::prompts::withdraw(tx, &row.id, attempt, *key, "harness")?,
+            _ => {}
         }
         if let Normalized::Usage {
             input_tokens,
@@ -179,21 +194,6 @@ impl RunHandler {
             Normalized::Exited { .. } => {
                 self.attempt_failed(tx, row, Failure::new(FailureKind::HarnessCrash, Source::Adapter))
             }
-            // Told in every live state: nothing the adapter reports is dropped (contracts 4.3).
-            Normalized::PermissionDenied {
-                tool,
-                tool_use_id,
-                input,
-                reason,
-            } => {
-                let data = json!({ "run": row.view(), "tool": tool, "tool_use_id": tool_use_id, "input": input,
-                    "reason": reason });
-                row.emit(tx, "run.permission_denied", data)?;
-                match row.state.as_str() {
-                    "running" => silence(tx, &row, w.silence_ms),
-                    _ => Ok(()),
-                }
-            }
             _ if row.state != "running" => Ok(()),
             Normalized::Activity { tool_running: true } => silence(tx, &row, w.tool_silence_ms),
             // The harness retries a request by itself: its announced pause is not silence (docs/design/adapters.md).
@@ -209,7 +209,7 @@ impl RunHandler {
                 silence(tx, &row, w.silence_ms.saturating_add(delay))
             }
             Normalized::TurnEnded { stop_reason } => {
-                super::prompts::advance(tx, &row.id, attempt, None, "settled")?;
+                super::prompts::settle(tx, &row.id, attempt)?;
                 // `turn_ended`: 0 while no turn ended, else how it ended (read back in `turn_settled`).
                 let ended: u8 = match stop_reason {
                     StopReason::Completed => 1,
@@ -235,6 +235,41 @@ impl RunHandler {
             } => self.turn_settled(tx, row, attempt),
             _ => silence(tx, &row, w.silence_ms),
         }
+    }
+
+    /// The permission request `request` (`{id, tool, tool_use_id, input, options}`) of the session of `attempt`: the
+    /// policy answers it at once and declines it (docs/design/config.md, Permissions); the denial is told as
+    /// `run.permission_denied`. A request already recorded is no news.
+    fn permission_requested(tx: &mut Tx<'_>, run: &str, attempt: u32, id: &str, request: Value) -> Result<(), Error> {
+        let answer = json!({ "by": "policy", "option": null });
+        let added = tx.sql().execute(
+            "INSERT OR IGNORE INTO permissions (run, attempt, id, body, answer) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![run, attempt, id, request.to_string(), answer.to_string()],
+        )?;
+        if added == 0 {
+            return Ok(());
+        }
+        let row = Row::load(tx, run)?;
+        row.record(tx, "permission", request.clone());
+        row.record(
+            tx,
+            "permission_answer",
+            json!({ "id": id, "by": "policy", "option": null }),
+        );
+        let (harness, handle): (String, Option<String>) = tx.sql().query_row(
+            "SELECT harness, handle FROM attempts WHERE run = ?1 AND n = ?2",
+            params![run, attempt],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let handle: Value = handle.and_then(|h| serde_json::from_str(&h).ok()).unwrap_or_default();
+        // A queue of its own: the answer does not wait behind a launch or a stop of the run.
+        let payload = json!({ "op": "permit", "run": run, "attempt": attempt, "harness": harness, "handle": handle,
+            "request": id, "option": null });
+        tx.effect(&format!("permit:{run}"), &format!("{attempt}:{id}"), &payload)?;
+        let data = json!({ "run": row.view(), "tool": request["tool"], "tool_use_id": request["tool_use_id"],
+            "input": request["input"], "reason": "loop-manager answers no permission request of a run" });
+        row.emit(tx, "run.permission_denied", data)?;
+        Ok(())
     }
 
     /// Idle without background: a turn that ended settles; one that has not ended yet is no news.

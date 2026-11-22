@@ -34,7 +34,8 @@ pub use step::Step;
 pub use tracker::MemoryTracker;
 
 /// Plays one queued scenario per `send_prompt`, after acknowledging the prompt. With no scenario left the prompt is
-/// acknowledged and the turn never ends: a hang. A scenario without `turn.ended` is a hang too.
+/// acknowledged and the turn never ends: a hang. A scenario without `turn.ended` is a hang too. A prompt sent while a
+/// turn is in flight is held: [`Step::Insert`] acknowledges the oldest one held, `cancel_turn` drops them all.
 #[derive(Clone)]
 pub struct ScriptedDriver {
     harness: &'static str,
@@ -62,6 +63,10 @@ struct State {
     keys: Vec<PromptKey>,
     /// Set by [`ScriptedDriver::stoppable_background`].
     stoppable: bool,
+    /// Set by [`ScriptedDriver::inserts_in_turn`].
+    prompts_in_turn: bool,
+    /// Every call of `answer_permission`: the request and the option.
+    permission_answers: Vec<(String, Option<String>)>,
     /// Calls of `stop_background`.
     background_stops: usize,
     /// Set by [`ScriptedDriver::hold_sessions`].
@@ -86,6 +91,8 @@ struct Session {
     instance: String,
     /// Prompts in order.
     prompts: Vec<PromptKey>,
+    /// Prompts sent during a turn and not yet inserted, oldest first.
+    held: VecDeque<PromptKey>,
     playing: Option<JoinHandle<()>>,
     /// A turn is in flight: from a prompt or a response until `turn.ended`.
     in_turn: bool,
@@ -247,6 +254,7 @@ impl Driver for ScriptedDriver {
             Session {
                 instance: instance.id.clone(),
                 prompts: Vec::new(),
+                held: VecDeque::new(),
                 playing: None,
                 in_turn: false,
                 empty: false,
@@ -277,11 +285,15 @@ impl Driver for ScriptedDriver {
         let s = state.sessions.entry(id).or_insert_with(|| Session {
             instance: String::new(),
             prompts: Vec::new(),
+            held: VecDeque::new(),
             playing: None,
             in_turn: false,
             empty: true,
         });
         s.instance = instance.id.clone();
+        // A new process has no turn in flight and holds nothing.
+        s.in_turn = false;
+        s.held.clear();
         ready(Ok(()))
     }
 
@@ -297,12 +309,23 @@ impl Driver for ScriptedDriver {
             state.texts.push(text.to_owned());
             state.keys.push(key);
             let losing = state.losing;
-            // Only a live session can drop a prompt: a dead process refuses it, as a harness's does.
-            Self::live_session(&mut state, instance, session).map(|s| (!losing).then(|| s.prompts.push(key)))
+            // Only a live session can drop a prompt: a dead process refuses it, as a harness's does. Whether the
+            // prompt starts a turn now.
+            Self::live_session(&mut state, instance, session).map(|s| match (losing, s.in_turn) {
+                (true, _) => false,
+                (false, true) => {
+                    s.held.push_back(key);
+                    false
+                }
+                (false, false) => {
+                    s.prompts.push(key);
+                    true
+                }
+            })
         };
         match recorded {
-            Ok(Some(())) => ready(self.play(instance, session, Normalized::PromptAcked { key })),
-            Ok(None) => ready(Ok(())),
+            Ok(true) => ready(self.play(instance, session, Normalized::PromptAcked { key })),
+            Ok(false) => ready(Ok(())),
             Err(e) => ready(Err(e)),
         }
     }
@@ -312,10 +335,15 @@ impl Driver for ScriptedDriver {
         instance: &'a InstanceHandle,
         session: &'a SessionRef,
     ) -> BoxFuture<'a, Result<(), Failure>> {
-        let playing = Self::live_session(&mut self.lock(), instance, session).map(|s| (s.in_turn, s.playing.take()));
-        ready(playing.map(|(in_turn, playing)| {
+        let playing = Self::live_session(&mut self.lock(), instance, session)
+            .map(|s| (s.in_turn, s.playing.take(), std::mem::take(&mut s.held)));
+        ready(playing.map(|(in_turn, playing, held)| {
             if let Some(playing) = playing {
                 playing.abort();
+            }
+            // The cancel takes every prompt the harness holds: none of them is ever delivered.
+            for key in held {
+                self.emit(&instance.id, Some(session), Normalized::PromptDropped { key });
             }
             // A real harness ends only a turn that is in flight; an idle session sees nothing.
             if in_turn {
@@ -325,6 +353,21 @@ impl Driver for ScriptedDriver {
                 self.emit(&instance.id, Some(session), ended);
             }
         }))
+    }
+
+    fn prompts_in_turn(&self) -> bool {
+        self.lock().prompts_in_turn
+    }
+
+    fn answer_permission<'a>(
+        &'a self,
+        _instance: &'a InstanceHandle,
+        request: &'a str,
+        option: Option<&'a str>,
+    ) -> BoxFuture<'a, ()> {
+        let answer = (request.to_owned(), option.map(str::to_owned));
+        self.lock().permission_answers.push(answer);
+        ready(())
     }
 
     fn stop_background<'a>(&'a self, instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()> {

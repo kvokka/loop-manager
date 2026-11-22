@@ -10,7 +10,7 @@ mod session;
 mod trace;
 
 use agent_client_protocol::{
-    Agent, Client, Lines,
+    Agent, Client, ErrorCode, Lines,
     schema::ProtocolVersion,
     v2::{ConnectionTo, InitializeOutcome, Responder, schema},
 };
@@ -87,9 +87,35 @@ struct Shared {
     record: Option<record::Recorder>,
     /// The instance started: before, its process is the start's to account for, and tells the core nothing.
     started: bool,
+    /// The permission requests of the session that wait for an answer, by their id.
+    permissions: HashMap<String, Pending>,
+    /// How many permission requests the instance had: the number of the next id.
+    asked: u64,
+}
+
+/// A permission request that waits for `answer_permission`.
+struct Pending {
+    responder: Responder<schema::RequestPermissionResponse>,
+    /// The answer that declines it.
+    decline: schema::RequestPermissionResponse,
+    /// Dropped with the request: ends the watch for the agent taking it back.
+    _answered: oneshot::Sender<()>,
 }
 
 impl Shared {
+    /// What instance `id` of the agent of `profile` shares, its events to `sink`; not started yet.
+    fn new(id: &str, sink: EventSink, profile: &'static Profile) -> Self {
+        Self {
+            events: child::Events::new(id, sink),
+            turn: Turn::new(profile),
+            session: None,
+            record: None,
+            started: false,
+            permissions: HashMap::new(),
+            asked: 0,
+        }
+    }
+
     fn send(&self, events: Vec<Normalized>) {
         for event in events.into_iter().filter(|_| self.started) {
             let wide = matches!(event, Normalized::Exited { .. });
@@ -238,13 +264,7 @@ impl Acp {
             start_time,
             pgid: pid,
         };
-        let shared = Arc::new(Mutex::new(Shared {
-            events: child::Events::new(id, sink),
-            turn: Turn::new(self.profile),
-            session: None,
-            record: None,
-            started: false,
-        }));
+        let shared = Arc::new(Mutex::new(Shared::new(id, sink, self.profile)));
         let transport = lines(&mut process, trace.clone());
         let stderr = tokio::spawn(loop_manager_contract::driver::stderr_tail(
             process.stderr.take().expect("stderr is piped"),
@@ -266,6 +286,8 @@ impl Acp {
             if let Some(record) = &shared.record {
                 record.flush();
             }
+            // No request of a process gone waits for an answer.
+            shared.permissions.clear();
             let events = shared.turn.exited(code, signal, &stderr);
             shared.send(events);
         });
@@ -404,7 +426,9 @@ impl Acp {
         ))
     }
 
-    async fn prompt(
+    /// Writes the prompt request; its answer comes as an event: `prompt.acked` when the agent inserted it,
+    /// `prompt.dropped` on `-32800`, any other error a `failure`.
+    fn prompt(
         &self,
         instance: &InstanceHandle,
         session: &SessionRef,
@@ -417,24 +441,31 @@ impl Acp {
         let request: schema::PromptRequest =
             serde_json::from_value(request).map_err(|e| child::config_error(e.to_string()))?;
         lock(&known.shared).turn.sent(key);
-        // The answer means the agent took the prompt; its turn is told by the session's state updates.
-        let sent = known.conn.send_request(request).block_task().await;
-        if sent.is_ok() {
-            // The answer means the agent inserted the prompt into the session: a resumed attempt asks (`transcript`).
-            // Unwritten, the prompt is not known delivered and goes again with its key.
-            let file = self.answered(session);
-            let _ = file.parent().map(std::fs::create_dir_all);
-            let _ = std::fs::write(&file, key.0.to_string());
-        }
-        let mut shared = lock(&known.shared);
-        match sent {
-            Ok(_) => {
-                let events = shared.turn.acked(key);
-                shared.send(events);
-                Ok(())
+        let (shared, file, classify) = (known.shared.clone(), self.answered(session), self.profile.classify);
+        // Ordered with the session's updates, and short: it waits for nothing.
+        let written = known.conn.send_request(request).on_receiving_result(move |answer| {
+            if answer.is_ok() {
+                // The answer means the agent inserted the prompt into the session: a resumed attempt asks
+                // (`transcript`). Unwritten, the prompt is not known delivered and goes again with its key.
+                let _ = file.parent().map(std::fs::create_dir_all);
+                let _ = std::fs::write(&file, key.0.to_string());
             }
-            Err(error) => Err(self.failed(&error)),
-        }
+            let mut shared = lock(&shared);
+            let events = match answer {
+                Ok(_) => shared.turn.acked(key),
+                // `session/cancel` took the prompt before the agent inserted it.
+                Err(e) if e.code == ErrorCode::REQUEST_CANCELLED => shared.turn.dropped(key),
+                Err(e) => shared
+                    .turn
+                    .refused(key, classify(e.code.into(), &e.message, e.data.as_ref())),
+            };
+            shared.send(events);
+            std::future::ready(Ok(()))
+        });
+        written.map_err(|e| {
+            lock(&known.shared).turn.forget(key);
+            self.failed(&e)
+        })
     }
 }
 
@@ -489,8 +520,41 @@ async fn connect(
             async move |request: schema::RequestPermissionRequest,
                         responder: Responder<schema::RequestPermissionResponse>,
                         _: ConnectionTo<Agent>| {
-                lock(&permissions).send(vec![session::denied(&request)]);
-                responder.respond(decline(&request))
+                let mut shared = lock(&permissions);
+                // Before the instance started nobody can answer.
+                if !shared.started {
+                    return responder.respond(decline(&request));
+                }
+                shared.asked += 1;
+                let id = format!("p{}", shared.asked);
+                let (answered, dropped) = oneshot::channel();
+                let cancellation = responder.cancellation();
+                let pending = Pending {
+                    responder,
+                    decline: decline(&request),
+                    _answered: answered,
+                };
+                shared.permissions.insert(id.clone(), pending);
+                shared.send(vec![session::requested(&id, &request)]);
+                drop(shared);
+                // The agent takes the request back (after `session/cancel`): it gets `cancelled`, and the core
+                // learns no answer is awaited. An answer first drops the request, and the watch with it.
+                let watched = permissions.clone();
+                tokio::spawn(async move {
+                    tokio::select! {
+                        () = cancellation.cancelled() => {}
+                        _ = dropped => return,
+                    }
+                    let mut shared = lock(&watched);
+                    if let Some(pending) = shared.permissions.remove(&id) {
+                        let cancelled = schema::CancelledPermissionOutcome::new().into();
+                        let _ = pending
+                            .responder
+                            .respond(schema::RequestPermissionResponse::new(cancelled));
+                        shared.send(vec![Normalized::PermissionWithdrawn { id }]);
+                    }
+                });
+                Ok(())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -787,7 +851,32 @@ impl Driver for Acp {
         text: &'a str,
         key: PromptKey,
     ) -> BoxFuture<'a, Result<(), Failure>> {
-        Box::pin(self.prompt(instance, session, text, key))
+        Box::pin(std::future::ready(self.prompt(instance, session, text, key)))
+    }
+
+    fn prompts_in_turn(&self) -> bool {
+        self.profile.prompts_in_turn
+    }
+
+    fn answer_permission<'a>(
+        &'a self,
+        instance: &'a InstanceHandle,
+        request: &'a str,
+        option: Option<&'a str>,
+    ) -> BoxFuture<'a, ()> {
+        let pending =
+            (self.instance(&instance.id).ok()).and_then(|known| lock(&known.shared).permissions.remove(request));
+        if let Some(pending) = pending {
+            let answer = match option {
+                Some(option) => schema::RequestPermissionResponse::new(schema::RequestPermissionOutcome::Selected(
+                    schema::SelectedPermissionOutcome::new(option.to_owned()),
+                )),
+                None => pending.decline,
+            };
+            // The connection gone, nobody waits for the answer.
+            let _ = pending.responder.respond(answer);
+        }
+        Box::pin(std::future::ready(()))
     }
 
     fn cancel_turn<'a>(

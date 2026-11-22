@@ -200,10 +200,14 @@ impl Live {
             .unwrap();
     }
 
-    /// Events until `until` holds for one, or `wait` passes; the matching event, if any.
+    /// Events until `until` holds for one, or `wait` passes; the matching event, if any. A permission request is
+    /// declined, as the core's policy does under the LM.
     async fn until(&mut self, wait: Duration, until: impl Fn(&Normalized) -> bool) -> Option<Normalized> {
         let deadline = tokio::time::Instant::now() + wait;
         while let Ok(Some(event)) = tokio::time::timeout_at(deadline, self.events.recv()).await {
+            if let Normalized::PermissionRequested { id, .. } = &event.event {
+                self.driver.answer_permission(&self.instance, id, None).await;
+            }
             self.seen.push(event.event.clone());
             if until(&event.event) {
                 return Some(event.event);

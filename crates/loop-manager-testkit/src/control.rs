@@ -76,6 +76,17 @@ impl ScriptedDriver {
         self.lock().stoppable = true;
     }
 
+    /// From now on the harness may insert a prompt into a turn in flight (`Driver::prompts_in_turn`).
+    pub fn inserts_in_turn(&self) {
+        self.lock().prompts_in_turn = true;
+    }
+
+    /// Every answer the core gave to a permission request so far, in order: the request and the option (`None`:
+    /// declined).
+    pub fn permission_answers(&self) -> Vec<(String, Option<String>)> {
+        self.lock().permission_answers.clone()
+    }
+
     /// How many times the core asked to stop what a session left in the background.
     pub fn background_stops(&self) -> usize {
         self.lock().background_stops
@@ -101,6 +112,7 @@ impl ScriptedDriver {
             let session = Session {
                 instance: String::new(),
                 prompts: s.prompts.clone(),
+                held: std::collections::VecDeque::new(),
                 playing: None,
                 in_turn: false,
                 empty: s.empty,

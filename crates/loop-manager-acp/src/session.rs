@@ -6,10 +6,12 @@ use agent_client_protocol::schema::MaybeUndefined;
 use agent_client_protocol::v2::schema::{
     self, BackgroundWork, IdleStateUpdate, SessionUpdate, StateUpdate, StopReason as AcpStop, ToolCallStatus,
 };
-use loop_manager_contract::driver::{Failure, FailureKind, Normalized, PromptKey, SessionState, Source, StopReason};
+use loop_manager_contract::driver::{
+    Failure, FailureKind, Normalized, PermissionOption, PromptKey, SessionState, Source, StopReason,
+};
 use serde_json::Value;
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -18,8 +20,8 @@ use std::{
 pub(crate) struct Turn {
     /// The agent's id of the session loop-manager opened: only its state drives the attempt.
     pub(crate) session: Option<String>,
-    /// The prompt sent and not yet acknowledged.
-    pending: Option<PromptKey>,
+    /// The prompts sent and not yet acknowledged, oldest first: the agent inserts them in that order.
+    pending: VecDeque<PromptKey>,
     in_turn: bool,
     /// The tool calls of the session not yet finished.
     tools: HashSet<String>,
@@ -60,20 +62,35 @@ impl Turn {
 
     /// A prompt goes out with `key`.
     pub(crate) fn sent(&mut self, key: PromptKey) {
-        self.pending = Some(key);
+        self.pending.push_back(key);
+    }
+
+    /// The prompt `key` is no longer awaited; whether it was.
+    pub(crate) fn forget(&mut self, key: PromptKey) -> bool {
+        let at = self.pending.iter().position(|k| *k == key);
+        at.and_then(|at| self.pending.remove(at)).is_some()
     }
 
     /// The agent took the prompt with `key` (its answer, or the first sign of the turn it started), once.
     pub(crate) fn acked(&mut self, key: PromptKey) -> Vec<Normalized> {
-        match self.pending == Some(key) {
-            true => self
-                .pending
-                .take()
-                .map(|key| Normalized::PromptAcked { key })
-                .into_iter()
-                .collect(),
+        match self.forget(key) {
+            true => vec![Normalized::PromptAcked { key }],
             false => Vec::new(),
         }
+    }
+
+    /// The agent dropped the prompt with `key` before it inserted it (`-32800`), once.
+    pub(crate) fn dropped(&mut self, key: PromptKey) -> Vec<Normalized> {
+        match self.forget(key) {
+            true => vec![Normalized::PromptDropped { key }],
+            false => Vec::new(),
+        }
+    }
+
+    /// The request of the prompt with `key` failed otherwise: the failure, and no acknowledgement after it.
+    pub(crate) fn refused(&mut self, key: PromptKey, failure: Failure) -> Vec<Normalized> {
+        self.forget(key);
+        vec![Normalized::Failure(failure)]
     }
 
     pub(crate) fn update(&mut self, session: &str, update: &SessionUpdate, now: Instant) -> Vec<Normalized> {
@@ -87,7 +104,8 @@ impl Turn {
                 let mut out = Vec::new();
                 if !self.in_turn {
                     self.in_turn = true;
-                    out.extend(self.pending.take().map(|key| Normalized::PromptAcked { key }));
+                    // A turn starts with the oldest prompt the agent holds.
+                    out.extend(self.pending.pop_front().map(|key| Normalized::PromptAcked { key }));
                     out.push(Normalized::TurnStarted);
                 }
                 out.push(Normalized::State {
@@ -204,7 +222,8 @@ impl Turn {
     /// The process is gone: an open turn fails as `harness_crash` whatever the exit code; then the instance is gone.
     pub(crate) fn exited(&mut self, code: Option<i32>, signal: Option<i32>, stderr: &str) -> Vec<Normalized> {
         let mut out = Vec::new();
-        if std::mem::take(&mut self.in_turn) || self.pending.take().is_some() {
+        let pending = !std::mem::take(&mut self.pending).is_empty();
+        if std::mem::take(&mut self.in_turn) || pending {
             let mut failure = Failure::new(FailureKind::HarnessCrash, Source::Adapter);
             failure.raw = format!("the agent exited in a turn (code {code:?}, signal {signal:?}): {stderr}");
             out.push(Normalized::Failure(failure));
@@ -256,20 +275,29 @@ pub(crate) fn classify(code: i32, message: &str, data: Option<&Value>) -> Failur
     failure
 }
 
-/// The `permission_denied` event of a request loop-manager declined: no person answers a run's permission request
-/// (decision 116).
-pub(crate) fn denied(request: &schema::RequestPermissionRequest) -> Normalized {
+/// The `permission.requested` event of the request `id`: its title as the tool, the tool call's id and input, and
+/// the options it offers.
+pub(crate) fn requested(id: &str, request: &schema::RequestPermissionRequest) -> Normalized {
     let subject = serde_json::to_value(&request.subject).unwrap_or_default();
     // A tool call's details are under `toolCall`.
     let call = match subject["toolCall"].is_null() {
         true => &subject,
         false => &subject["toolCall"],
     };
-    Normalized::PermissionDenied {
+    let options = (request.options.iter()).map(|o| PermissionOption {
+        id: o.option_id.to_string(),
+        name: o.name.clone(),
+        kind: serde_json::to_value(&o.kind)
+            .ok()
+            .and_then(|k| k.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+    });
+    Normalized::PermissionRequested {
+        id: id.to_owned(),
         tool: request.title.clone(),
         tool_use_id: call["toolCallId"].as_str().map(str::to_owned),
         input: call["rawInput"].clone(),
-        reason: Some("loop-manager answers no permission request of a run".into()),
+        options: options.collect(),
     }
 }
 

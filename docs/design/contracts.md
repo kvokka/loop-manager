@@ -117,7 +117,7 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.taken_over` | `{run}`; an operator took the run over (6.1): its orchestration stands until `run.handed_back` |
 | `run.handed_back` | `{run, deferred}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
-| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the harness or the adapter denied the agent a tool (4.3) and nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` its reason or null |
+| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the policy declined a permission request of the agent (4.3) at once, so nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` why it was declined |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
 | `trigger.skipped` | `{trigger, cause_seq, reason: "overlap"\|"input_unresolved"\|"depth"\|"nothing_ready"\|"rejected", detail}` |
 | `trigger.switched` | `{trigger, enabled}`; the operator switched a trigger on a rig off or back on (`POST /v1/triggers/disable`, `/enable`): off, neither its schedule nor its events fire it, a hand firing still does, and the switch outlives restarts and reloads |
@@ -361,9 +361,12 @@ no harness by name ([adapters](adapters.md)), tests wire the scripted driver in 
 are boxed; events go to the core through a sink handed to `start_instance`. The adapter translates and executes; it
 never retries a turn, parks or decides an outcome (adapter duties in 4.4–4.6 and
 [adapters](adapters.md#what-the-core-expects-of-a-driver)): decisions are policy, which lives in addons and config. Its
-semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fails with a typed failure (4.4). The
-interface has no steer in the middle of a turn, no model change inside a live session and no way for a human to join a
-live session ([frontends](../api/frontends.md#humans-and-runs)).
+semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fails with a typed failure (4.4).
+`send_prompt` returns once the request is written: the harness holds a prompt sent while a turn is in flight, and
+inserts it into that turn when `prompts_in_turn` is true, else after the turn ends; the insertion is `prompt.acked`, a
+drop `prompt.dropped` (4.3). A permission request of a session waits for `answer_permission`. The interface has no
+model change inside a live session and no way for a human to join a live session
+([frontends](../api/frontends.md#humans-and-runs)).
 
 ```rust
 trait Driver: Send + Sync {
@@ -380,7 +383,9 @@ trait Driver: Send + Sync {
     // session
     fn start_session(&self, instance: &InstanceHandle, session: &SessionPart) -> BoxFuture<Result<SessionRef, Failure>>;
     fn resume_session(&self, instance: &InstanceHandle, session: &SessionRef, part: &SessionPart) -> BoxFuture<Result<(), Failure>>;
-    fn send_prompt(&self, instance: &InstanceHandle, session: &SessionRef, text: &str, key: PromptKey) -> BoxFuture<Result<(), Failure>>;
+    fn send_prompt(&self, instance: &InstanceHandle, session: &SessionRef, text: &str, key: PromptKey) -> BoxFuture<Result<(), Failure>>; // returns once written
+    fn prompts_in_turn(&self) -> bool;                        // the harness may insert a prompt into a turn in flight; default false
+    fn answer_permission(&self, instance: &InstanceHandle, request: &str, option: Option<&str>) -> BoxFuture<()>; // None declines
     fn cancel_turn(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<Result<(), Failure>>;
     fn stop_background(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<()>; // commands left after the turn; session stays
     fn close_session(&self, instance: &InstanceHandle, session: &SessionRef) -> BoxFuture<()>; // transcript stays
@@ -414,17 +419,19 @@ numbering. The core takes an instance's events in `seq` order: one with `seq` �
 taken is dropped with no effect, and one that is not last + 1 (a repeat or a gap) is told with `resync.diverged`.
 They are input messages of the core, not journal events; the core turns some of them into the run events of 1.3.
 Nothing a driver reports is dropped: a retry of the harness, a degraded instance, token usage, an account limit and
-the stop reason of a turn and a denied permission reach the policy and the observers through those events.
+the stop reason of a turn and a permission request reach the policy and the observers through those events.
 
 | Event | Fields | Core use |
 |---|---|---|
-| `prompt.acked` | `key` | prompt delivery `sent → acked`; ends `starting` |
+| `prompt.acked` | `key` | the harness inserted the prompt: delivery `sent → acked`; ends `starting` |
+| `prompt.dropped` | `key` | the harness dropped the prompt before it inserted it (a `session/cancel` took it): delivery `withdrawn` (6.4), the prompt is never delivered |
 | `turn.started` | — | watchdog: first event seen |
 | `turn.ended` | `stop_reason: completed \| cancelled \| failed` | candidate end of the attempt's work; `failed` follows a `failure` event; `stop_reason` goes to `run.turn_ended_without_outcome` |
 | `state` | `state: running \| idle`, `background: bool` | "idle without background" = `idle` and `background == false`; the adapter applies the harness rule. `idle` with `background` after the turn ended and with the outcome declared makes the core call `stop_background` (6.3) |
 | `usage` | `input_tokens, output_tokens, rate_limit: {utilization, resets_at} \| null` | the core adds the tokens (increments) to the attempt; keeps the last `rate_limit` per account key (`account:<harness>/<id>`, one row, replaced by each report); still activity for the watchdog |
 | `retrying` | `attempt, delay, text` | in `running`: journals `run.retrying` (`next_retry_at` = now + `delay`) and sets the silence deadline to silence + `delay` (an announced pause is not silence) |
-| `permission_denied` | `tool, tool_use_id, input, reason` | in every live state: journals `run.permission_denied`; still activity for the watchdog in `running` |
+| `permission.requested` | `id, tool, tool_use_id, input, options: [{id, name, kind}]` | `id` names the request within the instance, `tool` is the harness's title of it, `kind` of an option `allow_once`, `allow_always`, `reject_once`, `reject_always` or the harness's own. For the attempt of the session in any state of the run (a background tool may ask while it is `finishing`): the policy declines it at once (`answer_permission` with no option, the harness's `reject_once`, else `cancelled`) and journals `run.permission_denied`; still activity for the watchdog in `running` |
+| `permission.withdrawn` | `id` | the harness took the request back (after a `session/cancel`): no answer is awaited |
 | `activity` | `tool_running: bool` | watchdog only: moves the silence deadline, kept in memory, no transaction; the adapter coalesces it to at most one per second per session |
 | `failure` | `Failure` (see 1.3) | ends the attempt with `run.attempt_failed`; a failed single tool call is never sent (the harness hands it back to the model), `tool_failure` means a tool is gone for the whole session (4.4) |
 | `exited` | `code, signal` | the instance process is gone: every session on it gets `harness_crash` unless a failure was already reported |
@@ -494,9 +501,10 @@ is given as a reference.
 |---|---|---|
 | Process and session | a `claude-agent-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the generated-files directory, the `home` of an isolated session, the skills and the host inheritance switch, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, MCP servers, system prompt in `append` mode, `_meta.claudeCode.options` with `settingSources`, `settings`, `agents`, `plugins`) and the config options `model`, `effort`, `mode`; the `SessionRef` keeps the session id, cwd and `home` | a `codex-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the session's `CODEX_HOME` and the `HOME` of an isolated session, the host's codex home its own home links from, the key variable of the host's model provider, the skills, the codex config of `CODEX_CONFIG` (model, effort, MCP servers, hooks, the agent roles of the subagent targets, the attempt environment, the native block) and the role files, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, system prompt in `append` mode, no MCP servers) and the config option `mode`; the `SessionRef` keeps the session id, cwd and `home` |
 | Prompt key | `idempotencyKey` of `session/prompt` | `idempotencyKey` of `session/prompt`, which the adapter passes on as codex's `clientUserMessageId` |
-| `prompt.acked` | the answer to `session/prompt` or the first `state_update: running`, whichever comes first | as claude |
+| `prompt.acked` | the answer to `session/prompt`, which the adapter gives when it inserts the prompt, or the first `state_update: running` (it acknowledges the oldest prompt not yet acknowledged), whichever comes first | as claude |
+| Prompt in a turn | the adapter queues it in Claude Code at once, which may insert it before the turn ends (`prompts_in_turn` true) | the adapter holds it until the turn is idle, then starts a turn with it (`prompts_in_turn` false) |
 | Turn end | `state_update: idle` with its `stopReason`; `background` while the update lists background work ([adapters](adapters.md#acp-v2-harnesses)) | as claude |
-| Cancel | `session/cancel`; the idle with `stopReason: cancelled` is `turn.ended{cancelled}` | as claude |
+| Cancel | `session/cancel`; the idle with `stopReason: cancelled` is `turn.ended{cancelled}`; every prompt the adapter holds is answered `-32800`, `prompt.dropped`; a pending permission request the adapter takes back with `$/cancel_request` is answered `cancelled`, `permission.withdrawn` | as claude |
 | Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | `session/resume` in a new process with the same session part, then `mode` again by `session/set_config_option` (the adapter resumes a session in a mode of its own); the codex config of the new attempt, model and effort included, comes in that process's `CODEX_CONFIG`, its `CODEX_HOME` from the `SessionRef` |
 | Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | the environment of the adapter's process, which codex and its hooks inherit, and the same variables in `shell_environment_policy.set` of the codex config, so codex keeps them in a command's environment |
 | Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | as claude; a command that detached itself goes when the session's process stops, on the sweep of the instance marker |
@@ -550,11 +558,11 @@ claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.m
   and, by the model and the host, `auto` and `bypassPermissions`; `dontAsk`, which it never offers, is a load error
   naming its key, and another mode it does not offer fails the attempt with `config_error` naming `mode`. As root it offers `bypassPermissions` only when the session's `env` sets `IS_SANDBOX=1`. Under
   `bypassPermissions` no request comes; under another mode what the rules do not allow comes as
-  `session/request_permission`, which the driver declines at once with the adapter's `reject_once` option, so
-  nothing waits and the model sees the denial.
-- A declined request is one `permission_denied`: `tool` is the request's title, `tool_use_id` and `input` the tool
-  call's id and raw input. A denial claude makes by its own rules (a `deny` rule) reaches the driver only as a failed
-  tool call: ACP has no event for it, so it is no `permission_denied`.
+  `session/request_permission`, one `permission.requested`, which the core's policy declines at once with the
+  adapter's `reject_once` option, so nothing waits and the model sees the denial.
+- In `permission.requested` `tool` is the request's title, `tool_use_id` and `input` the tool call's id and raw
+  input. A denial claude makes by its own rules (a `deny` rule) reaches the driver only as a failed tool call: ACP
+  has no event for it, so it is no permission request.
 
 codex (the `codex` profile of `crates/loop-manager-acp`, [adapters](adapters.md#profiles)):
 
@@ -580,8 +588,8 @@ codex (the `codex` profile of `crates/loop-manager-acp`, [adapters](adapters.md#
   history already holds the adapter answers at once, inserting nothing and starting no turn.
 - The permission mode follows `native.codex.approval_policy` and `sandbox_mode` ([config](config.md#permissions)).
   Under `agent-full-access`, the default, no request comes; under `workspace-write` and `read-only` what the sandbox
-  does not allow comes as `session/request_permission`, which the driver declines at once, so nothing waits and the
-  model sees the denial.
+  does not allow comes as `session/request_permission`, one `permission.requested`, which the core's policy declines
+  at once, so nothing waits and the model sees the denial.
 - Every MCP server loop-manager gives a session goes in `mcp_servers` of the codex config with `required = true`: one
   that does not start fails `session/new` or `session/resume` (`required MCP servers failed to initialize`), which is a
   `tool_failure` before the first prompt. A server of the rig or the host that fails is not told: the adapter reports
@@ -966,8 +974,11 @@ for it is not.
 ### 6.4 Prompt delivery and recovery
 
 - Every prompt has a delivery record `intent → sent → acked → settled` and a `PromptKey`. `intent` is written
-  with the decision to send; `sent` after `send_prompt` returned; `acked` on `prompt.acked`; `settled` when the turn
-  ended. No marker in the prompt text: the key goes as the harness's own idempotency key. An ACP harness, claude
+  with the decision to send; `sent` after `send_prompt` returned, the request written while the harness holds the
+  prompt; `acked` on `prompt.acked`, the harness inserted it; `settled` when the turn of an `acked` prompt ended (a
+  prompt the harness still holds stays as it is). `withdrawn` is final: from `intent` or `sent` on `prompt.dropped`,
+  the prompt is never delivered. A state never goes back. No marker in the prompt text: the key goes as the
+  harness's own idempotency key. An ACP harness, claude
   and codex among them, knows a prompt delivered when the agent answered it (the driver records the key of the last
   answer of the session, 4.6); a prompt whose answer the daemon did not live to read goes again with its key, and only
   the agent's memory of the key keeps it from running twice ([adapters](adapters.md#acp-v2-harnesses)).

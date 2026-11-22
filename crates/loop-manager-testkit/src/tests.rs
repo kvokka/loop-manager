@@ -310,3 +310,43 @@ fn failures_take_the_default_scope_of_their_kind() {
         assert_eq!(Failure::new(kind, Source::Adapter).scope, scope, "{kind:?}");
     }
 }
+
+/// A prompt sent during a turn is held: `Step::Insert` acknowledges the oldest one held, and a cancel drops the rest
+/// before the cancelled turn ends.
+#[tokio::test(start_paused = true)]
+async fn a_prompt_sent_in_a_turn_is_held_until_inserted_or_dropped_by_the_cancel() {
+    let mut s = setup().await;
+    let go = Arc::new(tokio::sync::Notify::new());
+    s.driver.script(vec![Step::Await(go.clone()), Step::Insert]);
+    s.prompt(1).await;
+    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(1) }));
+    s.prompt(2).await;
+    s.prompt(3).await;
+    assert_eq!(s.transcript(2).await, Transcript::Present { delivered: false });
+    go.notify_one();
+    assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(2) }));
+    assert_eq!(s.transcript(2).await, Transcript::Present { delivered: true });
+    s.driver.cancel_turn(&s.instance, &s.session).await.unwrap();
+    assert_eq!(
+        next(&mut s.events).await,
+        Some(Normalized::PromptDropped { key: key(3) })
+    );
+    let cancelled = Normalized::TurnEnded {
+        stop_reason: StopReason::Cancelled,
+    };
+    assert_eq!(next(&mut s.events).await, Some(cancelled));
+    assert_eq!(s.transcript(3).await, Transcript::Present { delivered: false });
+}
+
+/// The answers to permission requests are kept in order; whether prompts go into a turn is the test's knob.
+#[tokio::test]
+async fn the_answers_to_permission_requests_are_kept_and_prompts_in_turn_is_a_knob() {
+    let s = setup().await;
+    s.driver.answer_permission(&s.instance, "p1", None).await;
+    s.driver.answer_permission(&s.instance, "p2", Some("allow")).await;
+    let answers = [("p1".to_owned(), None), ("p2".to_owned(), Some("allow".to_owned()))];
+    assert_eq!(s.driver.permission_answers(), answers);
+    assert!(!s.driver.prompts_in_turn());
+    s.driver.inserts_in_turn();
+    assert!(s.driver.prompts_in_turn());
+}

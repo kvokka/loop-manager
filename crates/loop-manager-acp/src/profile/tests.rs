@@ -492,13 +492,9 @@ async fn connected() -> (Acp, InstanceHandle, mpsc::UnboundedReceiver<(String, S
             .connect_to(theirs),
     );
     let (sink, _events) = tokio::sync::mpsc::unbounded_channel();
-    let shared = Arc::new(Mutex::new(Shared {
-        events: child::Events::new("i1", sink),
-        turn: Turn::new(driver.profile),
-        session: None,
-        record: None,
-        started: true,
-    }));
+    let mut shared = Shared::new("i1", sink, driver.profile);
+    shared.started = true;
+    let shared = Arc::new(Mutex::new(shared));
     let (conn_tx, conn_rx) = oneshot::channel();
     let (close_tx, close_rx) = oneshot::channel();
     tokio::spawn(connect(shared.clone(), ours, conn_tx, close_rx));

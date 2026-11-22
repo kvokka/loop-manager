@@ -112,9 +112,15 @@ that agent's [profile](#profiles).
   `subagents`, a `native` block or `inherit_host = false`: `loop_manager_acp::unsupported` refuses them by key, as
   a load error that names the agent, the key and the harness ([config](config.md#harness-and-model)), and again at
   an attempt's start.
-- **The turn.** `send_prompt` is `session/prompt` with the `PromptKey` as `idempotencyKey`; the agent answers once it
-  took the prompt. `prompt.acked` comes from that answer or from the first `state_update: running` of the session,
-  whichever is first, so it always precedes `turn.started`. `state_update: idle` ends the turn: `end_turn`, no reason
+- **The turn.** `send_prompt` is `session/prompt` with the `PromptKey` as `idempotencyKey`; it returns once the
+  request is written, and the answer comes later as an event. The agent answers when it inserts the prompt into the
+  session: `prompt.acked` comes from that answer or from the first `state_update: running` of the session, which
+  acknowledges the oldest prompt not yet acknowledged (an agent inserts prompts in the order it got them), whichever
+  is first, so it always precedes `turn.started`. An answer `-32800` is `prompt.dropped`: `session/cancel` takes every
+  prompt the agent holds and not yet inserted. Any other error answer is a `failure`, classified as below. A prompt
+  sent while a turn is in flight is held by the agent: what it does with it is the profile's `prompts_in_turn`
+  (claude's adapter queues it in Claude Code, which may insert it before the turn ends; codex's holds it until the
+  turn is idle, then starts a turn with it; an agent of no profile is taken to do the latter). `state_update: idle` ends the turn: `end_turn`, no reason
   or an unknown one is `completed`, `cancelled` is `cancelled`; `max_tokens` (`context_overflow`), `max_turn_requests`
   (`runaway_turn`), `refusal` and `error` (by its JSON-RPC code: `-32000` `auth_required`, `-32602` `config_error`,
   else `unknown` with the agent's words) are a `failure`, then `failed`. Then `state{idle, background}`, `background`
@@ -126,8 +132,13 @@ that agent's [profile](#profiles).
   the driver writes the session's messages, thoughts, tool calls, their output, terminals, state and subagents to the
   run's [history](event-model.md#history) as the updates come, glued per text for up to 200 ms or 4 KiB; the text
   open when the process exits is written before its `exited`. A driver made for a config check writes none.
-- **Permissions.** loop-manager answers a `session/request_permission` with the agent's `reject_once` option, else
-  `cancelled`, and reports it as `permission_denied`: no person answers a run's request (decision 116).
+- **Permissions.** A `session/request_permission` is `permission.requested` with an id of the instance (`p1`, `p2`,
+  …), the request's title as `tool`, the tool call's id and raw input, and the options it offers; it waits for
+  `answer_permission`, which selects an option or declines it (the agent's `reject_once` option, else `cancelled`).
+  The core's policy declines every request at once: no person answers a run's request (decision 116). An agent that
+  takes its request back (`$/cancel_request`, after `session/cancel`) gets `cancelled`, and the driver reports
+  `permission.withdrawn`; a later answer is nothing. A request that comes before the instance started is declined by
+  the driver itself.
 - **Stopping work.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. When an attempt ends,
   the core's `stop` effect (these two) and the `stop_instance` of its instance run on separate queues; with a process
   per session the agent may get the EOF on its stdin, then the group's `SIGTERM`, before or instead of
@@ -195,6 +206,7 @@ the driver has no mechanism for.
 |---|---|
 | `split`, the process part | the keys the process needs, or the refusal (generic) |
 | `split`, the session part | what goes with `session/new` and `session/resume` beyond ACP, and a `mode` |
+| `prompts_in_turn` | whether the agent may insert a prompt into a turn in flight: claude `true`, codex and the generic profile `false` |
 | `start_instance`, before the spawn and after the exit | the files the process reads, and which of them go with it |
 | the process environment | the daemon's variables it gets and what it adds; the variables that carry a credential |
 | the protocol trace | the values of the session part that are secrets |
@@ -286,7 +298,7 @@ runs one process per session".
   `sandbox_mode` of the host's `config.toml` for a session that inherits the host, else `danger-full-access`
   (decision 38): `danger-full-access` with `never` is `agent-full-access`; `workspace-write` or `read-only` with
   `never` or `on-request` is the mode of that name, where a command outside the sandbox becomes a permission request
-  the driver declines. Any other policy (`untrusted`, `on-failure`, a granular table), `on-request` with
+  loop-manager declines. Any other policy (`untrusted`, `on-failure`, a granular table), `on-request` with
   `danger-full-access` or no `sandbox_mode` in the block, an unknown `sandbox_mode`, a native block that is no table,
   and `default_permissions` or `approvals_reviewer` (the mode overrides them on every turn) are a load error naming
   the key: "`native.codex.approval_policy`: the ACP harness `codex` offers `never` with `danger-full-access`, and

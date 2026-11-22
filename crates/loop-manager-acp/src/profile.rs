@@ -26,6 +26,8 @@ pub(crate) struct Profile {
     pub(crate) name: &'static str,
     /// The oldest version of the agent the profile supports, `(major, minor, patch)`.
     pub(crate) minimum: (u32, u32, u32),
+    /// Whether the agent may insert a prompt into a turn in flight (`Driver::prompts_in_turn`).
+    pub(crate) prompts_in_turn: bool,
     /// The process part of a session (`part::process` and what the profile delivers through the process); `state` is
     /// the daemon's state directory.
     pub(crate) process: fn(&str, Setup, &EffectiveConfig, &SessionPlan, &Path) -> Result<Value, Failure>,
@@ -56,6 +58,8 @@ pub(crate) const PROFILES: &[Profile] = &[
     Profile {
         name: "claude",
         minimum: claude::MINIMUM,
+        // Claude Code queues a prompt sent during a turn and may take it in before the turn ends.
+        prompts_in_turn: true,
         process: claude::process,
         session: claude::session,
         env: claude::env,
@@ -71,6 +75,8 @@ pub(crate) const PROFILES: &[Profile] = &[
     Profile {
         name: "codex",
         minimum: codex::MINIMUM,
+        // codex-acp holds a prompt sent during a turn until the turn is idle.
+        prompts_in_turn: false,
         process: codex::process,
         session: codex::session,
         env: codex::env,
@@ -90,6 +96,7 @@ pub(crate) const PROFILES: &[Profile] = &[
 pub(crate) const GENERIC: Profile = Profile {
     name: "",
     minimum: (0, 0, 0),
+    prompts_in_turn: false,
     process: |harness, setup, config, plan, _| part::process(harness, setup, config, plan),
     session: |_, _, _, _| Ok(()),
     env: part::env,

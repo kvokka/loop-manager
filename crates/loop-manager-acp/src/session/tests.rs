@@ -60,6 +60,30 @@ fn the_answer_acknowledges_a_prompt_no_update_did() {
     assert!(turn.acked(key).is_empty());
 }
 
+/// Of two prompts the agent holds, the turn that starts acknowledges the older; each answer its own, once; a drop
+/// takes a prompt out.
+#[test]
+fn a_turn_acknowledges_the_oldest_prompt_held_and_a_drop_takes_one_out() {
+    let (mut turn, now) = (turn(), Instant::now());
+    let (one, two, three) = (
+        PromptKey::new("r", 1, 1),
+        PromptKey::new("r", 1, 2),
+        PromptKey::new("r", 1, 3),
+    );
+    for key in [one, two, three] {
+        turn.sent(key);
+    }
+    assert_eq!(turn.dropped(two), vec![Normalized::PromptDropped { key: two }]);
+    assert!(turn.dropped(two).is_empty());
+    assert_eq!(
+        turn.update(ME, &running(), now)[0],
+        Normalized::PromptAcked { key: one }
+    );
+    assert!(turn.acked(one).is_empty());
+    assert_eq!(turn.acked(three), vec![Normalized::PromptAcked { key: three }]);
+    assert!(turn.acked(two).is_empty(), "a dropped prompt is acknowledged never");
+}
+
 #[test]
 fn idle_ends_the_turn_by_its_stop_reason_then_tells_the_state() {
     let now = Instant::now();
@@ -178,6 +202,10 @@ fn an_exit_in_a_turn_is_a_harness_crash_then_the_instance_is_gone() {
             signal: None
         })
     );
+    // A prompt the agent holds out of a turn fails with the exit too.
+    let mut held = Turn::default();
+    held.sent(PromptKey::new("r", 1, 1));
+    assert_eq!(kinds(&held.exited(None, Some(9), "")), vec![FailureKind::HarnessCrash]);
     // Out of a turn the exit is only the instance's.
     assert_eq!(
         Turn::default().exited(None, Some(9), ""),

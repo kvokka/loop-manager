@@ -161,6 +161,15 @@ pub enum SessionState {
     Idle,
 }
 
+/// One answer a permission request offers; `kind` is `allow_once`, `allow_always`, `reject_once`, `reject_always` or
+/// a kind of the harness's own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PermissionOption {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RateLimit {
     pub utilization: f64,
@@ -196,13 +205,23 @@ pub enum Normalized {
     Activity {
         tool_running: bool,
     },
-    /// The harness or the adapter denied the session a tool (nothing waits on it): one event per denial, with what
-    /// the harness tells of it.
-    PermissionDenied {
+    /// The harness dropped the prompt `key` before it was inserted (a `session/cancel` took it): it is never
+    /// delivered.
+    PromptDropped {
+        key: PromptKey,
+    },
+    /// The session asks for a permission and waits for [`Driver::answer_permission`]; `id` names the request within
+    /// the instance. `tool` is the harness's title of the request, `input` the tool call's input.
+    PermissionRequested {
+        id: String,
         tool: String,
         tool_use_id: Option<String>,
         input: Value,
-        reason: Option<String>,
+        options: Vec<PermissionOption>,
+    },
+    /// The harness took the request `id` back: no answer is awaited.
+    PermissionWithdrawn {
+        id: String,
     },
     Failure(Failure),
     /// The instance process is gone.
@@ -256,6 +275,8 @@ pub trait Driver: Send + Sync {
         session: &'a SessionRef,
         part: &'a SessionPart,
     ) -> BoxFuture<'a, Result<(), Failure>>;
+    /// Returns once the request is written; the insertion is told by `PromptAcked`, a drop by `PromptDropped`, any
+    /// other error of the request by a `Failure` event. An error here is one of writing it.
     fn send_prompt<'a>(
         &'a self,
         instance: &'a InstanceHandle,
@@ -263,6 +284,20 @@ pub trait Driver: Send + Sync {
         text: &'a str,
         key: PromptKey,
     ) -> BoxFuture<'a, Result<(), Failure>>;
+    /// Whether the harness may insert a prompt into a turn in flight; else a prompt sent during a turn waits for the
+    /// turn's end.
+    fn prompts_in_turn(&self) -> bool {
+        false
+    }
+    /// Answers the permission request `request` of `instance`: `Some(option)` selects that option, `None` declines
+    /// (the harness's own `reject_once`, else the `cancelled` outcome). A request already answered or withdrawn:
+    /// nothing.
+    fn answer_permission<'a>(
+        &'a self,
+        instance: &'a InstanceHandle,
+        request: &'a str,
+        option: Option<&'a str>,
+    ) -> BoxFuture<'a, ()>;
     fn cancel_turn<'a>(
         &'a self,
         instance: &'a InstanceHandle,

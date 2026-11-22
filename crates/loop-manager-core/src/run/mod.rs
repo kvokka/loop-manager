@@ -177,7 +177,7 @@ impl Handler for RunHandler {
                 key,
                 text,
             } => prompts::intent(tx, &run, attempt, 1, key, &text),
-            Msg::PromptSent { run, attempt, key } => prompts::advance(tx, &run, attempt, Some(key), "sent"),
+            Msg::PromptSent { run, attempt, key } => prompts::advance(tx, &run, attempt, key, "sent"),
             Msg::AttemptFailed { run, attempt, failure } => self.launch_failed(tx, &run, attempt, failure),
             Msg::Driver(event) => self.driver_event(tx, event),
             Msg::ExecDone {

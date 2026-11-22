@@ -1,5 +1,6 @@
 //! The delivery record of every prompt (docs/design/contracts.md 6.4): `intent` with the decision to send, `sent`
-//! once `send_prompt` returned, `acked` on `prompt.acked`, `settled` when the turn ended. A state never goes back.
+//! once `send_prompt` wrote the request, `acked` on `prompt.acked`, `settled` when the turn of an `acked` one ended;
+//! `withdrawn`, from `intent` or `sent`, when the harness dropped it. A state never goes back.
 
 use crate::{Error, Tx, driver::PromptKey};
 use rusqlite::{OptionalExtension, params};
@@ -33,30 +34,58 @@ pub(super) fn intent(
     )
 }
 
-/// Moves the prompt `key` of the attempt (`None`: every prompt of it) on to `state`; each prompt that moves gets the
-/// history record `prompt_state`.
-pub(super) fn advance(
-    tx: &mut Tx<'_>,
-    run: &str,
-    attempt: u32,
-    key: Option<PromptKey>,
-    state: &str,
-) -> Result<(), Error> {
+/// Moves the prompt `key` of the attempt on to `state` (`sent` or `acked`); a prompt that moves gets the history
+/// record `prompt_state`.
+pub(super) fn advance(tx: &mut Tx<'_>, run: &str, attempt: u32, key: PromptKey, state: &str) -> Result<(), Error> {
     let sql = format!(
-        "UPDATE prompts SET state = ?4 WHERE run = ?1 AND attempt = ?2 AND (?3 IS NULL OR key = ?3) AND {} < {} \
-         RETURNING key",
+        "UPDATE prompts SET state = ?4 WHERE run = ?1 AND attempt = ?2 AND key = ?3 AND {} < {} RETURNING key",
         RANK.replace("{}", "state"),
         RANK.replace("{}", "?4")
     );
-    let moved: Vec<String> = {
-        let mut stmt = tx.sql().prepare(&sql)?;
-        let rows = stmt.query_map(params![run, attempt, key.map(|k| k.0.to_string()), state], |r| r.get(0))?;
-        rows.collect::<Result<_, _>>()?
-    };
-    for key in moved {
+    for key in moved(tx, &sql, params![run, attempt, key.0.to_string(), state])? {
         record(tx, run, attempt, "prompt_state", json!({ "key": key, "state": state }))?;
     }
     Ok(())
+}
+
+/// The turn ended: every `acked` prompt of the attempt is `settled`. A prompt the harness still holds (`intent`,
+/// `sent`) is not of that turn and stays.
+pub(super) fn settle(tx: &mut Tx<'_>, run: &str, attempt: u32) -> Result<(), Error> {
+    let sql = "UPDATE prompts SET state = 'settled' WHERE run = ?1 AND attempt = ?2 AND state = 'acked' RETURNING key";
+    for key in moved(tx, sql, params![run, attempt])? {
+        record(
+            tx,
+            run,
+            attempt,
+            "prompt_state",
+            json!({ "key": key, "state": "settled" }),
+        )?;
+    }
+    Ok(())
+}
+
+/// The harness dropped the prompt `key` before it inserted it: from `intent` or `sent` it is `withdrawn` for good,
+/// the history record `prompt_state` saying `by` whom.
+pub(super) fn withdraw(tx: &mut Tx<'_>, run: &str, attempt: u32, key: PromptKey, by: &str) -> Result<(), Error> {
+    let sql = "UPDATE prompts SET state = 'withdrawn' WHERE run = ?1 AND attempt = ?2 AND key = ?3 \
+               AND state IN ('intent', 'sent') RETURNING key";
+    for key in moved(tx, sql, params![run, attempt, key.0.to_string()])? {
+        record(
+            tx,
+            run,
+            attempt,
+            "prompt_state",
+            json!({ "key": key, "state": "withdrawn", "by": by }),
+        )?;
+    }
+    Ok(())
+}
+
+/// The keys an `UPDATE … RETURNING key` moved.
+fn moved(tx: &Tx<'_>, sql: &str, params: impl rusqlite::Params) -> Result<Vec<String>, Error> {
+    let mut stmt = tx.sql().prepare(sql)?;
+    let rows = stmt.query_map(params, |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// A history record of `attempt` of `run`, at the step of that attempt.
@@ -92,7 +121,7 @@ pub(super) fn unsettled(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<Option<(
         .sql()
         .query_row(
             "SELECT p.n, p.key, p.text FROM prompts p JOIN attempts a ON a.run = p.run AND a.n = p.attempt \
-             WHERE p.run = ?1 AND p.attempt = ?2 AND p.state != 'settled' \
+             WHERE p.run = ?1 AND p.attempt = ?2 AND p.state IN ('intent', 'sent', 'acked') \
              AND json_extract(a.failure, '$.kind') = 'daemon_crash' ORDER BY p.n DESC LIMIT 1",
             params![run, attempt.saturating_sub(1)],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),

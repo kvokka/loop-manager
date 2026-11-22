@@ -176,8 +176,8 @@ async fn s11_eof_on_stdin_in_a_turn_ends_the_adapter_and_crashes_the_turn() {
     );
 }
 
-/// A silent provider gives no turn end and no failure: the core's watchdog owns the stall (docs/design/invariants.md);
-/// an interrupt ends the turn as cancelled.
+/// A silent provider gives no turn end and no failure: the core's watchdog owns the stall (docs/design/invariants.md).
+/// A prompt sent in that turn is held, never acknowledged; an interrupt drops it and ends the turn as cancelled.
 #[tokio::test]
 async fn s12_a_silent_provider_ends_nothing_until_an_interrupt_cancels_the_turn() {
     let dir = tempfile::tempdir().unwrap();
@@ -187,16 +187,27 @@ async fn s12_a_silent_provider_ends_nothing_until_an_interrupt_cancels_the_turn(
         .await;
     assert_eq!(ended, None);
     assert!(live.failures().is_empty(), "{:?}", live.seen);
+    let held = PromptKey::new("r1", 1, 2);
+    live.prompt(held, "And this too.").await;
+    let acked = live
+        .until(Duration::from_secs(2), |e| *e == Normalized::PromptAcked { key: held })
+        .await;
+    assert_eq!(acked, None, "{:?}", live.seen);
     live.driver.cancel_turn(&live.instance, &live.session).await.unwrap();
     assert_eq!(live.ended().await, StopReason::Cancelled, "{:?}", live.seen);
+    let dropped = Normalized::PromptDropped { key: held };
+    if !live.seen.contains(&dropped) {
+        live.until(Duration::from_secs(10), |e| *e == dropped).await;
+    }
+    assert!(live.seen.contains(&dropped), "{:?}", live.seen);
     assert!(live.failures().is_empty(), "{:?}", live.seen);
     live.stop().await;
 }
 
 /// The read-only sandbox with `on-request` is the mode `read-only`: a command the model asks to run outside the
-/// sandbox comes to the driver as `session/request_permission`, which it declines. codex offers no option to go on
-/// without the command, only its `cancel`: the command does not run, nothing waits for a person, and the turn ends
-/// cancelled. The tool of the denial is the title of the request, codex's "Run command?".
+/// sandbox comes to the driver as `session/request_permission`, told as `permission.requested` and declined. codex
+/// offers no option to go on without the command, only its `cancel`: the command does not run and the turn ends
+/// cancelled. The tool of the request is its title, codex's "Run command?".
 #[tokio::test]
 async fn s13_a_request_the_config_does_not_allow_is_declined_and_the_turn_is_cancelled() {
     let dir = tempfile::tempdir().unwrap();
@@ -216,7 +227,7 @@ async fn s13_a_request_the_config_does_not_allow_is_declined_and_the_turn_is_can
         .seen
         .iter()
         .filter_map(|e| match e {
-            Normalized::PermissionDenied {
+            Normalized::PermissionRequested {
                 tool,
                 tool_use_id,
                 input,

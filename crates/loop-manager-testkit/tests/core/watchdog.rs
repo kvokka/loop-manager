@@ -194,16 +194,17 @@ async fn a_retry_the_harness_announces_adds_its_pause_to_the_silence_limit() {
     );
 }
 
-/// A denial is activity: in `running` it restarts the silence; in `starting` it is told and the start timeout stands
-/// (contracts 4.3).
+/// A permission request is activity: in `running` it restarts the silence; in `starting` it is declined and told,
+/// and the start timeout stands (contracts 4.3).
 #[tokio::test(start_paused = true)]
-async fn a_denied_permission_is_activity_for_the_watchdog() {
+async fn a_permission_request_is_activity_for_the_watchdog() {
     let denied = || {
-        Step::Emit(Normalized::PermissionDenied {
+        Step::Emit(Normalized::PermissionRequested {
+            id: "p1".into(),
             tool: "Bash".into(),
             tool_use_id: None,
             input: Value::Null,
-            reason: None,
+            options: Vec::new(),
         })
     };
     let wait = Step::Wait(Duration::from_secs(50));

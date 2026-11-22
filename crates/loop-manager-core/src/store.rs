@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 26;
+const VERSION: i32 = 27;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -126,8 +126,18 @@ CREATE TABLE prompts (
     n INTEGER NOT NULL,
     key TEXT NOT NULL,
     text TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('intent', 'sent', 'acked', 'settled')),
+    state TEXT NOT NULL CHECK (state IN ('intent', 'sent', 'acked', 'settled', 'withdrawn')),
     PRIMARY KEY (run, attempt, n)
+);
+-- The permission requests of the live attempts (contracts 4.3): `id` names one within the attempt's instance,
+-- `body` is `{tool, tool_use_id, input, options}`, `answer` `{by, option}` (NULL: it waits for one).
+CREATE TABLE permissions (
+    run TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    answer TEXT,
+    PRIMARY KEY (run, attempt, id)
 );
 
 -- Issue gates (contracts 7): one closure per `(key, closed_by)`.

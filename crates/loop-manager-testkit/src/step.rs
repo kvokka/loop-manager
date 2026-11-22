@@ -13,6 +13,8 @@ pub enum Step {
     Emit(Normalized),
     /// As the first step: the prompt is not acknowledged, the scenario plays before `prompt.acked`.
     NoAck,
+    /// The harness inserts the oldest prompt it holds into the turn: `prompt.acked` of it; nothing when it holds none.
+    Insert,
     /// The process dies: `exited` is sent and every later call on the instance fails with `harness_crash`.
     Exit {
         code: Option<i32>,

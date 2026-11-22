@@ -49,7 +49,8 @@ The behaviour itself is described in the document named under each heading; this
 
 ## Harnesses — [contracts 4](../design/contracts.md#4-driver-interface)
 
-- The driver interface has no steer mid-turn, no change of model inside a live session, no human joining.
+- The driver interface has no change of model inside a live session and no human joining. A prompt sent during a
+  turn is held by the harness and goes into that turn only where the harness can (`prompts_in_turn`).
 - An instance has a limit of sessions; past it a second instance with the same fingerprint starts.
 
 ## Agents, packs, formulas — [config](../design/config.md)

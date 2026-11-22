@@ -122,19 +122,14 @@ impl Executor for RunExecutor {
                     let _ = core.send(None, Msg::InstanceStopped { id, reason }).await;
                     return true;
                 }
-                (Some("prompt"), Ok(handle)) => {
-                    let (text, key) = (payload["text"].as_str().unwrap_or_default(), key(payload));
-                    let sent = driver.send_prompt(&handle, &session, text, key).await;
-                    if sent.is_ok() {
-                        let run = payload["run"].as_str().unwrap_or_default().to_owned();
-                        let msg = Msg::PromptSent {
-                            run,
-                            attempt: attempt(payload),
-                            key,
-                        };
-                        let _ = core.send(None, msg).await;
-                    }
-                    sent
+                (Some("prompt"), Ok(handle)) => prompt(core, driver.as_ref(), &handle, &session, payload).await,
+                (Some("permit"), Ok(handle)) => {
+                    let (request, option) = (
+                        payload["request"].as_str().unwrap_or_default(),
+                        payload["option"].as_str(),
+                    );
+                    driver.answer_permission(&handle, request, option).await;
+                    Ok(())
                 }
                 (Some("stop_background"), Ok(handle)) => {
                     driver.stop_background(&handle, &session).await;
@@ -154,6 +149,27 @@ impl Executor for RunExecutor {
             true
         })
     }
+}
+
+/// Writes the prompt of `payload` into `session`; that it went out is the writer's to know. Its insertion comes as a
+/// driver event.
+async fn prompt(
+    core: &CoreHandle<Msg>,
+    driver: &dyn Driver,
+    handle: &InstanceHandle,
+    session: &SessionRef,
+    payload: &Value,
+) -> Result<(), Failure> {
+    let (text, key) = (payload["text"].as_str().unwrap_or_default(), key(payload));
+    driver.send_prompt(handle, session, text, key).await?;
+    let run = payload["run"].as_str().unwrap_or_default().to_owned();
+    let msg = Msg::PromptSent {
+        run,
+        attempt: attempt(payload),
+        key,
+    };
+    let _ = core.send(None, msg).await;
+    Ok(())
 }
 
 pub(super) fn attempt(payload: &Value) -> u32 {

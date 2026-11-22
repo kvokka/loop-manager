@@ -81,8 +81,8 @@ kind.
 | 9 | unknown model | `config_error` (`errorKind: model_not_found`) |
 | 10 | `kill -9` of the adapter while a command runs | `harness_crash` and `exited` with signal 9 within a second |
 | 11 | EOF on stdin in a turn | the adapter exits at once by itself (code 0, or 1 when its last write meets the closed stdout), the turn is not finished: `harness_crash` |
-| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); `session/cancel` ends the turn as cancelled |
-| 13 | a command the permission mode does not allow | mode `default`: the adapter asks `session/request_permission`, the driver declines it (`permission_denied` with the adapter's title of the command), the command does not run, the turn completes |
+| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); a prompt sent in that turn is not acknowledged; `session/cancel` ends the turn as cancelled and drops that prompt (`prompt.dropped`) |
+| 13 | a command the permission mode does not allow | mode `default`: the adapter asks `session/request_permission`, the driver reports `permission.requested` with the adapter's title of the command and the test declines it as the core's policy does, the command does not run, the turn completes |
 | 14 | background command after the turn | idle with `background` first, idle without background after the command |
 | 15 | the same prompt again with its idempotency key | taken once: the next prompt, of a key of its own, is the second turn and the second model request |
 
@@ -123,8 +123,8 @@ of `requests()`.
 | 9 | unknown model | `config_error` by the OpenAI API's words `does not exist or you do not have access to it`: the 404 does not reach the driver |
 | 10 | `kill -9` of the adapter while a command runs | `harness_crash` and `exited` with signal 9 within a second |
 | 11 | EOF on stdin in a turn | the adapter stops its app-server and exits at once by itself with code 0, the turn is not finished: `harness_crash` |
-| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); `session/cancel` ends the turn as cancelled |
-| 13 | a command the permission mode does not allow | mode `read-only` (`on-request` with `read-only`), the model asks to run `touch` outside the sandbox: the adapter asks `session/request_permission` titled `Run command?` with no option to go on without the command, the driver takes its `cancel` (`permission_denied`), the command does not run, the model is not asked again and the turn ends cancelled |
+| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); a prompt sent in that turn is not acknowledged; `session/cancel` ends the turn as cancelled and drops that prompt (`prompt.dropped`) |
+| 13 | a command the permission mode does not allow | mode `read-only` (`on-request` with `read-only`), the model asks to run `touch` outside the sandbox: the adapter asks `session/request_permission` titled `Run command?` with no option to go on without the command, the driver reports `permission.requested` and the test declines it, which takes codex's `cancel`, the command does not run, the model is not asked again and the turn ends cancelled |
 | 14 | command that outlives its turn | `exec_command` yields while the command runs: the turn completes, idle with `background` first, idle without background after the command, no turn follows |
 | 15 | the same prompt again with its idempotency key | taken once: the next prompt, of a key of its own, is the second turn and the second model request |
 | 16 | an MCP server loop-manager gives that does not start | `start_session` fails with `tool_failure` (`required MCP servers failed to initialize` in `data.details`), no request reaches the provider |
