@@ -15,7 +15,7 @@ fn fix(step: &str) -> String {
 }
 
 /// br in the project as `alice`, filing beads of the rig `web`.
-fn br(project: &Path, args: &[&str]) -> String {
+pub(super) fn br(project: &Path, args: &[&str]) -> String {
     br_in(project, Some("w"), args)
 }
 
@@ -107,7 +107,7 @@ async fn a_root_bead_with_an_exec_run_under_it_is_a_task_with_its_body_and_comme
 }
 
 /// A daemon whose `fix` formula is a prompt run of a claude agent on the fake `provider`, with a br tracker.
-async fn claude(provider: &Provider) -> Daemon {
+pub(super) async fn claude(provider: &Provider) -> Daemon {
     let base_url = provider.base_url();
     Daemon::start(|dir| {
         let shop = dir.join("config/loop-manager/shop");

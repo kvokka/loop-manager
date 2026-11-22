@@ -84,8 +84,8 @@ With `replayFrom: {"type": "start"}` the task's own history comes first, read fr
 Then the tree and the transcripts, as the daemon replays them:
 
 - each node is announced by `subagent_update` on its parent's session (the task's for a node directly under the
-  root) with `sessionId`, `title`, `cwd` (the session directory of a thread, when known) and `state`: `running` for a
-  live node, else `idle` with `stopReason: end_turn`. A parent is announced before its children.
+  root) with `sessionId`, `title`, `cwd` (the session directory of a thread, when known) and `state`, a state update
+  object: `{"state": "running"}` for a live node, else `{"state": "idle", "stopReason": "end_turn"}`. A parent is announced before its children.
 - each transcript entry `n` of a thread goes to the thread's session (table below);
 - a transcript that cannot be read (an ended session whose file is gone) is an `agent_message` `unavailable` on the
   thread: `The transcript of this session is unavailable: <reason>`.
