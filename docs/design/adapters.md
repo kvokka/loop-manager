@@ -1,12 +1,13 @@
 # Harness adapters
 
 A harness is an agent CLI loop-manager drives (claude, codex). The core treats every harness as the `Driver` trait
-([contracts 4](contracts.md#4-driver-interface)); each harness gets an adapter crate, `crates/loop-manager-<name>`, that
-translates its protocol into the trait. Everything known of one harness — its protocol, the shape of its failures, its
-options, its model short names, its `doctor` checks — lives in its adapter. Adapters are modules of the one
-`loop-manager` binary, not processes of their own. A harness the build has no adapter for is an agent executable that
-speaks the Agent Client Protocol, version 2, named in the config alone and driven by the one ACP driver,
-`crates/loop-manager-acp` ([ACP v2 harnesses](#acp-v2-harnesses)).
+([contracts 4](contracts.md#4-driver-interface)); an adapter translates the harness's protocol into the trait. A
+harness that speaks the Agent Client Protocol, version 2, is driven by the one ACP driver, `crates/loop-manager-acp`
+([ACP v2 harnesses](#acp-v2-harnesses)): named in the config alone, or known to the build by a
+[profile](#profiles), as claude is. A harness with a protocol of its own gets an adapter crate,
+`crates/loop-manager-<name>`, as codex does. Everything known of one harness — its protocol, the shape of its
+failures, its options, its model short names, its `doctor` checks — lives in its adapter or profile. Adapters are
+modules of the one `loop-manager` binary, not processes of their own.
 
 Where adapters stand among the other parts, and the boundaries the build checks, is in the
 [architecture](../architecture.md). The adapter never decides policy: retry, park and refuse live in addons and
@@ -14,46 +15,68 @@ config ([config](config.md#where-the-bundled-addons-end-and-the-core-begins)).
 
 ## Adding a harness
 
-1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Driver`.
-2. In it, one exported description of itself:
+A harness comes in one of three ways, the first that fits:
 
-   ```rust
-   pub const ADAPTER: loop_manager_contract::driver::Adapter = Adapter {
-       name: "<name>",                   // [harness.<name>] and the binary mise resolves
-       models: &[("<short>", "<full>")], // short model names it expands; any other name goes as it is
-       minimum: (1, 2, 0),               // oldest supported binary version, inclusive; also Capabilities.min_version
-       agent_types: &["<type>"],         // agent types built into the harness: no subagent takes such a name
-       subagents_inherit: false,         // true: a subagent has its session's MCP servers and hooks only
-       new,                              // fn(&Setup) -> Result<Arc<dyn Driver>, String>
-       doctor,                           // fn(DoctorAgents) -> Vec<Check>
-   };
-   ```
+- **An ACP v2 agent, by config alone.** An agent executable that speaks the Agent Client Protocol, version 2, and
+  needs nothing ACP does not carry is a `[harness.<name>]` with a `command` ([ACP v2 harnesses](#acp-v2-harnesses)):
+  no code and no rebuild.
+- **An ACP v2 agent with a profile.** An agent that takes more than ACP carries (hooks, skills, subagents, a native
+  block, an isolated home), reports its failures in fields of its own, or needs `doctor` checks gets a
+  [profile](#profiles) of the ACP driver, as claude does:
+  1. `src/profile/<name>.rs` in `crates/loop-manager-acp` with the functions of the points of the table in
+     "Profiles", and one row in `PROFILES` (`src/profile.rs`) naming them and `minimum`, the oldest version of the
+     agent the profile supports, inclusive.
+  2. A `pub const <NAME>: Adapter` in `crates/loop-manager-acp/src/lib.rs` (the shape below): `command` the agent's
+     executable, `minimum` the profile's, `new` building the driver by `Acp::of_adapter`. A harness with a profile
+     is an adapter of the build, and its `[harness.<name>]` takes the keys of an ACP harness (`command`, `args`,
+     `env`, `model`, `trace`); a `binary` is a config error.
+  3. One row in `ADAPTERS` (`crates/loop-manager/src/harness.rs`).
+  4. The agent pinned in `mise.toml` at an exact version, with the runtime it needs (claude: `node`), and the
+     contract suite in `crates/loop-manager-acp/tests/harness/` ([harness updates](../harness-updates.md)).
+- **A harness with a protocol of its own** gets an adapter crate, as codex does:
+  1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Driver`.
+  2. In it, one exported description of itself:
 
-   `new` gets the resolved binary, the state directory, the API socket and the adapter's own keys of
-   `[harness.<name>]` (everything but `binary` and `model`). It parses them itself and names the wrong key in its
-   error, which becomes a config error of `loop-manager config check`, `loop-manager doctor` and daemon start. A harness
-   that takes no settings refuses any key. `doctor` gets every agent on the harness, labelled and with its effective
-   config, and answers what only the adapter knows: whether a session the daemon starts can log in (the daemon's own
-   environment reaches no session, so a key there does not count), host settings every session inherits (stdio
-   MCP servers), a sandbox. `login_check` and `host_mcp_check` in `loop_manager_contract::driver` give the common
-   wording.
+     ```rust
+     pub const ADAPTER: loop_manager_contract::driver::Adapter = Adapter {
+         name: "<name>",                   // [harness.<name>]
+         command: "<executable>",          // the binary mise resolves
+         models: &[("<short>", "<full>")], // short model names it expands; any other name goes as it is
+         minimum: (1, 2, 0),               // oldest supported binary version, inclusive; also Capabilities.min_version
+         agent_types: &["<type>"],         // agent types built into the harness: no subagent takes such a name
+         subagents_inherit: false,         // true: a subagent has its session's MCP servers and hooks only
+         new,                              // fn(&Setup) -> Result<Arc<dyn Driver>, String>
+         doctor,                           // fn(DoctorAgents) -> Vec<Check>
+     };
+     ```
 
-   `models` is what the config knows of the harness (config.md "Harness and model"): a short model name becomes
-   the full one when the config is assembled, so the gate key `model:<harness>/<model>` and `explain` have the name
-   the harness gets. A harness whose CLI resolves its own short names (claude: `fable`, `opus`, `sonnet`, `haiku` to
-   the latest of each) lists none. The core reads them from `Config::adapters`, which the root fills with its
-   `ADAPTERS` when it loads the config (`config::load_for`); the core knows no harness by name. Which vendor a harness
-   reaches its model through is the harness's own setting (host config or `native.<harness>`); the core neither
-   reads nor names it.
+  3. One row in `ADAPTERS` (`crates/loop-manager/src/harness.rs`) and the crate in `crates/loop-manager/Cargo.toml`.
+  4. The binary pinned in `mise.toml` by release line ([harness updates](../harness-updates.md)) and the contract
+     suite below.
 
-   A test of the adapter checks the table against the harness's own model list, with no model call (codex:
-   `model/list` of `codex app-server`, `crates/loop-manager-codex/tests/harness/models.rs`). A target the harness does
-   not list, or marks as replaced, fails it: that is a finding for the owner, who picks the new name; the table is never
-   switched to another model silently.
-3. One row in `ADAPTERS` (`crates/loop-manager/src/harness.rs`) and the crate in `crates/loop-manager/Cargo.toml`.
-   Nothing else in the root names a harness; a `[harness.<name>]` with no row is a config error that lists the known
-   ones.
-4. The binary pinned in `mise.toml` by release line ([harness updates](../harness-updates.md)) and the contract suite below.
+Either way `new` gets the resolved binary, the `PATH` its process gets when mise found the binary (the directory of
+the runtime mise installed first), the state directory, the API socket, the run histories and the adapter's own keys
+of `[harness.<name>]` (everything but `binary` and `model`). It parses them itself and names the wrong key in its
+error, which becomes a config error of `loop-manager config check`, `loop-manager doctor` and daemon start. A harness
+that takes no settings refuses any key. `doctor` gets every agent on the harness, labelled and with its effective
+config, and answers what only the adapter knows: whether a session the daemon starts can log in (the daemon's own
+environment reaches no session, so a key there does not count), host settings every session inherits (stdio MCP
+servers), a sandbox. `login_check` and `host_mcp_check` in `loop_manager_contract::driver` give the common wording.
+
+`models` is what the config knows of the harness (config.md "Harness and model"): a short model name becomes the
+full one when the config is assembled, so the gate key `model:<harness>/<model>` and `explain` have the name the
+harness gets. A harness whose CLI resolves its own short names (claude: `fable`, `opus`, `sonnet`, `haiku` to the
+latest of each) lists none. The core reads them from `Config::adapters`, which the root fills with its `ADAPTERS`
+when it loads the config (`config::load_for`); the core knows no harness by name. Which vendor a harness reaches its
+model through is the harness's own setting (host config or `native.<harness>`); the core neither reads nor names it.
+
+A test of the adapter checks the table against the harness's own model list, with no model call (codex: `model/list`
+of `codex app-server`, `crates/loop-manager-codex/tests/harness/models.rs`). A target the harness does not list, or
+marks as replaced, fails it: that is a finding for the owner, who picks the new name; the table is never switched to
+another model silently.
+
+Nothing else in the root names a harness; a `[harness.<name>]` with neither a row in `ADAPTERS` nor a `command` is a
+config error that lists the known ones.
 
 ## ACP v2 harnesses
 
@@ -173,8 +196,10 @@ the driver has no mechanism for.
 | `account` | the hash the gates use |
 
 **`claude`** drives `claude-agent-acp`, the ACP adapter of claude (`@agentclientprotocol/claude-agent-acp` on npm,
-pinned in `mise.toml` with the `node` it runs on); the adapter carries its own claude CLI. While `ADAPTERS` lists
-`loop-manager-claude`, the root drives `claude` by that adapter and makes no ACP driver under the name.
+pinned in `mise.toml` with the `node` it runs on); the adapter carries its own claude CLI. `ADAPTERS` lists it as
+`loop_manager_acp::CLAUDE`: the executable is `command` of `[harness.claude]`, else `mise which claude-agent-acp`,
+else `claude-agent-acp` on `PATH`; when mise found it, the directory of `mise which node` goes first in the `PATH` of
+its process. Its minimum version is 0.109.1, the version its contract suite runs on.
 
 - **What it sends.** claude's own options go in `_meta.claudeCode.options` of `session/new` and `session/resume`:
   `settingSources: ["project", "local"]` for a session with `inherit_host = false`; `settings`, the `native.claude`
@@ -211,19 +236,22 @@ pinned in `mise.toml` with the `node` it runs on); the adapter carries its own c
   `rateLimit.status` `rejected` or a message that starts with `You've hit your` (`retry_at_ms` from
   `rateLimit.resetsAt`), else `rate_limited`; `overloaded`, `server_error` are `overloaded`; `model_not_found`
   `config_error`; `invalid_request` with a message that starts with `Prompt is too long` `context_overflow`. Then
-  `data.startupFailureReason`, with the reasons of the native driver: `session_held_by_background` is
+  `data.startupFailureReason`, by the list of `startup_kind`: `session_held_by_background` is
   `transcript_divergence`, the gateway sign-in ones `auth_required`, the configuration ones `config_error`. Then
   `data.cause`, or a message that starts with `Claude Code stopped`: `harness_crash`. Anything else is `unknown` with
-  the adapter's message. A message rule reads the message after the adapter's `Internal error: ` prefix.
+  the adapter's message. A message rule reads the message after the adapter's prefix `Internal error:`.
   `rate_limited` and `overloaded` are `retried_by_harness`: the CLI retries before it gives
   up. A `notice` titled `MCP server "<name>" failed to start` or `… needs authentication` is a `tool_failure`
   (decision 119); the adapter sends one for the servers of the session part only.
-- **The account.** The native driver's hash of where the credential comes from: the name and value of the first
-  credential variable of `env`, else the host's claude config directory. An account keeps its id across the two
-  drivers.
+- **The account.** A hash of where the credential comes from (`Fingerprint::of("claude", …)`): the name and value of
+  the first credential variable of `env`, else the host's claude config directory. The hashes are fixed by test, so
+  an account keeps its id and its gates across versions.
+- **`doctor`.** `claude login`: whether a session the daemon starts can log in, with the host's `.credentials.json`
+  or a credential variable of its own (`login_check`); `claude host mcp`: the stdio MCP servers of the host's
+  `.claude.json`, which start in every session that inherits the host (`host_mcp_check`).
 
 `crates/loop-manager-acp/src/profile/tests.rs` holds the claude profile: the parts and the environment of a typical
-agent, the account against the native driver's, the failures row by row, the plugin around a spawned process, and
+agent, the account hashes, the failures row by row, the plugin around a spawned process, and
 the config options after `session/new` and `session/resume` against an agent in the test's process.
 
 ## What the core expects of a driver
@@ -299,7 +327,7 @@ Made for the two harnesses there are; none is changed before a harness needs it.
   not the thread's); a harness without command hooks can only refuse an agent that has any, as a `config_error` at the
   start of a run.
 - `EffectiveConfig.targets` (the subagents a session may call) is delivered as the harness's own subagent
-  definitions: claude takes them by `--agents`, codex as agent roles of the thread
+  definitions: claude takes them in `agents` of `_meta.claudeCode.options`, codex as agent roles of the thread
   (`config.agents`, a generated role file per target).
 - `capabilities(&ProcessPart)` takes a process part although the minimum version does not depend on it; the root
   reads it from `Adapter.minimum` instead.

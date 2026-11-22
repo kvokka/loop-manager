@@ -29,7 +29,9 @@ experiment ran on Linux aarch64).
 Common setup for the claude experiments: `claude -p --input-format stream-json --output-format stream-json
 --verbose --setting-sources "" --strict-mcp-config --model haiku`, clean environment (only `PATH`, `HOME`, `LANG`,
 `USER`, `TERM`), `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, subscription login, every
-process in its own process group, a fresh empty work directory.
+process in its own process group, a fresh empty work directory. The product drives claude through its ACP adapter,
+`claude-agent-acp` ([adapters](adapters.md#profiles)), so the stream-json findings below describe the claude CLI
+under that adapter, not what the driver reads.
 
 ## claude protocol (experiment 1a)
 
@@ -46,14 +48,14 @@ Logs: `experiments/01-claude-protocol/logs/`.
 | Native prompt acknowledgement | Yes: `{"type":"command_lifecycle","command_uuid":<uuid of our user message>,"state":"queued"\|"started"\|"completed"}`. `queued` arrives 6–9 ms after the write and `started` within 15 ms, `completed` right after `result`. Emitted with and without `--replay-user-messages`; `init.capabilities` lists `msg_lifecycle_v1`. The `isReplay` echo of `--replay-user-messages` is not an acknowledgement: it arrives 0.9 s later, just before the reply. |
 | Idempotency key | The `uuid` field of the user message we write becomes the `uuid` of the user record in the transcript (`<config>/projects/<dir>/<session>.jsonl`). Writing a message whose `uuid` is already in the session yields `command_lifecycle{state:"completed"}` at once and no turn. So the key is the message `uuid` (derive it deterministically from the attempt key); after a daemon crash the transcript is searched for it. Limit: only a *finished* turn was observed. If the daemon dies after `queued` and the turn is cut, the user record is already in the transcript without an answer; a resend with the same `uuid` will most likely also complete silently and the attempt would hang. So after a restart the adapter checks the transcript for an answer after our `uuid` and, if there is none, sends a continuation with a new `uuid` ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)). |
 | `--resume` with stream-json input | Works: the context survives (the resumed session recalled a word from the first one), `session_id` is unchanged, `init` after the prompt as usual. |
-| Model after resume | Not reset. Without `--model`, a fresh session started on the account default (`claude-opus-5-5`), a resumed haiku session started on `claude-haiku-5-5`. The adapter still passes the model explicitly. (The no-`--model` runs used an unreachable `ANTHROPIC_BASE_URL`, so no non-haiku request was made; `init` already names the model.) |
-| Permission request | `--permission-prompt-tool stdio`: a `session_state_changed` to the waiting state and `control_request{subtype:"can_use_tool"}` arrive together; the answer is a `control_response` (shape below), then `{running}`. The adapter does not use this: it runs claude with `--permission-prompts none` (contracts 4.6). A deny with a message reaches the model as `tool_result{is_error:true, content:<message>}` with `tool_result_meta[].non_execution_kind:"permission-rule"`; the model went on with the next step. |
+| Model after resume | Not reset. Without `--model`, a fresh session started on the account default (`claude-opus-5-5`), a resumed haiku session started on `claude-haiku-5-5`. The driver still sets the model on every resume. (The no-`--model` runs used an unreachable `ANTHROPIC_BASE_URL`, so no non-haiku request was made; `init` already names the model.) |
+| Permission request | `--permission-prompt-tool stdio`: a `session_state_changed` to the waiting state and `control_request{subtype:"can_use_tool"}` arrive together; the answer is a `control_response` (shape below), then `{running}`. loop-manager drives claude through `claude-agent-acp`, which asks for a permission over ACP instead (contracts 4.6). A deny with a message reaches the model as `tool_result{is_error:true, content:<message>}` with `tool_result_meta[].non_execution_kind:"permission-rule"`; the model went on with the next step. |
 | Turn cancellation | `{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}` → `control_response{subtype:"success", response:{still_queued:[]}}` in 16 ms, then `result{subtype:"error_during_execution", is_error:true, terminal_reason:"aborted_tools", stop_reason:"tool_use"}` 43 ms after the request. The running Bash command and its children were gone 1 s later. The next prompt in the same process worked. |
 
 <!-- MEASURE id=claude-ack-latency date=2026-11-12 ver=claude-2.1.322 env=linux-arm64-orbstack src=experiments/01-claude-protocol/logs/basic.ndjson note="command_lifecycle queued 6–9 ms, started 7–15 ms after the write; n=2 turns" -->
 <!-- MEASURE id=claude-native-interrupt date=2026-11-12 ver=claude-2.1.322 env=linux-arm64-orbstack src=experiments/01-claude-protocol/logs/interrupt.ndjson note="n=1, during a foreground Bash python sleep; control_response 16 ms, result 43 ms" -->
 
-Wire shapes the adapter relies on (full samples in the logs):
+Wire shapes a stream-json client relies on (full samples in the logs):
 
 ```json
 {"type":"user","uuid":"<our id>","session_id":"","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":"…"}]}}
@@ -63,7 +65,7 @@ Wire shapes the adapter relies on (full samples in the logs):
 {"type":"control_request","request_id":"<ours>","request":{"subtype":"interrupt"}}
 ```
 
-Consequences for the claude adapter:
+Consequences for a stream-json client of claude:
 
 - "Prompt accepted" = `command_lifecycle{queued}` with our `command_uuid`; a timeout without it is an adapter
   failure, not a turn.
@@ -138,7 +140,7 @@ Findings: the state stays `running` after `result` while a background agent live
 background shell command still runs; one prompt produced three `result`s; and "state idle + empty task list" held
 for 0.1 s at 22.10 right before the harness woke itself up.
 
-**Rule for the adapter**: the session is idle without background work when (a) the last `session_state_changed`
+**Rule for a stream-json client**: the session is idle without background work when (a) the last `session_state_changed`
 is `idle`, (b) the last `background_tasks_changed` had an empty list (or none arrived since spawn), and (c) no
 `task_notification` arrived after the last `result`. Condition (c) closes the wake-up window seen at 22.10. A
 `task_notification{status:"stopped"}` does not count for (c): a task stopped by `stop_task` wakes no turn
@@ -163,7 +165,7 @@ the subagent runs a foreground `Bash` of 20 s (75 s in a third run), then answer
 
 Findings: after the `result` the session is silent for as long as the subagent's command runs, and the state does not
 leave `running` until the self-started turn ends. So the turn-end rule alone keeps the run under the plain `silence`
-budget; the adapter reports idle with background right after a `result` with a live `local_agent`, and the
+budget; a stream-json client reports idle with background right after a `result` with a live `local_agent`, and the
 subagent's steps out of a turn are no activity.
 
 <!-- MEASURE id=claude-background-subagent date=2026-11-17 ver=claude-2.1.326 env=linux-arm64-orbstack src=.loop/cycles/112/notes/wp99-stand.md note="fake provider, no model; n=2 with a 20 s command, n=1 with 75 s" -->
@@ -305,7 +307,7 @@ touched.
 | Hooks: `hooks/hooks.json` inside a `--plugin-dir` plugin | yes | fired next to the `--settings` ones |
 | Skills: `--plugin-dir` (`.claude-plugin/plugin.json` + `skills/<name>/SKILL.md`) | yes | `init.skills` holds `loop-manager-p:p-skill` |
 | MCP: `--mcp-config <file>` and `--mcp-config '<inline JSON>'` (twice in one run) + `--strict-mcp-config` | yes | both `connected` in `init.mcp_servers` |
-| Flags on `--resume` | **not kept** | resume without the flags: same session, but no plugin skill, no MCP, no hook fired. The adapter passes the full flag set on every resume |
+| Flags on `--resume` | **not kept** | resume without the flags: same session, but no plugin skill, no MCP, no hook fired. The driver sends the whole session config again with every `session/resume` |
 | `--setting-sources ""` | cuts host and rig | no rig hook, skill, `CLAUDE.md` or `.mcp.json`; 19 built-in skills and 4 plugins stay |
 | `--setting-sources project` (and `project,local`) | **rig works, host cut** | rig hook fired, `rig-skill` listed, the model quoted the `CLAUDE.md` marker, rig `.mcp.json` server `connected` (`enableAllProjectMcpServers` in the rig settings); host skills and MCP absent (19 skills, 0 other MCP — as with `""`) |
 | No source limit (`user,project,local`, host inherited) | rig works, host added | +5 skills, +1 MCP from the host |
@@ -315,8 +317,8 @@ touched.
 The user-level `~/.claude/CLAUDE.md` is dropped by `--setting-sources project,local` with an own
 `CLAUDE_CONFIG_DIR`, but claude also reads `CLAUDE.md` and `.claude/CLAUDE.md` up the ancestors of its working
 directory, so a rig under `HOME` still reached the host's file (acceptance scenario 12, claude 2.1.322). Without the
-host layer the adapter therefore sets `claudeMdExcludes` to `~/.claude/CLAUDE.md` and `~/.claude/rules/**` in the
-`--settings` file; scenario 12 checks that the isolated session no longer sees it. `~` here is the `HOME` of the
+host layer the `claude` profile therefore sets `claudeMdExcludes` to `~/.claude/CLAUDE.md` and `~/.claude/rules/**` in
+the session's `settings`; scenario 12 checks that the isolated session no longer sees it. `~` here is the `HOME` of the
 daemon process: a daemon run with another `HOME` than the user whose rigs it serves (a system service, for one) does
 not exclude that user's file; run the daemon as that user, as the service files do ([install](../guide/install.md#run-the-daemon)).
 Open: refresh of a delivered OAuth token after expiry ([config](config.md#host-inheritance)).
@@ -343,13 +345,15 @@ Open: refresh of a delivered OAuth token after expiry ([config](config.md#host-i
 
 ### Consequences
 
-- claude: the adapter delivers everything with flags and files in the state directory: `--settings` (file or
-  inline), `--plugin-dir` for skills and plugin hooks, `--mcp-config`; and repeats the whole set on every `--resume`. It
-  does not pass `--strict-mcp-config`: that would cut the rig's `.mcp.json` too, and with inheritance off the setting
-  sources and the own config directory already cut the host's servers. With inheritance on, the host's personal MCP
-  servers reach the session as well, as [config](config.md#host-inheritance) intends. Host inheritance off = `--setting-sources project,local` (not
-  `""`): the rig's own config keeps working — the rig-config rule of `config.md` holds for claude. With an isolated
-  `CLAUDE_CONFIG_DIR` the adapter delivers `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`).
+- claude: the `claude` profile of the ACP driver ([adapters](adapters.md#profiles)) delivers the same channels
+  through `claude-agent-acp`, which hands them to the CLI: `settings` with the hooks and a local plugin of the skills
+  in `_meta.claudeCode.options`, the MCP servers in `mcpServers`; and sends the whole set again with every
+  `session/resume`. Nothing limits the MCP servers to the given ones: that would cut the rig's `.mcp.json` too, and
+  with inheritance off the setting sources and the own config directory already cut the host's servers. With
+  inheritance on, the host's personal MCP servers reach the session as well, as [config](config.md#host-inheritance)
+  intends. Host inheritance off = `settingSources: ["project", "local"]` (not empty): the rig's own config keeps
+  working — the rig-config rule of `config.md` holds for claude. With an isolated `CLAUDE_CONFIG_DIR` the profile
+  delivers `CLAUDE_CODE_OAUTH_TOKEN` (or the session's own `ANTHROPIC_API_KEY`).
 - codex: MCP, hooks (`config.hooks`), instructions, `bypass_hook_trust` and which skills are on go per thread; the
   skill roots, the provider key value and the host layer are per process. The instance fingerprint
   ([contracts](contracts.md#8-instance-and-service-registry)) therefore holds
@@ -429,11 +433,11 @@ Once the outcome is declared and the turn has ended, the adapter stops what the 
 
 Limits and things to get right:
 
-- claude: a `task_notification` after the last `result` keeps the session in "background" by rule (c) of experiment 1b
-  (`crates/loop-manager-claude/src/stream.rs`, `notified_since_result`). After the adapter's own `stop_task` no turn
-  follows, so a `task_notification{status:"stopped"}` of a task the adapter stopped must not count as a wake-up, or the
-  session waits for the background budget anyway. A task killed from outside (`failed`) does wake claude into a
-  model turn — another reason to stop tasks through `stop_task`, not by signals.
+- claude: a `task_notification` after the last `result` keeps the session in "background" by rule (c) of experiment
+  1b for a stream-json client. After the client's own `stop_task` no turn follows, so a
+  `task_notification{status:"stopped"}` of a task the client stopped must not count as a wake-up, or the session waits
+  for the background budget anyway. A task killed from outside (`failed`) does wake claude into a model turn —
+  another reason to stop tasks through claude, not by signals.
 - `thread/backgroundTerminals/*` is experimental in codex; the contract suite has to cover it on every update. If it
   goes away, `unsubscribe` is the fallback (the session then needs a resume for a next prompt).
 - The sweep relies on `/proc` (Linux only, like the orphan sweep) and on the command keeping its environment; a
@@ -444,9 +448,9 @@ Limits and things to get right:
 
 What the product does (contracts 4.1, 4.6, 6.3): step 1 as recommended, through the driver call `stop_background`,
 which the core makes once the outcome is declared and the turn has ended with background, from the idle event or from
-a finisher that comes after the turn. claude stops only `local_bash` tasks: a background subagent is never stopped
-(criterion 4a), and while one lives the state stays `running`, so the call does not come at all. Rule (c) of
-experiment 1b skips a `stopped` notification. Step 2 comes when the session ends, not with the stop: a command that
+a finisher that comes after the turn. claude, through `claude-agent-acp`, stops what any ACP agent stops: the
+background terminals and tool calls of the last idle that advertise `capabilities.cancel`
+([adapters](adapters.md#acp-v2-harnesses)); a background subagent is never stopped (criterion 4a). Step 2 comes when the session ends, not with the stop: a command that
 detached itself holds no step, so the run does not wait for it. With claude it goes with the session's process on
 the orphan sweep by `LOOP_MANAGER_INSTANCE`; with codex `close_session` kills every process with the thread's attempt
 token (the app-server does not carry one, the other threads have tokens of their own).
@@ -456,10 +460,9 @@ token (the app-server does not carry one, the other threads have tokens of their
 Code: throwaway Python scripts in a temporary directory, not kept: a fake Messages API and a fake Responses API in the
 shape of `loop-manager-testkit`, except that the `usage.input_tokens` a reply reports is set per run (the testkit fakes
 always report 10 tokens, too few for a compaction); a hook script that logs its stdin and prints a prepared answer; an
-app-server client. claude 2.1.326 runs as the adapter starts it (`-p`, stream-json both ways, `--setting-sources
-project,local`, hooks in `--settings <file>`, `--permission-mode bypassPermissions`, model `claude-haiku-5-5`, whose
-window is 1 000 000 by `modelUsage.contextWindow`) with the environment of the adapter tests and its own
-`CLAUDE_CONFIG_DIR`; codex 0.169.0 as in experiment 2, several threads in one app-server, hooks per thread with
+app-server client. claude 2.1.326 runs with `-p`, stream-json both ways, `--setting-sources project,local`, hooks in
+`--settings <file>`, `--permission-mode bypassPermissions`, model `claude-haiku-5-5` (whose window is 1 000 000 by
+`modelUsage.contextWindow`), a clean environment and its own `CLAUDE_CONFIG_DIR`; codex 0.169.0 as in experiment 2, several threads in one app-server, hooks per thread with
 `bypass_hook_trust`. No live model: a reply reporting many input tokens makes the harness compact, and the fakes answer
 the summary request (claude: `CRITICAL: Respond with TEXT ONLY`, codex: `CONTEXT CHECKPOINT` in the input) with a
 fixed summary.
@@ -555,14 +558,14 @@ not run again here:
 
 | Question | Answer |
 |---|---|
-| Shape of a claude definition the adapter writes | A type name with a dot (`kit.qa`) or a colon is taken: `init.agents == ["kit.qa"]`, the main thread gets "- kit.qa: <description>", `Agent{subagent_type: "kit.qa"}` runs it with its `prompt`. `mcpServers` is a list of one-server maps (`[{"<name>": {type, command, args, env}}]`); a map fails with "expected array, received object", exit 1. `prompt` is required, an empty string is taken; `description`, `model`, `effort` and `hooks` (the `--settings` shape) together are taken. With `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` only the defined types are listed; the native `fork` stays. |
+| Shape of a claude definition the `claude` profile sends | A type name with a dot (`kit.qa`) or a colon is taken: `init.agents == ["kit.qa"]`, the main thread gets "- kit.qa: <description>", `Agent{subagent_type: "kit.qa"}` runs it with its `prompt`. `mcpServers` is a list of one-server maps (`[{"<name>": {type, command, args, env}}]`); a map fails with "expected array, received object", exit 1. `prompt` is required, an empty string is taken; `description`, `model`, `effort` and `hooks` (the `--settings` shape) together are taken. With `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` only the defined types are listed; the native `fork` stays. |
 
 ### Consequences
 
 For the context-budget addon:
 
-- **Threshold.** claude: `modelSettings.<model>.autoCompactWindow` in the session's `--settings` file (the adapter
-  already writes it per session), and `autoCompactWindow` in each agent of `--agents` — or one value for the session
+- **Threshold.** claude: `modelSettings.<model>.autoCompactWindow` in the session's `settings` (the `claude` profile
+  already sends them per session), and `autoCompactWindow` in each agent of its `agents` — or one value for the session
   and its subagents through `modelSettings` alone. Its floor is 100000 and a smaller value is dropped silently, so a
   smaller budget goes through `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in the process environment (a process per session) as
   a percent of the window. codex: `model_auto_compact_token_limit` in `thread/start.config`, any size up to 90% of the
@@ -573,12 +576,12 @@ For the context-budget addon:
   subagent or child, `agent_id` and `agent_type`; `trigger` tells automatic from manual. A count on `SubagentStop`
   would also see the summarizing fork of claude (`agent_type: ""`).
 - **Stopping past `max_compactions`.** No compaction hook stops a claude session (`continue:false` is ignored there);
-  a main-thread `PreToolUse` or `UserPromptSubmit` answering `continue:false` does, and the adapter sees a successful
-  `result` (`terminal_reason: "hook_stopped"` for `PreToolUse`), today a completed turn. On codex `continue:false` from
-  `PostCompact` (or `PreCompact`) ends the turn `interrupted`, today a cancelled turn; in a child it ends only the
-  child. On both, then, the run ends only if loop-manager tells the hook's stop from a normal end: the addon's hook
-  leaves its verdict where the core reads it (the run's bead or the finisher), or the adapters map `hook_stopped` and an
-  unrequested `interrupted` to a stop of their own.
+  a main-thread `PreToolUse` or `UserPromptSubmit` answering `continue:false` does, and the CLI ends the turn as a
+  success (`terminal_reason: "hook_stopped"` for `PreToolUse`, which ACP does not carry), so the driver sees a
+  completed turn. On codex `continue:false` from `PostCompact` (or `PreCompact`) ends the turn `interrupted`, today a
+  cancelled turn; in a child it ends only the child. On both, then, the run ends only if loop-manager tells the hook's
+  stop from a normal end: the addon's hook leaves its verdict where the core reads it (the run's bead or the
+  finisher), or the codex adapter maps an unrequested `interrupted` to a stop of its own.
 
 For codex native subagents: per-thread roles (`config.agents.<role>`) and per-thread skill allow-lists
 (`config.skills.config` over skills of the process roots) work on 0.169.0 as on 0.168.0; a role file carries

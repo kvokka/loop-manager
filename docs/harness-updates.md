@@ -1,37 +1,35 @@
 # Harness updates
 
-loop-manager drives `claude` and `codex` through their own protocols, so every new harness version is checked with
-the contract suite below: the real binary against a fake provider API, no model and no account. Each adapter has a
+loop-manager drives `claude` through its ACP adapter and `codex` through its own protocol, so every new harness
+version is checked with the contract suite below: the real binary against a fake provider API, no model and no account. Each adapter has a
 minimum supported version, inclusive, and no upper bound: a newer version gets no warning, so the suite is what
 guards it. Keeping the harness up to date is the user's or the loop-manager developer's job; loop-manager itself
 only warns below the minimum.
 
-`mise.toml` selects a release line of each harness, not an exact version: a newer release of the line is taken on
-`mise upgrade`, and the contract suite is what guards the protocol. That matters most for codex: app-server is
-marked `[experimental]`, and codex released every 2–8 days (observed on 2026-11-10, codex 0.166.0).
+`mise.toml` selects a release line of codex, not an exact version: a newer release of the line is taken on
+`mise upgrade`, and the contract suite is what guards the protocol. That matters: app-server is marked `[experimental]`, and codex released every 2–8 days (observed on 2026-11-10, codex 0.166.0).
 
 <!-- MEASURE id=codex-release-cadence date=2026-11-10 ver=codex-0.166.0 env=linux-arm64-orbstack src=reports/15 note="from the release history; recount before choosing an update policy" -->
 
 The ACP adapter of claude, `claude-agent-acp` (npm `@agentclientprotocol/claude-agent-acp`), is the exception: it is
 pinned to an exact version, with the `node` it runs on, and carries its own claude CLI (the platform package of
-`@anthropic-ai/claude-agent-sdk`), not the `claude` of `mise.toml`. Its `claude` profile in the ACP driver has a
-contract suite of its own, below.
+`@anthropic-ai/claude-agent-sdk`), not the `claude` of `mise.toml`. Its suite runs the ACP driver with the `claude`
+profile, below.
 
 ## Updating a harness
 
-1. `mise.toml` selects a release line (`claude = "2.1"`, `codex = "0"`) and mise takes the newest version of it;
-   there is no `mise.lock`. Run `mise upgrade claude` (or `codex`) and check that `mise exec -- claude --version`
-   shows the new version.
+1. Take the new version:
+   - claude: change the pin of `"npm:@agentclientprotocol/claude-agent-acp"` in `mise.toml`, run `mise install`, and
+     check `mise exec -- claude-agent-acp --version` and the CLI it carries with
+     `mise exec -- claude-agent-acp --cli --version`;
+   - codex: `mise.toml` selects a release line (`codex = "0"`) and mise takes the newest version of it; there is no
+     `mise.lock`. Run `mise upgrade codex` and check that `mise exec -- codex --version` shows the new version.
 2. Run the contract suite and the daemon tests of that harness:
-   - claude: `cargo nextest run -p loop-manager-claude` and `cargo nextest run -p loop-manager -E 'test(/^claude::/)'`;
+   - claude: `cargo nextest run -p loop-manager-acp -E 'binary(harness)'` and
+     `cargo nextest run -p loop-manager -E 'test(/^claude::/)'`;
    - codex: `cargo nextest run -p loop-manager-codex` and `cargo nextest run -p loop-manager -E 'test(/^codex::/)'`.
-   - the ACP adapter of claude: change its pin in `mise.toml` (`"npm:@agentclientprotocol/claude-agent-acp"`),
-     `mise install`, check `mise exec -- claude-agent-acp --version` and the CLI it carries with
-     `mise exec -- claude-agent-acp --cli --version`, then run
-     `cargo nextest run -p loop-manager-acp -E 'binary(harness)'`. Its failure classification is `classify` in
-     `crates/loop-manager-acp/src/profile/claude.rs`.
 3. A red scenario is a change of the harness protocol or of its failure fields. Fix the adapter (the failure
-   classification lives in `crates/loop-manager-claude/src/stream/classify.rs` and
+   classification lives in `classify` of `crates/loop-manager-acp/src/profile/claude.rs` and in
    `crates/loop-manager-codex/src/stream.rs`), never the scenario's expectation, unless the harness now reports more
    than before.
 4. When all is green, run one real turn on the cheapest model of the harness: the request row of criterion 2,
@@ -39,8 +37,9 @@ contract suite of its own, below.
    calls and needs a login). The suite runs against fake providers; this turn is the only check against the real one, so
    it is not skipped.
 5. Then add a line to the log below, naming the real turn. When the adapter comes to rely on the new version, or
-   older ones are no longer supported, raise the minimum (`MINIMUM` of the adapter crate, which is `Adapter.minimum`
-   and `capabilities().min_version`; below it the daemon and `loop-manager doctor` warn).
+   older ones are no longer supported, raise the minimum (`MINIMUM` of the adapter crate or of the profile,
+   `crates/loop-manager-acp/src/profile/claude.rs`, which is `Adapter.minimum` and `capabilities().min_version`;
+   below it the daemon and `loop-manager doctor` warn).
 
 ## How the suite is built
 
@@ -60,32 +59,6 @@ contract suite of its own, below.
   the same holds: its error carries no `rateLimit`.
 - `claude-agent-acp` asks the model for a session title once per session: a request without tools whose message
   starts with `<session>`. The fake answers it with a title, outside the plan, and leaves it out of `requests()`.
-
-## What the claude suite covers
-
-`crates/loop-manager-claude/tests/harness/contract.rs`, one test per scenario above:
-
-| # | Scenario | Expected from the adapter |
-|---|---|---|
-| 1 | 429 twice, then an answer | two `retrying`, the turn completes, no failure |
-| 2 | 429 for ever | `rate_limited`, `retried_by_harness` |
-| 3 | quota with a reset time | `rate_limited` without `retry_at`: with an API key claude reports no reset time |
-| 4 | quota in unknown words | `rate_limited`, by the 429 status |
-| 5 | 529 | `overloaded`, `retried_by_harness` |
-| 6 | 401 | `auth_required` |
-| 7 | no credit (`insufficient_quota`) | `billing` |
-| 8 | prompt too long | `context_overflow` |
-| 9 | unknown model | `config_error` |
-| 10 | `kill -9` in a command | `harness_crash` and `exited` within a second |
-| 11 | EOF on stdin in a turn | the turn finishes unobserved, the command's effect happens, claude exits 0 |
-| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); an interrupt cancels the turn |
-| 13 | a command the permission mode does not allow | claude denies it by itself (`manual` mode, `--permission-prompts none`), the command does not run, the turn completes |
-| 14 | background command after the turn | idle with `background` first, idle without background after the command |
-| 15 | second writer in the session | claude does not refuse it: one writer per session is the core's to keep |
-
-`crates/loop-manager/tests/e2e/claude.rs` adds the daemon side: the finisher passes a prompt run, `kill -9` in a command
-is typed within a second and resumed with the bead's claim held (criteria 9 and 16), and a finisher called with a
-background command running passes the run only after the command (criterion 4a on the fake).
 
 ## What the `claude` profile suite covers
 
@@ -118,6 +91,10 @@ runs (its marker file), the model is offered a skill as `loop-manager:<name>` an
 an MCP server; the main thread is told the one subagent type of the list and no built-in one; an isolated session
 reads the rig's `CLAUDE.md`, not the host's; `stop_background` stops a background command, asks the model nothing and
 the session takes the next prompt.
+
+`crates/loop-manager/tests/e2e/claude.rs` adds the daemon side: the finisher passes a prompt run, `kill -9` in a command
+is typed within a second and resumed with the bead's claim held (criteria 9 and 16), and a finisher called with a
+background command running passes the run only after the command (criterion 4a on the fake).
 
 ## What the codex suite covers
 

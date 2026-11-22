@@ -37,10 +37,11 @@ rustup); `cargo build` then works as above.
 
 loop-manager starts agents through their own command-line harnesses and never downloads or installs them:
 
-- `claude` (Claude Code) and/or `codex` (Codex CLI): the harnesses your agents use. Log in to each once as you
-  normally do, or give the agents an API key in `env` (see [the first formula](first-formula.md)). A codex whose
-  host config selects a model provider with an `env_key` needs no login: `codex login status` then says "Not logged
-  in", and `loop-manager doctor` checks that variable instead.
+- `claude-agent-acp` (the ACP adapter of Claude Code, with the `node` it runs on) and/or `codex` (Codex CLI): the
+  harnesses your agents use. The adapter carries its own Claude Code CLI, so the `claude` harness needs no separate
+  `claude`. Log in to each once as you normally do, or give the agents an API key in `env` (see
+  [the first formula](first-formula.md)). A codex whose host config selects a model provider with an `env_key` needs
+  no login: `codex login status` then says "Not logged in", and `loop-manager doctor` checks that variable instead.
 - `br` (beads_rust): only for projects that keep their tasks in a `.beads` tracker. Read
   [its license](../../README.md#the-br-tracker-and-its-license) before you install it.
 
@@ -48,17 +49,18 @@ Running a harness headless spends the limits of your subscription, and a vendor'
 subscription is used through its automation interfaces (OpenAI's terms for the codex app-server limit commercial and
 hosted use). loop-manager supports API keys for both harnesses; keeping to the vendor's terms is your responsibility.
 
-The claude adapter sets `CLAUDE_CODE_ENTRYPOINT=loop-manager` to label requests. An agent can override the label in
-`env` or `native.claude.env`. Claude's own default for `claude -p` is `sdk-cli`. Community A/B runs in
+loop-manager sets `CLAUDE_CODE_ENTRYPOINT=loop-manager` for claude to label requests. An agent can override the
+label in `env` or `native.claude.env`. Claude's own default for `claude -p` is `sdk-cli`, and the SDK under
+`claude-agent-acp` sets `sdk-ts` when the variable is absent. Community A/B runs in
 [anthropics/claude-code#97074](https://github.com/anthropics/claude-code/issues/97074), not an official statement, report
 that `sdk-cli` spends the 5-hour window of a subscription 1.8–2.5 times faster than another label (2026-11, claude
 2.1.3xx); a measurement of this project on a weekly-only limit saw no clear difference (2026-11-18, claude 2.1.327).
 <!-- MEASURE id=claude-entrypoint-community date=2026-11-18 ver=claude-2.1.3xx env=community-ab-runs src=anthropics/claude-code#97074 note="not official; several ABBA runs, not every one on cached tool-heavy load saw a difference" -->
 <!-- MEASURE id=claude-entrypoint-weekly date=2026-11-18 ver=claude-2.1.327 env=linux-arm64-orbstack-max-20x src="own run, data outside the repository" note="weekly limit only, ratio up to ~1.6, not decisive; measure again on an account with a 5-hour window" -->
 
-With a custom label, Claude normally sends an extra request to generate the session title from the full first
-prompt. It uses the small model (the main model behind a third-party `ANTHROPIC_BASE_URL`). That request is
-uncached and billed, and `total_cost_usd` can omit it. The adapter skips that request by default.
+`claude-agent-acp` asks the model for a session title once per session, from the first prompt or at the end of the
+first turn. It uses the small model (the main model behind a third-party `ANTHROPIC_BASE_URL`); the request is billed,
+the adapter has no switch for it, and the model gate of a run does not count it.
 
 ### Headless session defaults
 
@@ -85,19 +87,31 @@ global `~/.config/mise/config.toml`:
 
 ```toml
 [tools]
-claude = "2.1"
+node = "26.12.0"
+"npm:@agentclientprotocol/claude-agent-acp" = "0.109.1"
 codex = "0"
 "github:Dicklesworthstone/beads_rust" = "0.7.6"
 ```
 
-These ranges are what to install (the repository's `mise.toml` takes br at an exact version and claude and codex
-by release line). This release supports claude 2.1.329 and codex 0.171.0 and any newer version; below these, or when
-`--version` shows no version, `loop-manager doctor` and the daemon print a warning naming the minimum and still run
-the harness. br has its own tested range ([tracker-br](../design/tracker-br.md#versions)). The daemon resolves each
-binary in this order: `binary` in the config (`[harness.claude] binary = "/path/to/claude"`; harnesses only, br has
-no such key), then `mise which <name>`, then `PATH`. A daemon under systemd or launchd has no mise shims on its
-`PATH`, which is why mise is asked directly. Without mise, or when mise does not know the tool, the bare name is
-looked up on the daemon's `PATH`; `loop-manager doctor` shows which source each binary came from.
+These are what to install (the repository's `mise.toml` takes node, `claude-agent-acp` and br at an exact version and
+codex by release line). The adapter needs node 22 or newer, and its CLI comes as an optional dependency of its npm
+package, so do not install it with `--omit=optional`. This release supports `claude-agent-acp` 0.109.1 and codex
+0.171.0 and any newer version; below these, or when `--version` shows no version, `loop-manager doctor` and the
+daemon print a warning naming the minimum and still run the harness. br has its own tested range
+([tracker-br](../design/tracker-br.md#versions)).
+
+The daemon resolves each binary in this order: the config (`[harness.claude] command = "/path/to/claude-agent-acp"`,
+`[harness.codex] binary = "/path/to/codex"`; br has no such key), then `mise which <name>` (`claude-agent-acp`,
+`codex`, `br`), then `PATH`. A daemon under systemd or launchd has no mise shims on its `PATH`, which is why mise is
+asked directly. `claude-agent-acp` is a node script: when mise found it, the directory of `mise which node` goes first
+in the `PATH` of its process, so the daemon needs no node of its own on `PATH`; an adapter named in the config or found
+on `PATH` runs with the daemon's `PATH`, and node must be on it. Without mise, or when mise does not know the tool, the
+bare name is looked up on the daemon's `PATH`; `loop-manager doctor` shows which source each binary came from.
+
+claude logs in through the CLI the adapter carries: run `mise exec -- claude-agent-acp --cli` once and log in with
+`/login` (a `claude` you installed yourself logs in to the same place). On Linux the login is
+`~/.claude/.credentials.json`, which every session without a key of its own uses, isolated sessions too. macOS keeps
+it in the keychain, which loop-manager does not read: an isolated session there needs a key in `env`.
 
 ## Check the setup
 
@@ -107,7 +121,10 @@ loop-manager doctor                                      # with the daemon runni
 ```
 
 `loop-manager doctor` checks the config, each harness binary (where it was found, its version, the login), br and its
-license, the modes of the state and socket directories, and the state with its outbox. An ACP harness of the config
+license, the modes of the state and socket directories, and the state with its outbox. claude gets three lines:
+`claude`, the adapter's path, its `--version` and where it was found; `claude login`, whether a session can log in
+(the host's `.credentials.json`, or a key in the agents' `env`); `claude host mcp`, a warning naming the stdio MCP
+servers of your `~/.claude.json`, which start in every session that inherits the host. An ACP harness of the config
 gets one line, `<name> acp`: the agent is started, asked `initialize` and stopped, with no session and no tokens
 spent; the line names the agent and its version, the negotiated protocol and the capabilities it advertised
 (`acp-agent 0.0.1, ACP protocol 2; capabilities: session.mcp (stdio, http)`), or is an `error` saying why the agent

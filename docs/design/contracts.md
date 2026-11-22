@@ -466,23 +466,24 @@ Success traps are the adapter's: claude `subtype:"success"` with `is_error:true`
 
 `Capabilities { sessions_per_instance, instance_idle, min_version }`:
 
-- `sessions_per_instance`: claude 1 (a process per session, 8); codex the config value `max_sessions`
-  (default 8); an ACP harness of the config 1 ([adapters](adapters.md#acp-v2-harnesses)).
+- `sessions_per_instance`: claude 1 (a process of its ACP adapter per session, 8); codex the config value
+  `max_sessions` (default 8); an ACP harness of the config 1 ([adapters](adapters.md#acp-v2-harnesses)).
 - `instance_idle`: how long an instance without sessions lives on (8): claude 0, codex the config value
   `instance_idle_s` (default 60 s), an ACP harness 0.
 - Whether the harness retries 429 itself is the adapter's knowledge: it sets `Failure.retried_by_harness` on the
-  failure, and the policy never retries on top of a harness that already did. claude retries 429 and 5xx itself, up
-  to 10 times by default (`CLAUDE_CODE_MAX_RETRIES`; 7 seen in the experiment log), so its `rate_limited` and
-  `overloaded` are always retried. codex retries 5xx, but a 429 only when the provider sent `Retry-After`, once
-  after that pause: a 429 without it is never retried by codex and the policy must do it. Whether a quota failure
-  carries `retry_at` shows on the failure itself (claude: subscription login only; codex: yes, from the rate-limit
+  failure, and the policy never retries on top of a harness that already did. The claude CLI under `claude-agent-acp`
+  retries 429 and 5xx itself, up to 10 times by default (`CLAUDE_CODE_MAX_RETRIES` in the process environment; 7 seen
+  in the experiment log, claude 2.1.322), so its `rate_limited` and `overloaded` are always retried. codex retries
+  5xx, but a 429 only when the provider sent `Retry-After`, once after that pause: a 429 without it is never retried
+  by codex and the policy must do it. Whether a quota failure carries `retry_at` shows on the failure itself (claude:
+  subscription login only, from `data.rateLimit.resetsAt` of the turn's error; codex: yes, from the rate-limit
   update).
   <!-- MEASURE id=claude-self-retries date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/34 note="delays 0.57→32.8 s on a fake API; set by CLAUDE_CODE_MAX_RETRIES" -->
 - `min_version`: the oldest supported version of the harness binary, inclusive, with no upper bound; the same as
-  `Adapter.minimum` ([adapters](adapters.md)): claude 2.1.329, codex 0.171.0. A version below it, or `--version`
-  output with no `major.minor.patch` in it, gets a warning naming the minimum from the daemon at start and from
-  `loop-manager doctor`; the harness still runs. An ACP harness of the config has no known version: its check is
-  the protocol version `initialize` settles on.
+  `Adapter.minimum` ([adapters](adapters.md)): claude 0.109.1, the version of `claude-agent-acp` (not of the claude
+  CLI it carries), codex 0.171.0. A version below it, or `--version` output with no `major.minor.patch` in it, gets a
+  warning naming the minimum from the daemon at start and from `loop-manager doctor`; the harness still runs. An ACP
+  harness of the config has no known version: its check is the protocol version `initialize` settles on.
 
 `account(process)` returns the account id the gates use (7): a stable hash of the credential source of the
 process part, never the credential itself; an `env` reference counts as written (`${NAME}`), so the id says where
@@ -495,71 +496,68 @@ is given as a reference.
 
 | Concern | claude | codex |
 |---|---|---|
-| Process and session | process per session; everything is in `ProcessPart`, so the fingerprint is unique per session; `start_session` and `resume_session` only bind the reference (the `--session-id`/`--resume` flag is part of the spawn) | one app-server per fingerprint over stdio; `ProcessPart` = `CODEX_HOME`, `HOME`, skills (the session's and its subagent targets', links in its own `CODEX_HOME/skills`; with host inheritance that home links the host's `auth.json` and `config.toml`), the default `sandbox_mode`, provider and key variable, process environment; `SessionPart` = cwd, model, effort, instructions, MCP, hooks with `bypass_hook_trust`, the agent roles of the subagent targets, command environment ([experiments](experiments.md#config-and-credential-delivery-experiments-4-and-5)) |
-| Prompt key | user message `uuid` | `clientUserMessageId` |
-| `prompt.acked` | `command_lifecycle{queued}` with our uuid | `turn/start` response with a turn id |
-| Turn end | `result` of a turn, then "idle without background" by the three-condition rule ([experiments](experiments.md#idle-without-background-both-signals-in-one-run)) | `turn/completed` only; thread status `idle` does not end a turn (below) |
-| Cancel | `control_request{interrupt}`; the following `aborted_tools` result is `turn.ended{cancelled}` | `turn/interrupt` |
-| Resume | full flag set again on every `--resume` | full thread config again on every `thread/resume`, after app-server closed the thread (`thread/unsubscribe` until `notLoaded`, at most 10 s, else `transcript_divergence`; a `thread/resume` refused because the thread is still closing is retried within the same 10 s): a thread it still holds keeps the old config |
-| Attempt environment | process environment | `shell_environment_policy.set` of the thread; a hook runs with the process environment, so each hook command starts with `export` of the same variables |
-| Stop of what a session left | `control_request{stop_task}` on every `local_bash` task of the last `background_tasks_changed` (a `local_agent` subagent is left alone); the `task_notification{stopped}` that follows is not a wake-up | `thread/backgroundTerminals/clean{threadId}` (experimental API): only that thread's commands go, each one's `item/completed` follows; a command that detached itself goes on `close_session`, killed by the thread's attempt token |
-| Transcript check | the session file under `config_dir`: user record with `key`, answer after it | `thread/read` with turns: `userMessage` with `clientId == key`, completed turn after it |
+| Process and session | a `claude-agent-acp` process per session, ACP v2 over its stdio; `ProcessPart` = command, `args`, process environment, the attempt, the generated-files directory, the `home` of an isolated session, the skills and the host inheritance switch, so the fingerprint is unique per session; `SessionPart` = the `session/new` parameters (cwd, MCP servers, system prompt in `append` mode, `_meta.claudeCode.options` with `settingSources`, `settings`, `agents`, `plugins`) and the config options `model`, `effort`, `mode`; the `SessionRef` keeps the session id, cwd and `home` | one app-server per fingerprint over stdio; `ProcessPart` = `CODEX_HOME`, `HOME`, skills (the session's and its subagent targets', links in its own `CODEX_HOME/skills`; with host inheritance that home links the host's `auth.json` and `config.toml`), the default `sandbox_mode`, provider and key variable, process environment; `SessionPart` = cwd, model, effort, instructions, MCP, hooks with `bypass_hook_trust`, the agent roles of the subagent targets, command environment ([experiments](experiments.md#config-and-credential-delivery-experiments-4-and-5)) |
+| Prompt key | `idempotencyKey` of `session/prompt` | `clientUserMessageId` |
+| `prompt.acked` | the answer to `session/prompt` or the first `state_update: running`, whichever comes first | `turn/start` response with a turn id |
+| Turn end | `state_update: idle` with its `stopReason`; `background` while the update lists background work ([adapters](adapters.md#acp-v2-harnesses)) | `turn/completed` only; thread status `idle` does not end a turn (below) |
+| Cancel | `session/cancel`; the idle with `stopReason: cancelled` is `turn.ended{cancelled}` | `turn/interrupt` |
+| Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | full thread config again on every `thread/resume`, after app-server closed the thread (`thread/unsubscribe` until `notLoaded`, at most 10 s, else `transcript_divergence`; a `thread/resume` refused because the thread is still closing is retried within the same 10 s): a thread it still holds keeps the old config |
+| Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | `shell_environment_policy.set` of the thread; a hook runs with the process environment, so each hook command starts with `export` of the same variables |
+| Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | `thread/backgroundTerminals/clean{threadId}` (experimental API): only that thread's commands go, each one's `item/completed` follows; a command that detached itself goes on `close_session`, killed by the thread's attempt token |
+| Transcript check | none: ACP does not tell whether the session holds the prompt, so `Present { delivered: false }` and the prompt goes again with the same idempotency key | `thread/read` with turns: `userMessage` with `clientId == key`, completed turn after it |
 
 Every adapter runs each session process (claude) or instance process (codex) in its own process group, and takes
 the end of a turn from the harness's authoritative signal, never from the answer to a request.
 
-claude (`crates/loop-manager-claude`):
+claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.md#profiles)):
 
-- Transport: `claude -p` with stream-json input and output, a given `--session-id`, resume by `--resume`. The
-  session config is flags and files in the state directory: setting sources (the host inheritance switch),
-  `--settings` with the hooks, `--mcp-config`, `--agents` with the definitions of the subagent targets,
-  `--plugin-dir`, system prompt, model, effort, permission mode; the model is passed explicitly on resume too
-  ([experiments](experiments.md#config-and-credential-delivery-experiments-4-and-5)), and so is `--agents`.
-  `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` leaves no built-in subagent type. The generated files
-  (`settings.json`, `mcp.json` with the tokens of services, `agents.json`, the skills plugin) are a process's own, in
-  `<state>/claude/<session>/<instance>/`, and are removed when it exits; a resume writes them again. The config
-  directory of an isolated session (`<state>/claude/<session>/config/`, its transcript) stays: no driver call says
-  that a session will never be resumed, so it is removed by hand.
-- Signals read: `system/api_retry` (`retrying`), `rate_limit_event` with the reset time, the assistant message's
-  `error`, the turn `result` with its error flag, failure fields and `permission_denials`, `system/permission_denied`, `session_state_changed`,
-  `background_tasks_changed`, `task_notification`, and the `tool_progress` heartbeat of a long tool every 30 s
-  ([experiments](experiments.md#heartbeat-of-a-long-tool)).
-  No heartbeat comes from inside a subagent; the watchdog's budgets allow for that (invariant 15).
-- The reset time of a limit comes only with a subscription login; with an API key a limit is a plain `rate_limit`
-  without it. The shape of the event when a real quota runs out has not been seen live (the claude half of
-  criterion 10 stays open).
-- Nothing is printed before the first prompt: `init` comes after the prompt and on every turn, so waiting for
-  `init` before the prompt deadlocks. The number of turn results is not the number of prompts: a background task
-  wakes the session into a turn of its own.
-- Subagents of claude run in the background by default, so a turn's `result` does not end its work: the end is
-  "idle without background" (4.3). While a `local_agent` task lives, the state stays `running` after the `result`
-  and the subagent's steps come out of the turn only as its commands end
-  ([experiments](experiments.md#a-background-subagent-after-the-result)); so the adapter reports `State{Idle,
-  background: true}` right after such a `result` (the background budget, 6.1) and no activity outside a turn. A retry,
-  rate limit or denial the subagent meets outside a turn is told with `State{Idle, background: true}` after it, so it
-  does not shorten that budget to the silence one.
-- When the daemon dies, the turn goes on unobserved; its outcome is learned from the transcript and the state of the
-  repository (4.2 `Transcript`, 6.4). A `--resume` reaches `init` in 0.30 s, so a resumed attempt costs little; a
-  planned restart drains first ([invariants](invariants.md#recovery)).
+- Transport: `claude-agent-acp` (`@agentclientprotocol/claude-agent-acp`), ACP v2 over its stdio, a process per
+  session; it runs the claude CLI it carries. What claude takes beyond ACP goes in `_meta.claudeCode.options` of
+  `session/new` and `session/resume`: `settingSources: ["project", "local"]` (host inheritance off); `settings`, the
+  `native.claude` block with the hooks added and, for an isolated session, `claudeMdExcludes`; `agents`, the
+  definitions of the subagent targets; `plugins`, one local plugin with the skills. The model, the effort and the
+  permission mode are the session's config options `model`, `effort` and `mode`, set in that order after
+  `session/new` and again after `session/resume`. `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` in the process
+  environment leaves no built-in subagent type. The generated files are in `<state>/acp/claude/<run>-<attempt>/`: the
+  skills plugin is written before the spawn and removed when the process exits; the `home` of an isolated session,
+  the process's `CLAUDE_CONFIG_DIR` with its transcript, stays and is carried in the `SessionRef`, so a resume takes
+  it again: no driver call says that a session will never be resumed, so it is removed by hand.
+- Signals read: the `session/update`s of ACP (`state_update` with its `stopReason`, `error`, `usage` and background
+  work, tool calls, terminals, messages, `notice`) and the JSON-RPC errors of requests. A child session (a
+  subagent) is activity and never drives the state; the watchdog's budgets allow for a silent subagent (invariant
+  15). ACP carries no
+  retry and no rate limit event: claude's own retries are not seen (no `retrying`), and the reset time of a limit
+  comes only in the error of the turn that gave up (`data.rateLimit.resetsAt`).
+- The reset time of a limit comes only with a subscription login; with an API key the error has no `rateLimit` and
+  a limit is a plain `rate_limited` without it. The shape of the error when a real quota runs out has not been seen
+  live (the claude half of criterion 10 stays open).
+- When the daemon dies, the adapter loses its stdin and exits, and the open turn ends with it (contract scenario 11).
+  The next attempt resumes the session by `session/resume`, its `home` from the `SessionRef`, and sends the prompt
+  again with the same idempotency key (4.2 `Transcript`, 6.4); a planned restart drains first
+  ([invariants](invariants.md#recovery)). The claude CLI reaches `init` 0.30 s after a resume of a one-turn session
+  (claude 2.1.322), and 0.4–0.5 s through an ACP adapter (2.1.321), so a resumed attempt costs little.
   <!-- MEASURE id=claude-resume-time date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/42 note="one-turn session, haiku, n=6; through the ACP adapter on 2.1.321 0.4–0.5 s (reports/14); resume of a long transcript not measured" -->
-- A cold start takes 0.25–0.35 s to `init`; the rest is the model's time to the first token, so no warm pool.
-  <!-- MEASURE id=claude-coldstart-init date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/42 note="haiku, n=5–7, medians from spawn; re-measure on the role models" -->
+- A cold start of the claude CLI takes 0.25–0.35 s to `init` (claude 2.1.322); the rest is the model's time to the
+  first token, so no warm pool. The adapter adds the start of `node` and its `claude auth status` probe, not measured.
+  <!-- MEASURE id=claude-coldstart-init date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/42 note="haiku, n=5–7, medians from spawn; re-measure on the role models and through claude-agent-acp" -->
 - `CLAUDE_CODE_RETRY_WATCHDOG=1` is never set in a session's environment: claude then waits out a 429 or 529 in
   silence (one `api_retry{max_retries: 300}` with a pause of an hour), which the core's watchdog reads as a stall.
-- An MCP server that `init` lists as `failed` or `needs-auth` is a `tool_failure` of the session: nobody logs a
-  server in after the start.
-- claude runs with `--permission-prompts none`: whatever would prompt is denied by claude itself and the model sees
-  the denial; the permission mode decides the rest. The mode is `bypassPermissions` unless `native.claude` sets
-  `permission_mode` or `permissions.defaultMode` ([config](config.md#permissions)); as root claude exits before
-  `init` under that mode unless the session's `env` sets `IS_SANDBOX=1`. Any `control_request` of the CLI
-  gets an error `control_response` at once, so nothing waits. claude prompts for some commands even under
-  `bypassPermissions` (seen on 2.1.325: a Bash heredoc into a directory outside the workdir); such a command is denied
-  at once.
-- A denial comes as `system/permission_denied` (`tool_name`, `tool_use_id`, `decision_reason_type`, no tool input)
-  and again in the `permission_denials` (`tool_name`, `tool_use_id`, `tool_input`) of the turn's `result`; the adapter
-  sends one `permission_denied` per `tool_use_id` in a turn, from whichever comes first (`reason` is
-  `decision_reason_type`, `input` only from the `result`). A denial without `tool_use_id` is sent as it is. The
-  `result` list was seen live (2.1.322); the shape of `system/permission_denied` is read from the code of 2.1.326.
+- The adapter asks the model for a session title once per session (a request of the small model without tools); it
+  has no switch, and the model gate does not see that request.
+- An MCP server of the session part that does not start, or waits for a login, comes as a `notice` titled
+  `MCP server "<name>" failed to start` or `… needs authentication`, and is a `tool_failure` of the session: nobody
+  logs a server in after the start. A server of the rig (`.mcp.json`) or the host that fails is not told: the adapter
+  sends such a `notice` only for the servers loop-manager passes.
+- The permission mode is `bypassPermissions` unless `native.claude` sets `permission_mode` or
+  `permissions.defaultMode` ([config](config.md#permissions)). The adapter offers `default`, `acceptEdits`, `plan`
+  and, by the model and the host, `auto` and `bypassPermissions`; a mode it does not offer (`dontAsk`) fails the
+  attempt with `config_error` naming `mode`. As root it offers `bypassPermissions` only when the session's `env` sets `IS_SANDBOX=1`. Under
+  `bypassPermissions` no request comes; under another mode what the rules do not allow comes as
+  `session/request_permission`, which the driver declines at once with the adapter's `reject_once` option, so
+  nothing waits and the model sees the denial.
+- A declined request is one `permission_denied`: `tool` is the request's title, `tool_use_id` and `input` the tool
+  call's id and raw input. A denial claude makes by its own rules (a `deny` rule) reaches the driver only as a failed
+  tool call: ACP has no event for it, so it is no `permission_denied`.
 
 codex (`crates/loop-manager-codex`):
 
@@ -610,17 +608,22 @@ text is a narrow fallback, and a value no rule knows is never an error: the next
 apart is `unknown` with the harness words (or `field=value`) in `text` and the message in `raw`. A refusal of the
 model by policy and a network break without a status are `unknown` on both harnesses.
 
-- claude, in order: `startup_failure_reason` of a claude that could not start (sessions run with
-  `CLAUDE_CODE_STARTUP_FAILURE_RESULTS=1`, so it comes as a `result` and not only on stderr; a reason that may pass by
-  itself, such as remote settings that did not arrive, is `unknown`); the result's `subtype` and `terminal_reason`
-  (turn, budget and structured-output limits `runaway_turn`, `prompt_too_long` and `blocking_limit`
-  `context_overflow`); the assistant message's `error` of the turn; `api_error_status` (401 and 403
-  `auth_required`, 429 `rate_limited`, 404 `config_error`, 408, 5xx and 529 `overloaded`); then two text rules
-  (`Not logged in` and, for a rate-limited turn, `You've hit your`). A `rate_limit_event` of the turn refines only a
-  rate-limited turn: `credits_required` makes it `billing`, `rejected` `quota_exhausted` with its reset time. The
-  first `api_retry` with 401, 403 or a logged-out `error` (`authentication_failed`, `oauth_org_not_allowed`,
-  `cloud_credential_error`) is `auth_required` at once.
-- codex: the variant of `codexErrorInfo` and its `httpStatusCode` (statuses as for claude; `flexUnavailable` and
+- claude, in order: the turn's `stopReason` (`max_tokens` `context_overflow`, `max_turn_requests` `runaway_turn`,
+  `refusal` `unknown`); then, for an error of a turn or a request, `classify` of the profile: the JSON-RPC code
+  (`-32000` `auth_required`, `-32602` `config_error`; `-32002` or `-32601` on a resume `transcript_divergence`);
+  `data.errorKind`
+  (`authentication_failed`, `oauth_org_not_allowed`, `cloud_credential_error`, `verification_required`
+  `auth_required`; `billing_error`, `account_on_hold` `billing`; `rate_limit` `billing` with `rateLimit.errorCode`
+  `credits_required`, `quota_exhausted` with `rateLimit.status` `rejected` or a message that starts with
+  `You've hit your`, its reset time from `rateLimit.resetsAt`, else `rate_limited`; `overloaded`, `server_error`
+  `overloaded`; `model_not_found` `config_error`; `invalid_request` with a message that starts with
+  `Prompt is too long` `context_overflow`); `data.startupFailureReason` of a claude that could not start
+  (`session_held_by_background` `transcript_divergence`, the gateway sign-in reasons `auth_required`, the
+  configuration reasons `config_error`; a reason that may pass by itself, such as remote settings that did not
+  arrive, is `unknown`); `data.cause`, or a message that starts with `Claude Code stopped` (the CLI died under the
+  adapter), `harness_crash`. A text rule reads claude's words after the adapter's prefix `Internal error:`.
+- codex: the variant of `codexErrorInfo` and its `httpStatusCode` (401 and 403 `auth_required`, 429
+  `rate_limited`, 404 `config_error`, 408, 5xx and 529 `overloaded`; `flexUnavailable` and
   `policyCapacityUnavailable` `overloaded`, `sandboxError` `config_error`). `usageLimitExceeded` stands for a used-up
   plan, a missing plan, no credit and a spend cap alike: it is `billing` when the last rate-limit snapshot says
   `rateLimitReachedType` `workspace_*` or `spendControlReached`, or its message is one of codex's plan and credit
