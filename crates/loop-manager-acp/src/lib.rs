@@ -383,6 +383,14 @@ impl Acp {
         Ok(())
     }
 
+    /// The file of the key of the last prompt the agent of `session` answered, across restarts of the daemon:
+    /// `<state>/acp/<harness>/answered/<session id in hex>`.
+    fn answered(&self, session: &SessionRef) -> PathBuf {
+        let id = session.0["session_id"].as_str().unwrap_or_default();
+        let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
+        self.state.join("acp").join(&self.name).join("answered").join(hex)
+    }
+
     /// The history writer of `session`, for the run and attempt the session part `part` names.
     fn recorder(&self, part: &Value, session: &str) -> Option<record::Recorder> {
         let (run, attempt) = (part["run"].as_str()?, part["attempt"].as_u64()?);
@@ -411,6 +419,13 @@ impl Acp {
         lock(&known.shared).turn.sent(key);
         // The answer means the agent took the prompt; its turn is told by the session's state updates.
         let sent = known.conn.send_request(request).block_task().await;
+        if sent.is_ok() {
+            // The answer means the agent inserted the prompt into the session: a resumed attempt asks (`transcript`).
+            // Unwritten, the prompt is not known delivered and goes again with its key.
+            let file = self.answered(session);
+            let _ = file.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(&file, key.0.to_string());
+        }
         let mut shared = lock(&known.shared);
         match sent {
             Ok(_) => {
@@ -830,18 +845,25 @@ impl Driver for Acp {
             if let Ok(close) = serde_json::from_value::<schema::CloseSessionRequest>(close) {
                 let _ = request_within(known.conn.send_request(close).block_task()).await;
             }
+            let _ = std::fs::remove_file(self.answered(session));
         })
     }
 
-    /// Whether the agent still has the session; whether it holds the prompt the agent does not tell, so a resumed
-    /// attempt sends it again with the same idempotency key.
+    /// The session is there (`resume_session` fails one the agent does not have); the prompt with `key` is delivered
+    /// when it is the last one the agent of the session answered. ACP gives the key back in no update, and a replay
+    /// names a message only by the `messageId` of that answer, so the answer is the driver's own record of delivery.
     fn transcript<'a>(
         &'a self,
         _instance: &'a InstanceHandle,
-        _session: &'a SessionRef,
-        _key: PromptKey,
+        session: &'a SessionRef,
+        key: PromptKey,
     ) -> BoxFuture<'a, Result<Transcript, Failure>> {
-        Box::pin(async { Ok(Transcript::Present { delivered: false }) })
+        Box::pin(async move {
+            let answered = std::fs::read_to_string(self.answered(session)).unwrap_or_default();
+            Ok(Transcript::Present {
+                delivered: answered == key.0.to_string(),
+            })
+        })
     }
 
     fn chat_log(&self, _session: &SessionRef) -> std::io::Result<loop_manager_contract::driver::chat::ChatLog> {

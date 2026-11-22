@@ -54,7 +54,7 @@ async fn a_prompt_runs_a_command_with_the_attempt_environment_and_the_turn_compl
     assert_eq!(requests[0]["model"], "gpt-fake");
     assert!(requests[0].to_string().contains("zq7-mail"), "the skill is listed");
     let transcript = live.driver.transcript(&live.instance, &live.session, key).await;
-    assert_eq!(transcript.unwrap(), Transcript::Present { delivered: false });
+    assert_eq!(transcript.unwrap(), Transcript::Present { delivered: true });
     live.stop().await;
 }
 
@@ -174,6 +174,39 @@ async fn a_resumed_session_takes_the_new_attempt_token_and_model() {
     live.stop().await;
 }
 
+/// Criterion 8 at the adapter: the prompt the adapter answered before its process died mid-turn is delivered to the
+/// driver of the next daemon after the resume in a new process; a prompt never sent is not. The prompt that
+/// reconciles, of a key of its own, starts a turn on the thread (the same key again would start none: the adapter
+/// finds it in the thread's history).
+#[tokio::test]
+async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = vec![
+        Reply::Command("echo $$ > sleep.pid; exec sleep 300".into()),
+        Reply::Text("RECONCILED".into()),
+    ];
+    let first = Live::start(plan, dir.path(), |_| {}).await;
+    first.pid_in("sleep.pid").await;
+    let (provider, session, rig) = (first.provider.clone(), first.session.clone(), first.rig.clone());
+    first.stop().await;
+    let plan = resumed(session, rig, 2, "two");
+    let mut live = Live::open(provider, dir.path(), plan, |_| {}).await.unwrap();
+    let (sent, reconcile) = (PromptKey::new("r1", 1, 1), PromptKey::new("r1", 2, 1));
+    for (key, delivered) in [(sent, true), (reconcile, false)] {
+        let transcript = live.driver.transcript(&live.instance, &live.session, key).await;
+        assert_eq!(transcript.unwrap(), Transcript::Present { delivered }, "{key:?}");
+    }
+    live.prompt(reconcile, "Go on.").await;
+    assert_eq!(live.ended().await, StopReason::Completed, "{:?}", live.seen);
+    assert!(live.seen.contains(&Normalized::TurnStarted), "{:?}", live.seen);
+    let requests = live.requests(2).await;
+    assert!(
+        requests[1]["input"].to_string().contains("sleep.pid"),
+        "the thread goes on"
+    );
+    live.stop().await;
+}
+
 /// Criterion 34 at the adapter: `stop_background` stops the command through the harness, which comes to idle
 /// without background on its own, starts no turn, asks the model nothing, and takes the next prompt.
 #[tokio::test]
@@ -235,4 +268,39 @@ async fn an_isolated_session_logs_in_by_its_own_key_in_its_own_codex_home() {
     let mode = std::fs::metadata(&auth).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
     live.stop().await;
+}
+
+/// An isolated session's own `config.toml` turns codex's plugins off: codex does not sync its curated plugins (a git
+/// clone of github.com/openai/plugins, ~96 MB, which it starts within 2 s of the app-server's start otherwise) into
+/// the session's `CODEX_HOME`, which stays small.
+#[tokio::test]
+async fn an_isolated_session_clones_no_plugins_into_its_codex_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let mut live = Live::start(vec![Reply::Text("OK".into())], dir.path(), |_| {}).await;
+    assert_eq!(live.ended().await, StopReason::Completed, "{:?}", live.seen);
+    tokio::time::sleep(Duration::from_secs(4).saturating_sub(started.elapsed())).await;
+    let home = dir.path().join("state/acp/codex/r1-1/codex-home");
+    let synced: Vec<String> = (std::fs::read_dir(home.join(".tmp")).into_iter().flatten().flatten())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("plugins"))
+        .collect();
+    assert!(synced.is_empty(), "no plugin sync: {synced:?}");
+    // MEASURE id=codex-acp-codex-home-size-plugins-off date=2026-11-22 ver=codex-acp-2.9.0+codex-0.171.0 env=linux-arm64-orbstack src=this-test note="bytes of codex-home 4 s after the start, one turn on the fake: 1.69 MB with plugins off; without it the plugin sync starts within 2 s and the home grows to 99 MB"
+    // On 2026-11-22 (codex-acp 2.9.0): 1.69 MB with plugins off, 99 MB once the clone finished without it.
+    let size = bytes(&home);
+    assert!(size < 10 << 20, "{size} bytes in {}", home.display());
+    live.stop().await;
+}
+
+/// The bytes of the files under `dir`, links not followed.
+fn bytes(dir: &std::path::Path) -> u64 {
+    let entries = std::fs::read_dir(dir).into_iter().flatten().flatten();
+    entries
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => bytes(&e.path()),
+            Ok(t) if t.is_file() => e.metadata().map_or(0, |m| m.len()),
+            _ => 0,
+        })
+        .sum()
 }

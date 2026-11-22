@@ -149,8 +149,7 @@ async fn turn(
     (seen, transcript, requests)
 }
 
-/// The ACP driver cannot tell whether the agent holds the prompt, so a resumed attempt sends it again with the same
-/// idempotency key (docs/design/adapters.md): the transcript is present, the prompt not known delivered.
+/// The prompt the agent answered is in the session: the transcript is present, the prompt delivered.
 #[tokio::test]
 async fn a_reply_is_acked_and_completed() {
     let dir = tempfile::tempdir().unwrap();
@@ -164,7 +163,7 @@ async fn a_reply_is_acked_and_completed() {
             stop_reason: StopReason::Completed
         })
     );
-    assert_eq!(transcript, Transcript::Present { delivered: false });
+    assert_eq!(transcript, Transcript::Present { delivered: true });
 }
 
 /// The hook runs (its marker file), the model is offered the skill through the plugin and the tool of the MCP server.
@@ -353,4 +352,63 @@ async fn a_command_left_in_the_background_is_stopped_and_the_session_takes_the_n
     );
     assert_eq!(provider.requests().len(), 3, "the stop asked the model nothing");
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
+}
+
+/// Criterion 8 at the adapter: the prompt the agent answered before its process died mid-turn is delivered to the
+/// driver of the next daemon after `session/resume` in a new process; a prompt never sent is not. The prompt that
+/// reconciles, of a key of its own, starts a turn on the conversation of the first.
+#[tokio::test]
+async fn a_prompt_answered_before_the_process_died_is_delivered_after_the_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = vec![
+        Reply::Bash("echo $$ > sleep.pid; exec sleep 300".into()),
+        Reply::Text("Reconciled.".into()),
+    ];
+    let provider = Provider::start(plan).await;
+    let workdir = dir.path().join("rig");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let mut config = config(&provider, dir.path());
+    config.native = Some(sourced(serde_json::json!({ "permission_mode": "bypassPermissions" })));
+    let first = driver(dir.path());
+    let split = first.split(&config, &new_session(workdir.clone())).unwrap();
+    let (sink, mut events) = mpsc::unbounded_channel();
+    let instance = first.start_instance("i1", &split.process, sink).await.unwrap();
+    let session = first.start_session(&instance, &split.session).await.unwrap();
+    let sent = PromptKey::new("r1", 1, 1);
+    first.send_prompt(&instance, &session, "Run it.", sent).await.unwrap();
+    pid_in(&workdir.join("sleep.pid")).await;
+    first.stop_instance(&instance, Duration::from_secs(4)).await;
+    until(&mut events, |e| matches!(e, Normalized::Exited { .. })).await;
+
+    let next = driver(dir.path());
+    let plan = SessionPlan::Resume {
+        session: session.clone(),
+        workdir,
+        run: "r1".into(),
+        attempt: 2,
+        token: "two".into(),
+        actor: None,
+        bead: None,
+    };
+    let split = next.split(&config, &plan).unwrap();
+    let (sink, mut events) = mpsc::unbounded_channel();
+    let instance = next.start_instance("i2", &split.process, sink).await.unwrap();
+    next.resume_session(&instance, &session, &split.session).await.unwrap();
+    let reconcile = PromptKey::new("r1", 2, 1);
+    for (key, delivered) in [(sent, true), (reconcile, false)] {
+        let transcript = next.transcript(&instance, &session, key).await.unwrap();
+        assert_eq!(transcript, Transcript::Present { delivered }, "{key:?}");
+    }
+    next.send_prompt(&instance, &session, "Go on.", reconcile)
+        .await
+        .unwrap();
+    let seen = until(&mut events, |e| matches!(e, Normalized::TurnEnded { .. })).await;
+    assert!(seen.contains(&Normalized::TurnStarted), "{seen:?}");
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2, "one request per turn");
+    assert!(
+        requests[1].body["messages"].to_string().contains("Run it."),
+        "the conversation goes on"
+    );
+    next.stop_instance(&instance, Duration::from_secs(4)).await;
 }

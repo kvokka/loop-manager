@@ -348,7 +348,10 @@ an isolated one gets none of them (set them in `env` if it needs them). A codex 
 subagent targets') that inherits the host gets a `CODEX_HOME` of its own in the state directory,
 `<state>/acp/codex/<run>-<attempt>/codex-home` (codex reads skills only from `CODEX_HOME/skills`): it links the host's
 `auth.json`, `config.toml`, `AGENTS.md` and every skill of `~/.codex/skills` beside the agent's own (an agent's skill of
-the same name wins); nothing else in `~/.codex` reaches such an agent, and `HOME` stays the operator's.
+the same name wins); nothing else in `~/.codex` reaches such an agent, and `HOME` stays the operator's. Such an agent,
+like one that runs in `~/.codex` itself, takes from the host's `config.toml` the keys codex reads only when it starts
+(`features.plugins`, `analytics.enabled`, `feedback.enabled`, `check_for_update_on_startup`): with plugins on there,
+codex syncs its curated plugins from GitHub into that `CODEX_HOME` at every start.
 
 codex runs with `sandbox_mode = "danger-full-access"`, in the mode `agent-full-access` ("Permissions"), unless the
 native block, or the host's `config.toml` of an inheriting process, sets `sandbox_mode`: the codex sandbox needs
@@ -368,10 +371,11 @@ own uses that one instead.
   `CLAUDE_CODE_OAUTH_TOKEN`.
 - codex (the `codex` profile of the ACP driver, `crates/loop-manager-acp/src/profile/codex.rs`,
   [adapters](adapters.md#profiles)): an own `CODEX_HOME` and `HOME` (`codex-home` and `home` in
-  `<state>/acp/codex/<run>-<attempt>/`, kept for its resumes); the host's `auth.json` is linked into that
-  `CODEX_HOME`, and the model provider the host config selects comes in the session's codex config
-  (`model_provider` and `model_providers.<name>`), its `env_key` variable passed from the daemon's environment. The
-  same variable is passed when inheriting. Own credentials: `OPENAI_API_KEY`, `CODEX_API_KEY`; a session with one
+  `<state>/acp/codex/<run>-<attempt>/`, kept for its resumes); that `CODEX_HOME` has a `config.toml` of its own
+  with plugins, analytics, feedback and the update check off; the host's `auth.json` is linked into it, and the
+  model provider the host config selects comes in the session's codex config (`model_provider` and
+  `model_providers.<name>`), its `env_key` variable passed from the daemon's environment. The same variable is passed
+  when inheriting. Own credentials: `OPENAI_API_KEY`, `CODEX_API_KEY`; a session with one
   gets neither the host's login nor its provider, and `DEFAULT_AUTH_REQUEST` makes the adapter log codex in by that
   key, which codex writes to `auth.json` of the session's own `CODEX_HOME`.
 

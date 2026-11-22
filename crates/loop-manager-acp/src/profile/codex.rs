@@ -35,6 +35,21 @@ const DEFAULT_APPROVAL: &str = "never";
 /// The sandbox when no config sets one (decision 38); `doctor` warns about it.
 const DEFAULT_SANDBOX: &str = "danger-full-access";
 
+/// The `config.toml` of an isolated session's own codex home: the keys codex reads only when its app-server starts,
+/// which it ignores in the config of a thread. With plugins off codex does not clone its curated plugins from GitHub
+/// into the home at every start.
+const STARTUP_CONFIG: &str = r"check_for_update_on_startup = false
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+[features]
+plugins = false
+";
+
 /// The modes of the adapter by the sandbox they run commands in, with the approval policies each stands for: the
 /// adapter sets the policy and the sandbox of every turn by the session's mode alone.
 const MODES: [(&str, &[&str], &str); 3] = [
@@ -145,9 +160,9 @@ fn skills(config: &EffectiveConfig) -> BTreeMap<String, PathBuf> {
     skills
 }
 
-/// The codex config of the session and its role files. In order, a later key over an earlier one: the headless
-/// defaults; the host's model `provider`, when given, without the keys that hold secrets (the adapter puts the
-/// provider in the app-server's argv); the native block without the approval policy and the sandbox, which the mode
+/// The codex config of the session and its role files. In order, a later key over an earlier one: `notify = []`; the
+/// host's model `provider`, when given, without the keys that hold secrets (the adapter puts the provider in the
+/// app-server's argv); the native block without the approval policy and the sandbox, which the mode
 /// carries; the model and the effort; the attempt environment in `shell_environment_policy.set` of the block; the MCP
 /// servers over the block's of the same name; the hooks added to the block's; the roles of the targets over the
 /// block's `agents`. An empty key is not written.
@@ -157,12 +172,7 @@ fn codex_config(
     state: &Path,
     provider: Option<&(String, toml::Value)>,
 ) -> Result<(Map<String, Value>, Roles), Failure> {
-    let mut codex = Map::from_iter([
-        ("analytics".to_owned(), json!({ "enabled": false })),
-        ("feedback".to_owned(), json!({ "enabled": false })),
-        ("check_for_update_on_startup".to_owned(), json!(false)),
-        ("notify".to_owned(), json!([])),
-    ]);
+    let mut codex = Map::from_iter([("notify".to_owned(), json!([]))]);
     if let Some((name, provider)) = provider {
         let mut table = provider.as_table().cloned().unwrap_or_default();
         table.retain(|k, _| k != "http_headers" && k != "experimental_bearer_token");
@@ -396,7 +406,8 @@ pub(super) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Env, Fai
     Ok(env)
 }
 
-/// Before the spawn: the role files; and for a session with its own homes, both (mode 0700), the links of its skills
+/// Before the spawn: the role files; and for a session with its own homes, both (mode 0700), `config.toml` of an
+/// isolated one ([`STARTUP_CONFIG`], mode 0600, rewritten at every start), the links of its skills
 /// rebuilt (a link per skill to its directory; for a session that inherits the host, the host's skills too, its own
 /// first), and the links to the host's files: `auth.json`, `config.toml` and `AGENTS.md` for a session that inherits
 /// the host, `auth.json` for an isolated one without a key. Hidden entries of `skills` are codex's own: they stay.
@@ -414,6 +425,7 @@ pub(super) fn start(p: &Value) -> std::io::Result<()> {
     private(home)?;
     if let Some(user_home) = p["user_home"].as_str() {
         private(Path::new(user_home))?;
+        write_private(&home.join("config.toml"), STARTUP_CONFIG)?;
     }
     let shown = |name: &str| !name.starts_with('.');
     let dir = home.join("skills");
@@ -451,6 +463,15 @@ pub(super) fn start(p: &Value) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// `text` written to `path`, readable by its owner alone.
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let mut file = (std::fs::OpenOptions::new().write(true).create(true).truncate(true))
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(text.as_bytes())
 }
 
 /// The values of the session part's `secrets`.

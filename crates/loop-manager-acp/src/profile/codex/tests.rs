@@ -127,8 +127,7 @@ fn an_isolated_session_gets_its_codex_config_and_homes_in_the_environment() {
     .unwrap();
     assert_eq!(text, expected);
     let config = json!({
-        "analytics": { "enabled": false }, "feedback": { "enabled": false },
-        "check_for_update_on_startup": false, "notify": [],
+        "notify": [],
         "model_provider": "corp",
         "model_providers": { "corp": { "name": "corp", "base_url": "https://llm.corp/v1", "env_key": HOST_KEY } },
         "model": "gpt-6.1-terra",
@@ -547,19 +546,32 @@ fn the_start_makes_the_homes_the_links_and_the_role_files_and_a_second_rebuilds_
         std::fs::read_link(home.join("auth.json")).unwrap(),
         host.path().join("auth.json")
     );
-    for absent in ["config.toml", "AGENTS.md", "skills/notes"] {
+    for absent in ["AGENTS.md", "skills/notes"] {
         assert!(
             home.join(absent).symlink_metadata().is_err(),
             "an isolated home links no {absent}"
         );
     }
+    // Its own `config.toml`, no link to the host's: the keys codex reads only when its app-server starts.
+    let own = home.join("config.toml");
+    let meta = std::fs::symlink_metadata(&own).unwrap();
+    assert!(meta.is_file(), "a file of its own");
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    let written: toml::Table = toml::from_str(&std::fs::read_to_string(&own).unwrap()).unwrap();
+    let expected: toml::Table = toml::from_str(
+        "check_for_update_on_startup = false\n[analytics]\nenabled = false\n[feedback]\nenabled = false\n\
+         [features]\nplugins = false\n",
+    )
+    .unwrap();
+    assert_eq!(written, expected);
     let (path, text) = role(&p);
     let written: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(written, text);
     let leftovers = std::fs::read_dir(Path::new(&path).parent().unwrap()).unwrap().count();
     assert_eq!(leftovers, 1, "no temporary file stays");
-    // The skills change, codex made its own cache: the links follow, the cache stays.
+    // The skills change, codex made its own cache, its config changed: the links follow, the cache stays.
     std::fs::create_dir_all(home.join("skills/.system")).unwrap();
+    std::fs::write(&own, "[features]\nplugins = true\n").unwrap();
     config.skills.clear();
     config.skills.insert("mail".into(), skill(mail.path()));
     let (p, _) = split_in(&config, &plan(), state.path(), host.path());
@@ -570,12 +582,15 @@ fn the_start_makes_the_homes_the_links_and_the_role_files_and_a_second_rebuilds_
         "the dropped skill's link is gone"
     );
     assert!(home.join("skills/.system").is_dir());
+    // A start writes it again over what was there.
+    assert_eq!(std::fs::read_to_string(&own).unwrap(), STARTUP_CONFIG);
 }
 
 #[test]
 fn the_start_links_the_hosts_files_and_skills_only_for_a_session_that_inherits_the_host() {
     let (host, state, kit) = (full_host(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     // A session that inherits the host: its home links the host's files and skills, its own skill first.
+    let host_text = std::fs::read_to_string(host.path().join("config.toml")).unwrap();
     let mut config = typical(true);
     config.skills.insert("kit".into(), skill(kit.path()));
     let (p, _) = split_in(&config, &plan_of("r2"), state.path(), host.path());
@@ -593,6 +608,11 @@ fn the_start_links_the_hosts_files_and_skills_only_for_a_session_that_inherits_t
     assert!(
         home.join("skills/.system").symlink_metadata().is_err(),
         "codex makes its own"
+    );
+    assert_eq!(
+        std::fs::read_to_string(host.path().join("config.toml")).unwrap(),
+        host_text,
+        "the host's config.toml is linked as it is, never written"
     );
     assert!(
         state.path().join("acp/codex/r2-1/home").symlink_metadata().is_err(),
@@ -623,6 +643,10 @@ fn the_start_links_the_hosts_files_and_skills_only_for_a_session_that_inherits_t
         .collect();
     skills.sort();
     assert_eq!(skills, [".system", "kit", "notes"]);
+    assert_eq!(
+        std::fs::read_to_string(host.path().join("config.toml")).unwrap(),
+        host_text
+    );
 }
 
 /// The accounts of the gates are those the native codex driver had: the same hashes of the same sources.

@@ -139,11 +139,16 @@ that agent's [profile](#profiles).
 - **What ACP does not give.** `resume_session` is `session/resume` with the same session part, then the same config
   options as after `session/new`: an agent may take them from its transcript, and the config of the new attempt
   wins. An agent with no such session (`-32002`) or no such method (`-32601`) fails it with
-  `transcript_divergence`, and the core goes on with a fresh session. Whether the agent holds a prompt it does not
-  tell: `transcript` answers `Present { delivered: false }`, so a resumed attempt sends its prompt again with the
-  same idempotency key. Only the agent's memory of that key keeps the prompt from
-  being taken twice, and an agent whose process died with the daemon has none: the delivery may repeat. There is no
-  transcript file for `chat_log` and no live tap.
+  `transcript_divergence`, and the core goes on with a fresh session. Whether the agent holds a prompt ACP does not
+  tell: no update gives the idempotency key back, and a replay names a message only by the `messageId` of the
+  answer to `session/prompt`. So the answer is the record: when the agent answers a prompt, the driver writes its key
+  to `<state>/acp/<harness>/answered/<session id in hex>` (the key of the last prompt answered in the session;
+  `close_session` removes the file), and `transcript` answers `Present { delivered }`, delivered when the key asked
+  about is the one in that file. A delivered prompt is reconciled with a prompt of a new key, which starts a turn; an
+  agent that holds a key answers a prompt sent again with it at once and starts no turn (codex's adapter, claude's
+  after a resume). A prompt the agent took but whose answer the daemon did not live to read is not known delivered:
+  it goes again with its key, and the agent's memory of the key decides whether it runs again or is answered without
+  a turn. There is no transcript file for `chat_log` and no live tap.
 - **The account.** `account` is a hash of the `command`, the names of the harness's and the agent's `env` and the
   `${NAME}` references among their values: a literal value (a flag, a path, a key written inline) changes no
   account gate.
@@ -265,11 +270,10 @@ runs one process per session".
 
 - **What it sends.** Nothing beyond ACP in `session/new` and `session/resume`, and no MCP servers there: the codex
   config goes as JSON in `CODEX_CONFIG` of the adapter's process, which hands it to every thread it opens. In order, a
-  later key over an earlier one: `analytics.enabled`, `feedback.enabled`, `check_for_update_on_startup` false and
-  `notify = []`; for an isolated session without a key of its own, the model provider the host's `config.toml` selects
-  (`model_provider` and `model_providers.<name>`, without `http_headers` and `experimental_bearer_token`: the adapter
-  puts the provider in the arguments it starts codex with); the `native.codex` block without `approval_policy` and
-  `sandbox_mode`; `model` and `model_reasoning_effort` of the config; the attempt's variables in
+  later key over an earlier one: `notify = []`; for an isolated session without a key of its own, the model provider
+  the host's `config.toml` selects (`model_provider` and `model_providers.<name>`, without `http_headers` and
+  `experimental_bearer_token`: the adapter puts the provider in the arguments it starts codex with); the
+  `native.codex` block without `approval_policy` and `sandbox_mode`; `model` and `model_reasoning_effort` of the config; the attempt's variables in
   `shell_environment_policy.set` of the block; the MCP servers as codex's own `mcp_servers`, each `required = true`,
   over the block's of the same name; the enabled hooks added to the block's `hooks` (in the shape of claude's settings,
   the timeout in seconds) with `bypass_hook_trust = true`; the targets as `agents.<name> = {description, config_file}`
@@ -296,7 +300,14 @@ runs one process per session".
   skill to its directory (the targets' among them, the session's first; for a session that inherits the host, the
   host's skills after them), the links of the last start removed first and hidden entries, codex's own, kept; a home
   that inherits the host links the host's `auth.json`, `config.toml` and `AGENTS.md`, an isolated one without a key
-  of its own the host's `auth.json`. The role of a target is a file `<state>/acp/codex/roles/<hash>.toml` named by
+  of its own the host's `auth.json`. An isolated home gets its own `config.toml` (mode 0600, written again at every
+  start) with the keys codex reads only when its app-server starts and ignores in a thread's config:
+  `check_for_update_on_startup`, `analytics.enabled`, `feedback.enabled` and `features.plugins`, all false. With
+  plugins off codex does not clone its curated plugins from GitHub into the home at every start (1.7 MB of home
+  after one turn instead of 99 MB on 2026-11-22, codex-acp 2.9.0); a session that inherits the host reads the host's
+  `config.toml` for them, and a `native.codex` key codex reads only at the start has no effect.
+  <!-- MEASURE id=codex-acp-codex-home-size date=2026-11-22 ver=codex-acp-2.9.0+codex-0.171.0 env=linux-arm64-orbstack src=crates/loop-manager-acp/tests/harness/codex/session.rs note="bytes of an isolated session's codex-home after one turn on the fake; 99 MB once the plugin sync from GitHub finished without plugins off" -->
+  The role of a target is a file `<state>/acp/codex/roles/<hash>.toml` named by
   its content (its role prompt as `developer_instructions`, model, effort, and the skills its target has not turned
   off), written whole before the spawn.
 - **What stays on disk.** The homes, with the rollout of the thread, and the role files, shared by content.

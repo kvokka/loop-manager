@@ -504,7 +504,7 @@ is given as a reference.
 | Resume | `session/resume` with the same session part, `_meta` included, then `model`, `effort` and `mode` again by `session/set_config_option`: a resumed session would take them from its transcript | `session/resume` in a new process with the same session part, then `mode` again by `session/set_config_option` (the adapter resumes a session in a mode of its own); the codex config of the new attempt, model and effort included, comes in that process's `CODEX_CONFIG`, its `CODEX_HOME` from the `SessionRef` |
 | Attempt environment | the environment of the adapter's process, which the claude CLI it starts inherits | the environment of the adapter's process, which codex and its hooks inherit, and the same variables in `shell_environment_policy.set` of the codex config, so codex keeps them in a command's environment |
 | Stop of what a session left | `terminal/cancel` or `tool_call/cancel` of each background terminal or tool call of the last idle whose last update advertises `capabilities.cancel`; a subagent is left alone | as claude; a command that detached itself goes when the session's process stops, on the sweep of the instance marker |
-| Transcript check | none: ACP does not tell whether the session holds the prompt, so `Present { delivered: false }` and the prompt goes again with the same idempotency key | none, as claude; the adapter does not insert a prompt whose key the thread's history already holds |
+| Transcript check | ACP does not tell whether the session holds the prompt: delivered when the agent answered `session/prompt` with that key, the driver's record of the last key answered in the session ([adapters](adapters.md#acp-v2-harnesses)); the adapter answers a key its stored history holds without a turn | as claude; the adapter finds the key in the thread's history |
 
 The driver runs each agent process in its own process group, and takes the end of a turn from the harness's
 authoritative signal, never from the answer to a request.
@@ -532,8 +532,9 @@ claude (the `claude` profile of `crates/loop-manager-acp`, [adapters](adapters.m
   a limit is a plain `rate_limited` without it. The shape of the error when a real quota runs out has not been seen
   live (the claude half of criterion 10 stays open).
 - When the daemon dies, the adapter loses its stdin and exits, and the open turn ends with it (contract scenario 11).
-  The next attempt resumes the session by `session/resume`, its `home` from the `SessionRef`, and sends the prompt
-  again with the same idempotency key (4.2 `Transcript`, 6.4); a planned restart drains first
+  The next attempt resumes the session by `session/resume`, its `home` from the `SessionRef`, and reconciles a prompt
+  the adapter answered with a prompt of a new key; one it never answered goes again with the same idempotency key
+  (4.2 `Transcript`, 6.4); a planned restart drains first
   ([invariants](invariants.md#recovery)). The claude CLI reaches `init` 0.30 s after a resume of a one-turn session
   (claude 2.1.322), and 0.4–0.5 s through an ACP adapter (2.1.321), so a resumed attempt costs little.
   <!-- MEASURE id=claude-resume-time date=2026-11-10 ver=claude-2.1.322 env=linux-arm64-orbstack src=reports/42 note="one-turn session, haiku, n=6; through the ACP adapter on 2.1.321 0.4–0.5 s (reports/14); resume of a long transcript not measured" -->
@@ -578,9 +579,9 @@ codex (the `codex` profile of `crates/loop-manager-acp`, [adapters](adapters.md#
   own: the core's watchdog owns it.
 - When the daemon dies, the adapter loses its stdin and stops codex, and the open turn ends with it (contract
   scenario 11). The next attempt resumes the session by `session/resume` in a new process, its `CODEX_HOME` from the
-  `SessionRef`, and sends the prompt again with the same idempotency key: the adapter makes it codex's
-  `clientUserMessageId` and does not insert a prompt whose key the thread's history already holds (read in the
-  adapter's code, not run across a daemon's death).
+  `SessionRef`, and reconciles a prompt the adapter answered with a prompt of a new key; one it never answered goes
+  again with the same idempotency key, which the adapter makes codex's `clientUserMessageId`. A key the thread's
+  history already holds the adapter answers at once, inserting nothing and starting no turn.
 - The permission mode follows `native.codex.approval_policy` and `sandbox_mode` ([config](config.md#permissions)).
   Under `agent-full-access`, the default, no request comes; under `workspace-write` and `read-only` what the sandbox
   does not allow comes as `session/request_permission`, which the driver declines at once, so nothing waits and the
@@ -971,9 +972,9 @@ for it is not.
 - Every prompt has a delivery record `intent → sent → acked → settled` and a `PromptKey`. `intent` is written
   with the decision to send; `sent` after `send_prompt` returned; `acked` on `prompt.acked`; `settled` when the turn
   ended. No marker in the prompt text: the key goes as the harness's own idempotency key. An ACP harness, claude
-  and codex among them, has no transcript check: only the agent's memory of the key protects the prompt (codex's
-  adapter looks it up in the thread's history, 4.6), and otherwise the delivery may repeat
-  ([adapters](adapters.md#acp-v2-harnesses)).
+  and codex among them, knows a prompt delivered when the agent answered it (the driver records the key of the last
+  answer of the session, 4.6); a prompt whose answer the daemon did not live to read goes again with its key, and only
+  the agent's memory of the key keeps it from running twice ([adapters](adapters.md#acp-v2-harnesses)).
 - Daemon start ([invariants](invariants.md#recovery)): open the state and drain the outbox; for every recorded instance check pid + start time, kill its
   process group and sweep every process carrying its marker `LOOP_MANAGER_INSTANCE=<id>` in the environment, wait for
   the end (invariants 6, 7); every hook still queued is first killed by its `LOOP_MANAGER_INSTANCE` marker, with what it
