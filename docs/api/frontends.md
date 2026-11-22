@@ -157,7 +157,8 @@ client (T3 Code, Zed, any ACP client), started by the client, locally or over `s
 process; it reaches the daemon on its API socket (`--socket`, else `LOOP_MANAGER_SOCKET`, else the XDG default, as
 every command does), and the harnesses stay with the daemon. Logs go to stderr. One ACP session is one run: the
 session id is the run id, across steps, attempts and harnesses. The command lists runs, replays their history and
-follows it, takes a run over, instructs its agent and hands it back ([Humans and runs](#humans-and-runs)).
+follows it, takes a run over, instructs its agent, stops it, answers its permission requests and hands it back
+([Humans and runs](#humans-and-runs)).
 
 - `initialize`: protocol version 2 only; a client that asks for version 1 gets `-32022`. The capabilities are the
   baseline `session` (`{}`); `agentInfo` is `loop-manager` and the binary's version.
@@ -190,8 +191,27 @@ follows it, takes a run over, instructs its agent and hands it back ([Humans and
   (`no_live_session` among the refusals) is echoed as a command is. An error reply of the daemon is a notice line too,
   an unreachable daemon `-32603`. The answer to the prompt is that `messageId`. A prompt to a session this process has
   not opened is `-32600`.
-- `session/close` stops following; the run goes on, manual or not. `session/cancel` is ignored. `session/new` is
-  `-32601` with the message "runs are started with `loop-manager run start`". Other methods are `-32601`.
+- `session/cancel` is the operator's Stop: `POST /v1/runs/{id}/stop` with the attempt the session has shown, which
+  takes a run under loop-manager over. The notification has no answer; the session gets the daemon's answer as an
+  `agent_message_chunk` notice line (`messageId` `lm-stop-<n>`): `accepted` (the history's `stop` record tells what
+  was stopped; a cancelled turn ends when the harness ends it, and `manual.stop` of the run view is `pending` until
+  then), `nothing_to_stop`, or a refusal (`stale_attempt`, `run_terminal`). A session this process has not opened
+  gets a refusal notice.
+- Permission requests: once the history is read up to now (at the answer to `session/resume`, and again whenever a
+  broken stream catches up), the requests that wait for an operator (`permissions` of the run view, of its live
+  attempt) go to the client as `session/request_permission`, and so does each later `permission` record the view
+  then lists as waiting. A request the policy answered (any run under loop-manager) is no longer listed, so it is
+  never sent, live or in a replay. The request's `title` is its `tool`; its `subject` is a `tool_call` of id
+  `<attempt>-<tool_use_id>` with the `input` as `rawInput` (none without a `tool_use_id`); its options are the
+  request's (`optionId` its `id`, `name`, `kind`). A `selected` outcome is `POST /v1/runs/{id}/permission` with that
+  option and the request's attempt, any other outcome the same with `option: null` (a decline). An `accepted` answer
+  adds nothing (the history's `permission_answer` record shows it); another (`already_answered`, `stale_attempt`,
+  `run_terminal`, `unknown_request`, `unknown_option`) is a notice line, `messageId` `lm-permission-<n>`. An error
+  of the client leaves the request to the others. A `permission_answer` record of a request still put to the client,
+  an `attempt_end` of its attempt, `session/close` or a later `session/resume`, and the run's end cancel it at the
+  client (`$/cancel_request`), and its late answer is not sent.
+- `session/close` stops following; the run goes on, manual or not. `session/new` is `-32601` with the message "runs
+  are started with `loop-manager run start`". Other methods are `-32601`.
 - Several clients on one run each get the same stream: each is its own process reading the history.
 
 How a history record becomes updates:
@@ -203,13 +223,11 @@ How a history record becomes updates:
 | `prompt` | a `user_message_chunk` of its text, `messageId` `prompt-<key>` |
 | `exec_output` | its text as a `tool_call_content_chunk` of an `execute` tool call that a `tool_call_update` (`in_progress`, title `<step> (exec)`, or `<step> (check)` for the output of a check script) opens at the attempt's first output: id `exec-<attempt>`, or `exec-<attempt>-<n>` for output after that call ended. The call ends at the next boundary record: `failed` at an `attempt_end` with a failure, an `outcome` `fail` or a `run` not passed, else `completed` |
 | `step`, `attempt`, `attempt_end`, `outcome`, `control`, `run`, `truncated` | an `agent_message_chunk` notice line of its own (`messageId` `lm-<n>`), such as `— step build (ai) —`, `— attempt 2: resume on claude —`, `— attempt 2 failed: rate_limited —`, `— outcome pass: done —`, `— taken over by an operator —`, `— handed back to loop-manager —`, `— run cancelled (cancel) —` |
+| `permission`, `permission_answer`, `stop` | a notice line the same way, without ending an `execute` tool call: `— permission asked: <tool> —`; `— permission <tool>: <option's name>, by an operator —`, `…: declined by an operator —`, `…: declined by loop-manager —` (the policy), `…: taken back by the agent —` (`<tool>` is the request's id when its `permission` record was not read); `— Stop sent to the agent: the turn ends when the harness stops it —` (`target` `turn`), `— Stop: the step's command is stopped; its outcome waits for /lm-continue —` (`command`) |
 | any other kind | nothing |
 
 The boundaries are agent messages, not the protocol's `notice` update: a notice is a live event outside the session's
 history, and a client may drop it.
-
-Not supported from an ACP client: instructions to a run taken over, `session/cancel` as a stop, answers to permission
-requests.
 
 ## Humans and runs
 

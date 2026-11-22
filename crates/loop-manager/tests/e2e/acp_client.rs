@@ -1,9 +1,10 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an outside ACP v2 client, the SDK's, on the built binary over
-//! stdio, observing and taking over the runs of a daemon whose harness is the `acp-agent` fixture. No model.
+//! stdio, observing, taking over and stopping the runs of a daemon whose harness is the `acp-agent` fixture, and
+//! answering their permission requests. No model.
 
 use crate::common::{self, Daemon};
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::v2::{ConnectionTo, InitializeOutcome, schema};
+use agent_client_protocol::v2::{ConnectionTo, InitializeOutcome, Responder, schema};
 use agent_client_protocol::{Agent, Client, Lines, v1};
 use serde_json::{Value, json};
 use std::{
@@ -21,15 +22,22 @@ use tokio::{
 /// A daemon of the projects `shop` and `lab` whose `build` formula is one `ai` step of an agent on the `acp-agent`
 /// fixture running `command` as its tool.
 async fn daemon(command: &str) -> Daemon {
+    configured(command, "", "", &[]).await
+}
+
+/// The daemon of [`daemon`] with `top` before the tables of its config, `args` of the fixture (a TOML array's
+/// items) and the files `shop` (a path in the project's directory, its text).
+async fn configured(command: &str, top: &str, args: &str, shop: &[(&str, &str)]) -> Daemon {
     let agent = Path::new(common::EXE).with_file_name("acp-agent");
     let config = format!(
-        "projects = [\"shop\", \"lab\"]\n[harness.fake]\ncommand = \"{}\"\n[harness.fake.env]\nACP_AGENT_COMMAND = \
-         \"{command}\"\n",
+        "projects = [\"shop\", \"lab\"]\n{top}[harness.fake]\ncommand = \"{}\"\nargs = [{args}]\n[harness.fake.env]\n\
+         ACP_AGENT_COMMAND = \"{command}\"\n",
         agent.display()
     );
+    let shop: Vec<(String, String)> = (shop.iter()).map(|(p, t)| ((*p).to_owned(), (*t).to_owned())).collect();
     Daemon::start(move |dir| {
         let projects = dir.join("config/loop-manager");
-        let files = [
+        let mut files = vec![
             (projects.join("config.toml"), config),
             (projects.join("lab/loop-manager.toml"), String::new()),
             (
@@ -45,6 +53,10 @@ async fn daemon(command: &str) -> Daemon {
                 "Build {{ rig.name }}.".to_owned(),
             ),
         ];
+        files.extend(
+            shop.into_iter()
+                .map(|(path, text)| (projects.join("shop").join(path), text)),
+        );
         for (path, text) in files {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
@@ -57,11 +69,19 @@ fn project_dir(d: &Daemon, project: &str) -> PathBuf {
     d.dir.path().join("config/loop-manager").join(project)
 }
 
+/// A `session/request_permission` received, with the responder that answers it.
+type Asked = (
+    schema::RequestPermissionRequest,
+    Responder<schema::RequestPermissionResponse>,
+);
+
 /// One `loop-manager acp` process with the SDK's client on its stdio, initialized; dropped, it goes.
 struct Acp {
     cx: ConnectionTo<Agent>,
     /// The `session/update` notifications received, as JSON.
     updates: mpsc::UnboundedReceiver<Value>,
+    /// The permission requests received, unanswered.
+    asked: mpsc::UnboundedReceiver<Asked>,
     _close: oneshot::Sender<()>,
     _child: Child,
 }
@@ -97,6 +117,7 @@ impl Acp {
         let mut child = spawn(d, args);
         let transport = lines(&mut child);
         let (tx, updates) = mpsc::unbounded_channel();
+        let (asked_tx, asked) = mpsc::unbounded_channel();
         let (cx_tx, cx_rx) = oneshot::channel();
         let (close, closed) = oneshot::channel::<()>();
         tokio::spawn(
@@ -109,6 +130,15 @@ impl Acp {
                         Ok(())
                     },
                     agent_client_protocol::on_receive_notification!(),
+                )
+                .on_receive_request(
+                    async move |request: schema::RequestPermissionRequest,
+                                responder: Responder<schema::RequestPermissionResponse>,
+                                _: ConnectionTo<Agent>| {
+                        let _ = asked_tx.send((request, responder));
+                        Ok(())
+                    },
+                    agent_client_protocol::on_receive_request!(),
                 )
                 .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
                     let _ = cx_tx.send(cx.clone());
@@ -131,6 +161,7 @@ impl Acp {
         Self {
             cx,
             updates,
+            asked,
             _close: close,
             _child: child,
         }
@@ -600,4 +631,160 @@ async fn clients_resuming_while_records_are_written_get_each_record_once_in_orde
         assert!(seen.iter().any(|u| text(u).starts_with("— run cancelled")), "{seen:#?}");
         assert_eq!(records(seen), records(&ends[ends.len() - 1]));
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_cancel_stops_the_turn_of_the_run_and_takes_it_over() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    let seen = acp.resume(&run, true).await.unwrap();
+    if !seen.iter().any(printed) {
+        acp.until(printed).await;
+    }
+    let cancel = schema::CancelSessionNotification::new(run.clone());
+    acp.cx.send_notification(cancel.clone()).unwrap();
+    // The answer and the history's record of the Stop, whichever first, then the turn's end.
+    let seen = acp.until(|u| state(u) == "idle").await;
+    let texts: Vec<&str> = seen.iter().map(text).collect();
+    assert!(
+        texts.contains(&"— Stop accepted: the run is taken over until /lm-continue —\n"),
+        "{seen:#?}"
+    );
+    assert!(
+        texts.contains(&"— Stop sent to the agent: the turn ends when the harness stops it —\n"),
+        "{seen:#?}"
+    );
+    assert_eq!(seen.last().unwrap()["update"]["stopReason"], "cancelled", "{seen:#?}");
+    let deadline = Instant::now() + common::WAIT;
+    loop {
+        let view = d.get(&format!("/v1/runs/{run}")).await;
+        assert_eq!(
+            (&view["control"], &view["state"]),
+            (&json!("manual"), &json!("running"))
+        );
+        if view["manual"]["stop"].is_null() {
+            break;
+        }
+        assert_eq!(view["manual"]["stop"], "pending");
+        assert!(Instant::now() < deadline, "the stop stays pending: {view:#}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    acp.cx.send_notification(cancel).unwrap();
+    acp.until(|u| text(u).starts_with("— Stop: nothing to stop, no turn is in flight"))
+        .await;
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}
+
+/// A daemon on `acp-agent --permission` running `command` once allowed, whose run is held after a turn that ended
+/// without an outcome: no default policy, and a hook on that event that never answers.
+async fn held(command: &str) -> Daemon {
+    let hold = "name = \"hold\"\nversion = \"0.1.0\"\n[[hook]]\non = \"run.turn_ended_without_outcome\"\n\
+                command = [\"sleep\", \"600\"]\ntimeout = \"300s\"\n";
+    let shop = [
+        (
+            "loop-manager.toml",
+            "[[addon]]\npath = \"hold\"\n[settings]\naddons = [{ name = \"hold\" }]\n[rigs.web]\npath = \"web\"\n",
+        ),
+        ("hold/addon.toml", hold),
+    ];
+    let top = "builtin = { default-policy = { enabled = false } }\n";
+    configured(command, top, "\"--permission\"", &shop).await
+}
+
+/// The next permission request `acp` receives.
+async fn asked(acp: &mut Acp) -> Asked {
+    let asked = tokio::time::timeout(common::WAIT, acp.asked.recv()).await;
+    asked.expect("no permission request").unwrap()
+}
+
+fn outcome(outcome: Value) -> schema::RequestPermissionResponse {
+    serde_json::from_value(json!({ "outcome": outcome })).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_permission_request_reaches_no_client_under_loop_manager_and_every_client_of_a_manual_run() {
+    let out = tempfile::tempdir().unwrap();
+    let ran = out.path().join("ran");
+    let command = format!("touch {}; sleep 600", ran.display());
+    let d = held(&command).await;
+    let run = d.create("build", None).await;
+    let mut first = Acp::start(&d, &[]).await;
+    // Under loop-manager the policy declines the first turn's request: the client sees it in the history only.
+    let mut seen = first.resume(&run, true).await.unwrap();
+    if !seen.iter().any(|u| state(u) == "idle") {
+        seen.extend(first.until(|u| state(u) == "idle").await);
+    }
+    let texts: Vec<&str> = seen.iter().map(text).collect();
+    let line = |what: &str| format!("— permission {what} —\n");
+    for notice in [
+        format!("asked: {command}"),
+        format!("{command}: declined by loop-manager"),
+    ] {
+        assert!(texts.contains(&line(&notice).as_str()), "{seen:#?}");
+    }
+    assert!(
+        first.asked.try_recv().is_err(),
+        "a request of a run under loop-manager reached the client"
+    );
+    assert!(!ran.exists());
+
+    // An instruction takes the run over, and the request of its turn waits for an operator: it is put to the client.
+    first.command(&run, "try again", None).await;
+    let (request, first_asked) = asked(&mut first).await;
+    let request = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        (&request["sessionId"], &request["title"]),
+        (&json!(run), &json!(command))
+    );
+    assert_eq!(
+        request["options"],
+        json!([{ "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+            { "optionId": "reject", "name": "Reject", "kind": "reject_once" }])
+    );
+    let call = &request["subject"]["toolCall"];
+    assert!(call["toolCallId"].as_str().unwrap().starts_with("1-"), "{request:#}");
+    assert_eq!(call["rawInput"]["command"], command.as_str());
+    // A client that opens the session now gets it at once, with a replay or without.
+    let mut second = Acp::start(&d, &[]).await;
+    second.resume(&run, false).await.unwrap();
+    let (_, second_asked) = asked(&mut second).await;
+    let mut third = Acp::start(&d, &[]).await;
+    third.resume(&run, true).await.unwrap();
+    let (_, third_asked) = asked(&mut third).await;
+
+    // One answer counts: the run gets it, and the other clients' requests are cancelled.
+    second_asked
+        .respond(outcome(json!({ "outcome": "selected", "optionId": "allow" })))
+        .unwrap();
+    for responder in [first_asked, third_asked] {
+        let cancelled = tokio::time::timeout(common::WAIT, responder.cancellation().cancelled()).await;
+        cancelled.expect("the request answered elsewhere is not cancelled");
+        responder.respond(outcome(json!({ "outcome": "cancelled" }))).unwrap();
+    }
+    let allowed = line(&format!("{command}: Allow, by an operator"));
+    for client in [&mut first, &mut second, &mut third] {
+        client.until(|u| text(u) == allowed).await;
+        assert!(client.asked.try_recv().is_err(), "a request reached a client twice");
+    }
+    let deadline = Instant::now() + common::WAIT;
+    while !ran.exists() {
+        assert!(Instant::now() < deadline, "the allowed command did not run");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(view["permissions"], json!([]), "{view:#}");
+    // The history has the one answer.
+    let mut late = Acp::start(&d, &[]).await;
+    let all = late.resume(&run, true).await.unwrap();
+    let answers = all
+        .iter()
+        .filter(|u| text(u).starts_with(&format!("— permission {command}: ")));
+    assert_eq!(answers.count(), 2, "{all:#?}");
+    assert!(late.asked.try_recv().is_err());
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
 }

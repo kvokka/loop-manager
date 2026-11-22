@@ -2,7 +2,7 @@
 
 An editor or app that speaks the [Agent Client Protocol](https://agentclientprotocol.com) version 2 can show the runs
 of a loop-manager daemon as its sessions: the list of runs, the history of one from its first step, and what the run
-does as it does it, take a run over, instruct its agent and hand it back. The client starts `loop-manager acp` as its agent, on the
+does as it does it, take a run over, instruct its agent, stop it, answer its permission requests and hand it back. The client starts `loop-manager acp` as its agent, on the
 same machine or over ssh; the command reaches the daemon on its API socket and the harnesses keep running under the
 daemon. What the command does, method by method, is in [frontends: ACP](../api/frontends.md#acp).
 
@@ -59,6 +59,39 @@ was in when the session was opened). If the run has moved on to a later attempt 
 the daemon refuses the command and nothing changes: `— /lm-takeover refused: the run is past attempt 1 that this
 session shows; … —`. Once the new attempt shows, the command can be sent again. A closed session keeps showing the
 attempt it showed last, so a command there is refused the same way until the session is opened again.
+
+## Stopping
+
+The client's Stop button (`session/cancel`) is the operator's Stop, as `loop-manager run stop` does, with the attempt
+the session shows. It takes the run over first, if loop-manager holds it. The session gets the daemon's answer as a
+notice line:
+
+- `— Stop accepted: the run is taken over until /lm-continue —`. The history then shows what was stopped. For an AI
+  step it is `— Stop sent to the agent: the turn ends when the harness stops it —`: the turn is cancelled through
+  its session, the agent's process lives on, and the stop stays pending (`manual.stop` of the run view) until the
+  harness ends the turn, which shows as the agent's `idle` state with the stop reason `cancelled`. For an exec step
+  it is `— Stop: the step's command is stopped; its outcome waits for /lm-continue —`.
+- `— Stop: nothing to stop, … —`: no turn is in flight and no command runs (between turns, during a check script,
+  in a step with no process). Nothing was sent; the run is taken over all the same.
+- A refusal: the run has ended, or it is past the attempt the session shows.
+
+## Permission requests
+
+Under loop-manager the policy declines every permission request of a run's agent at once; the session shows both
+in the history (`— permission asked: <title> —`, `— permission <title>: declined by loop-manager —`) and the client
+is asked nothing. While the run is taken over, a request waits for an operator, and every client with the session
+open gets it as the protocol's permission prompt: its title, its tool call and the options the agent offers. A
+client that opens the session while a request waits gets it at once, with or without a replay; one answered before
+is not asked again.
+
+The first answer counts: the option selected, or a decline when the prompt is dismissed. The history shows it
+(`— permission <title>: Allow, by an operator —`), and the prompts of the other clients are cancelled. An answer
+given elsewhere (another client, `loop-manager run permit`) cancels them the same way, and so does the agent taking
+its request back, the end of the attempt, or `/lm-continue`, on which the policy declines what is still open. An
+answer that comes too late gets a notice: `— the answer to the permission request is not taken: the request was
+answered elsewhere, or the agent took it back —`.
+
+## Leaving
 
 Closing the session or leaving the client changes nothing: a run taken over stays manual until someone hands it back,
 from a client or with `loop-manager run continue`.

@@ -4,7 +4,7 @@
 
 use base64::Engine;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// The keys whose ids an agent keeps unique only within its own session.
 const IDS: [&str; 3] = ["messageId", "toolCallId", "terminalId"];
@@ -18,6 +18,8 @@ pub(crate) struct Translator {
     exec_attempts: HashSet<u64>,
     /// The subagent messages whose first chunk is marked.
     marked: HashSet<String>,
+    /// The permission requests asked, by attempt and id.
+    requests: HashMap<(u64, String), Value>,
 }
 
 impl Translator {
@@ -45,7 +47,45 @@ impl Translator {
                 ));
                 updates
             }
+            "permission" | "permission_answer" | "stop" => {
+                let id = format!("lm-{}", record["n"].as_u64().unwrap_or(0));
+                vec![text_chunk(
+                    "agent_message_chunk",
+                    &id,
+                    &format!("— {} —\n", self.operator(record, attempt)),
+                )]
+            }
             _ => Vec::new(),
+        }
+    }
+
+    /// The notice line of a permission request, its answer or the operator's Stop.
+    fn operator(&mut self, record: &Value, attempt: u64) -> String {
+        let key = (attempt, text(record, "id").to_owned());
+        match record["kind"].as_str().unwrap_or_default() {
+            "permission" => {
+                self.requests.insert(key, record.clone());
+                format!("permission asked: {}", text(record, "tool"))
+            }
+            "permission_answer" => {
+                let request = self.requests.remove(&key).unwrap_or_default();
+                let what = request["tool"].as_str().unwrap_or(&key.1);
+                let option = record["option"].as_str();
+                let chosen = (request["options"].as_array().into_iter().flatten())
+                    .find(|o| o["id"].as_str() == option)
+                    .and_then(|o| o["name"].as_str())
+                    .or(option);
+                match (text(record, "by"), chosen) {
+                    ("harness", _) => format!("permission {what}: taken back by the agent"),
+                    ("operator", Some(chosen)) => format!("permission {what}: {chosen}, by an operator"),
+                    ("operator", None) => format!("permission {what}: declined by an operator"),
+                    _ => format!("permission {what}: declined by loop-manager"),
+                }
+            }
+            _ => match text(record, "target") {
+                "command" => "Stop: the step's command is stopped; its outcome waits for /lm-continue".to_owned(),
+                _ => "Stop sent to the agent: the turn ends when the harness stops it".to_owned(),
+            },
         }
     }
 

@@ -253,3 +253,40 @@ fn every_update_parses_as_an_acp_v2_session_update() {
         serde_json::from_value::<SessionUpdate>(update.clone()).unwrap_or_else(|e| panic!("{update}: {e}"));
     }
 }
+
+#[test]
+fn a_permission_request_its_answer_and_a_stop_are_notices() {
+    let mut t = Translator::default();
+    let options = json!([{ "id": "allow", "name": "Allow", "kind": "allow_once" },
+        { "id": "reject", "name": "Reject", "kind": "reject_once" }]);
+    let asked = |id: &str| json!({ "id": id, "tool": "rm -r x", "tool_use_id": "t1", "input": {}, "options": options });
+    let answer = |id: &str, by: &str, option: Value| json!({ "id": id, "by": by, "option": option });
+    let lines = [
+        (record(3, 1, "permission", asked("p1")), "permission asked: rm -r x"),
+        (
+            record(4, 1, "permission_answer", answer("p1", "policy", Value::Null)),
+            "permission rm -r x: declined by loop-manager",
+        ),
+        (record(5, 1, "permission", asked("p2")), "permission asked: rm -r x"),
+        (
+            record(6, 1, "permission_answer", answer("p2", "operator", json!("allow"))),
+            "permission rm -r x: Allow, by an operator",
+        ),
+        (
+            record(7, 1, "permission_answer", answer("p3", "harness", Value::Null)),
+            "permission p3: taken back by the agent",
+        ),
+        (
+            record(8, 1, "stop", json!({ "target": "turn" })),
+            "Stop sent to the agent: the turn ends when the harness stops it",
+        ),
+        (
+            record(9, 1, "stop", json!({ "target": "command" })),
+            "Stop: the step's command is stopped; its outcome waits for /lm-continue",
+        ),
+    ];
+    for (record, line) in lines {
+        let n = record["n"].as_u64().unwrap();
+        assert_eq!(t.record(&record), vec![notice(n, line)]);
+    }
+}

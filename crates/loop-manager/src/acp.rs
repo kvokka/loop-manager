@@ -1,8 +1,10 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an ACP v2 agent over stdio for an outside client, and a client of
 //! the daemon's API. Its sessions are the daemon's runs: listed, replayed from their history and followed as the
 //! history grows. A prompt is one of the commands `/lm-takeover` and `/lm-continue` or else an instruction to the run's
-//! agent, sent to the daemon with the attempt the session shows; closing a session leaves the run as it is.
+//! agent, sent to the daemon with the attempt the session shows; `session/cancel` is the operator's Stop. A manual
+//! run's permission requests are put to the client; closing a session leaves the run as it is.
 
+mod permissions;
 mod translate;
 
 #[cfg(test)]
@@ -98,7 +100,8 @@ fn fail(message: &str) -> ExitCode {
 async fn serve(daemon: Arc<Daemon>) -> Result<()> {
     let sessions = Shared::default();
     let (list, prompt) = (daemon.clone(), (daemon.clone(), sessions.clone()));
-    let (resume, close) = ((daemon, sessions.clone()), sessions);
+    let (resume, cancel) = ((daemon.clone(), sessions.clone()), (daemon, sessions.clone()));
+    let close = sessions;
     Agent
         .v2()
         .name("loop-manager")
@@ -130,30 +133,7 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
             async move |request: schema::ResumeSessionRequest,
                         responder: Responder<schema::ResumeSessionResponse>,
                         connection: ConnectionTo<Peer>| {
-                let replay = match &request.replay_from {
-                    None => false,
-                    Some(schema::ReplayFrom::Start(_)) => true,
-                    Some(_) => {
-                        let error = schema::Error::invalid_params()
-                            .data(json!("only `{\"type\": \"start\"}` is a replay cursor here"));
-                        return responder.respond_with_error(error.into());
-                    }
-                };
-                let run = request.session_id.to_string();
-                let (stop_tx, stop) = oneshot::channel();
-                // A session resumed again drops its earlier follower.
-                let mut sessions = lock(&resume.1);
-                sessions.following.insert(run.clone(), stop_tx);
-                sessions.shown.insert(run.clone(), 0);
-                drop(sessions);
-                let follower = Follower {
-                    daemon: resume.0.clone(),
-                    sessions: resume.1.clone(),
-                    connection: connection.clone(),
-                    run,
-                    replay,
-                };
-                connection.spawn(follower.follow(responder, stop))
+                resume_session(&resume.0, &resume.1, &request, responder, &connection)
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -165,6 +145,16 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
                 responder.respond(schema::CloseSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_notification(
+            async move |request: schema::CancelSessionNotification, connection: ConnectionTo<Peer>| {
+                let (daemon, sessions) = cancel.clone();
+                let run = request.session_id.to_string();
+                connection
+                    .clone()
+                    .spawn(async move { stop(&daemon, &sessions, &connection, &run).await })
+            },
+            agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_request(
             async |_: schema::NewSessionRequest,
@@ -194,6 +184,41 @@ async fn serve(daemon: Arc<Daemon>) -> Result<()> {
         )
         .connect_to(Stdio::new())
         .await
+}
+
+/// Opens the session of a run for `session/resume`: a follower sends its history, from the start when the request
+/// asks for a replay, and answers.
+fn resume_session(
+    daemon: &Arc<Daemon>,
+    sessions: &Shared,
+    request: &schema::ResumeSessionRequest,
+    responder: Responder<schema::ResumeSessionResponse>,
+    connection: &ConnectionTo<Peer>,
+) -> Result<()> {
+    let replay = match &request.replay_from {
+        None => false,
+        Some(schema::ReplayFrom::Start(_)) => true,
+        Some(_) => {
+            let error =
+                schema::Error::invalid_params().data(json!("only `{\"type\": \"start\"}` is a replay cursor here"));
+            return responder.respond_with_error(error.into());
+        }
+    };
+    let run = request.session_id.to_string();
+    let (stop_tx, stop) = oneshot::channel();
+    // A session resumed again drops its earlier follower.
+    let mut shared = lock(sessions);
+    shared.following.insert(run.clone(), stop_tx);
+    shared.shown.insert(run.clone(), 0);
+    drop(shared);
+    let follower = Follower {
+        daemon: daemon.clone(),
+        sessions: sessions.clone(),
+        connection: connection.clone(),
+        run,
+        replay,
+    };
+    connection.spawn(follower.follow(responder, stop))
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -241,7 +266,6 @@ async fn command(
     connection: &ConnectionTo<Peer>,
     request: &schema::PromptRequest,
 ) -> Result<schema::PromptResponse> {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
     let run = request.session_id.to_string();
     let blocks = serde_json::to_value(&request.prompt).map_err(|e| internal(&e))?;
     let text: String = (blocks.as_array().into_iter().flatten())
@@ -282,7 +306,7 @@ async fn command(
         // The history's `prompt` record of the instruction shows it under this id (`translate`).
         (Some(key), _) => format!("prompt-{key}"),
         (None, Some(key)) => format!("lm-key-{}", key.as_ref()),
-        (None, None) => format!("lm-command-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+        (None, None) => format!("lm-command-{}", next()),
     };
     if taken.is_none() {
         send(
@@ -292,13 +316,44 @@ async fn command(
             "content": { "type": "text", "text": text } }),
         )?;
     }
-    send(
-        connection,
-        &run,
-        json!({ "sessionUpdate": "agent_message_chunk", "messageId": format!("{id}-reply"),
-        "content": { "type": "text", "text": format!("— {line} —\n") } }),
-    )?;
+    send(connection, &run, notice(&format!("{id}-reply"), &line))?;
     Ok(schema::PromptResponse::new(id))
+}
+
+/// The operator's Stop of the client's `session/cancel` of `run`, sent to the daemon with the attempt the session
+/// shows; the daemon's answer is a notice line.
+async fn stop(daemon: &Daemon, sessions: &Shared, connection: &ConnectionTo<Peer>, run: &str) -> Result<()> {
+    let attempt = lock(sessions).shown.get(run).copied();
+    let line = match attempt {
+        None => format!("Stop refused: session `{run}` is not open; `session/resume` opens it"),
+        Some(attempt) => {
+            let body = json!({ "attempt": attempt });
+            match daemon
+                .client
+                .request("POST", &run_path(run, "/stop"), Some(&body), None)
+                .await
+            {
+                Ok(reply) => answered("Stop", &reply, attempt),
+                Err(ClientError::Api { error, .. }) => {
+                    format!("Stop failed: {}", error["message"].as_str().unwrap_or_default())
+                }
+                Err(e) => format!("Stop failed: {e}"),
+            }
+        }
+    };
+    send(connection, run, notice(&format!("lm-stop-{}", next()), &line))
+}
+
+/// A number for the id of a notice of this process, unique within it.
+fn next() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The notice line `line` as an agent message `id`.
+fn notice(id: &str, line: &str) -> Value {
+    json!({ "sessionUpdate": "agent_message_chunk", "messageId": id,
+        "content": { "type": "text", "text": format!("— {line} —\n") } })
 }
 
 /// The command `text` is: the operation of the run and the choice of `/lm-continue send|withdraw`; `None` for an
@@ -337,6 +392,7 @@ fn answered(what: &str, reply: &Value, attempt: u32) -> String {
         ("the instruction", "accepted") => {
             "the instruction is sent to the agent; the run is taken over until /lm-continue".into()
         }
+        ("Stop", "accepted") => "Stop accepted: the run is taken over until /lm-continue".into(),
         (_, "accepted") => format!("{what} accepted: loop-manager goes on with the run in the same attempt"),
         (_, "returning") => {
             format!("{what} accepted: the run goes back to loop-manager once the agent has taken the instructions in")
@@ -356,6 +412,12 @@ fn answered(what: &str, reply: &Value, attempt: u32) -> String {
             "{what} refused: the run is past attempt {attempt} that this session shows; once its current attempt shows \
              (`session/resume` brings a closed session up to date), send it again"
         ),
+        (_, "nothing_to_stop") => "Stop: nothing to stop, no turn is in flight and no command runs; the run is taken \
+             over until /lm-continue"
+            .into(),
+        (_, "already_answered") => {
+            format!("{what} is not taken: the request was answered elsewhere, or the agent took it back")
+        }
         (_, "run_terminal") => format!("{what} refused: the run has ended"),
         (_, "not_manual") => format!("{what} refused: the run is not taken over; /lm-takeover takes it"),
         (_, answer) => format!("{what} refused: {answer}"),
@@ -427,13 +489,16 @@ struct Follower {
 impl Follower {
     /// Sends the run's history from its first record when `replay` asks for it, then the current state and the
     /// answer to `session/resume`, then the records as they are written, until the run ends or `stop` fires. A broken
-    /// stream is opened again after the last record read: no hole, no repeat.
+    /// stream is opened again after the last record read: no hole, no repeat. Once the history is read up to now, the
+    /// permission requests that wait for an operator are put to the client, and so is each one that comes later; one
+    /// answered meanwhile, or of an attempt that ended, is cancelled at the client, and so are all when it ends.
     async fn follow(
         self,
         responder: Responder<schema::ResumeSessionResponse>,
         mut stop: oneshot::Receiver<()>,
     ) -> Result<()> {
         let (mut responder, mut translator) = (Some(responder), Translator::default());
+        let mut open = permissions::Open::new();
         let (mut next, mut ended, mut drained) = (1, false, false);
         loop {
             let path = format!("{}?from={next}", run_path(&self.run, "/history"));
@@ -449,6 +514,7 @@ impl Follower {
                             if let Some(responder) = responder.take() {
                                 self.answer(responder, "running")?;
                             }
+                            self.ask_open(&mut open).await?;
                         }
                         "history_error" => {
                             let error = internal(&format!("history of run `{}`: {}", self.run, event.data));
@@ -476,6 +542,16 @@ impl Follower {
                             let updates = translator.record(&record);
                             if self.replay || responder.is_none() {
                                 updates.into_iter().try_for_each(|u| self.send(u))?;
+                            }
+                            let attempt = record["attempt"].as_u64().unwrap_or(0);
+                            match record["kind"].as_str().unwrap_or_default() {
+                                // One the policy answers has its answer already: the view does not list it.
+                                "permission" if responder.is_none() => self.ask_open(&mut open).await?,
+                                "permission_answer" => {
+                                    open.remove(&(attempt, text(&record, "id")));
+                                }
+                                "attempt_end" => open.retain(|(of, _), _| *of != attempt),
+                                _ => {}
                             }
                         }
                     }
@@ -525,7 +601,22 @@ impl Follower {
         responder.respond(schema::ResumeSessionResponse::new())
     }
 
+    /// Puts the permission requests of the run that wait for an operator to the client, those not put yet.
+    async fn ask_open(&self, open: &mut permissions::Open) -> Result<()> {
+        match self.daemon.get(&run_path(&self.run, "")).await {
+            Ok(view) => permissions::ask_open(&self.daemon, &self.connection, &view, open),
+            Err(e) => {
+                eprintln!("loop-manager acp: the permission requests of run `{}`: {e}", self.run);
+                Ok(())
+            }
+        }
+    }
+
     fn send(&self, update: Value) -> Result<()> {
         send(&self.connection, &self.run, update)
     }
+}
+
+fn text(record: &Value, key: &str) -> String {
+    record[key].as_str().unwrap_or_default().to_owned()
 }
