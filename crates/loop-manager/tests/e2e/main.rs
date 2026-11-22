@@ -29,6 +29,7 @@ mod role_prompt;
 mod run_card;
 mod step_if;
 mod stop;
+mod tasks;
 mod tracker;
 mod wait;
 mod worktree;
