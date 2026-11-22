@@ -339,3 +339,24 @@ fn tasks_beads_take_the_newest_run() {
     (new.bead_title, new.bead_parent) = (Some("New".into()), Some("E".into()));
     assert_eq!(beads(&[old, new]), map(&[("A", "New", Some("E"))]));
 }
+
+#[test]
+fn tasks_only_the_current_round_of_a_live_run_is_live() {
+    let runs = [WorkRun {
+        live: true,
+        round: 2,
+        ..run("run_1", Some("E"), 0)
+    }];
+    let attempts = [attempt("run_1", 1, 1, "s1", 10), attempt("run_1", 2, 2, "s2", 60)];
+    let nodes = tree("E", &runs, &attempts, &epic());
+    let live: Vec<_> = nodes.iter().map(|n| (n.id.as_str(), n.live)).collect();
+    assert_eq!(
+        live,
+        [
+            ("r:run_1.1", false),
+            ("t:run_1.1", false),
+            ("r:run_1.2", true),
+            ("t:run_1.2", false),
+        ]
+    );
+}
