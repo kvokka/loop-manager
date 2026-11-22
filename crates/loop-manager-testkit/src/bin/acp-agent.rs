@@ -2,8 +2,8 @@
 //!
 //! `acp-agent` speaks protocol version 2. A prompt is acknowledged with a `messageId` at once and run in the
 //! session's turn order: `running`, an `agent_message_chunk` echoing the prompt text, the command of
-//! `ACP_AGENT_COMMAND` (when set) as an `execute` tool call run by `sh -c` in the session's `cwd`, then `idle` with
-//! `end_turn`. `session/cancel` kills the command's process group and ends the turn with `cancelled`.
+//! `ACP_AGENT_COMMAND` (when set) as an `execute` tool call run by `sh -c` in the session's `cwd`, its output sent as
+//! `tool_call_content_chunk`s as it comes, then `idle` with `end_turn`. `session/cancel` kills the command's process group and ends the turn with `cancelled`.
 //!
 //! The command sees the session's system prompt and config options in `ACP_AGENT_SYSTEM_PROMPT`, `ACP_AGENT_MODEL`
 //! and `ACP_AGENT_EFFORT`. A session lives as long as the process: `session/resume` answers `-32002`.
@@ -14,6 +14,7 @@
 //!   `model` and `thought_level`;
 //! - `--background`: after the command, a turn leaves `sleep 600` running as a background terminal that advertises
 //!   `cancel`; `terminal/cancel` kills it, then the session goes idle without background;
+//! - `--subagent`: after the echo, a child session `<session>-sub` reports an `agent_message_chunk` `Sub: <prompt>`;
 //! - `--unsupported`: answers `initialize` with `-32022`;
 //! - `--v1`: serves only protocol version 1, answering any `initialize` with `protocolVersion: 1`.
 
@@ -304,6 +305,16 @@ impl Worker {
             format!("Echo: {text}").into(),
             message_id,
         )))?;
+        if self.script.flag("--subagent") {
+            let child = schema::SessionId::new(format!("{}-sub", self.session_id));
+            let message_id = schema::MessageId::new(self.script.state().next_id("message"));
+            let chunk = schema::ContentChunk::new(format!("Sub: {text}").into(), message_id);
+            self.connection
+                .send_notification(schema::UpdateSessionNotification::new(
+                    child,
+                    schema::SessionUpdate::AgentMessageChunk(chunk),
+                ))?;
+        }
         if let Some(command) = self.script.command.clone() {
             self.run_command(&command, turn.epoch).await?;
         }
@@ -370,24 +381,41 @@ impl Worker {
             .spawn();
         let (status, output) = match spawned {
             Err(e) => (schema::ToolCallStatus::Failed, format!("cannot run `sh`: {e}")),
-            Ok(child) => {
+            Ok(mut child) => {
                 // Kills what the command left running, on every way out: its end, a cancel, the agent's exit.
                 let _group = child
                     .id()
                     .and_then(|id| rustix::process::Pid::from_raw(i32::try_from(id).ok()?))
                     .map(Group);
-                tokio::select! {
-                    output = child.wait_with_output() => match output {
-                        Ok(output) if output.status.success() => {
-                            (schema::ToolCallStatus::Completed, String::from_utf8_lossy(&output.stdout).into_owned())
-                        }
-                        Ok(output) => (schema::ToolCallStatus::Failed, String::from_utf8_lossy(&output.stdout).into_owned()),
-                        Err(e) => (schema::ToolCallStatus::Failed, format!("cannot wait for the command: {e}")),
-                    },
-                    // A closed session drops the sender, which cancels too.
-                    _ = self.epoch.wait_for(|current| *current != epoch) => {
-                        (schema::ToolCallStatus::Failed, "cancelled".to_owned())
+                let mut stdout = child.stdout.take().expect("stdout is piped");
+                let (connection, session, mut output) = (self.connection.clone(), self.session_id.clone(), Vec::new());
+                let read = async {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = [0_u8; 4096];
+                    while let Ok(n @ 1..) = stdout.read(&mut buf).await {
+                        output.extend_from_slice(&buf[..n]);
+                        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                        let chunk = schema::ToolCallContentChunk::new(id.clone(), schema::ToolCallContent::from(text));
+                        let update = schema::SessionUpdate::ToolCallContentChunk(chunk);
+                        let _ = connection
+                            .send_notification(schema::UpdateSessionNotification::new(session.clone(), update));
                     }
+                    child.wait().await
+                };
+                let ended = tokio::select! {
+                    status = read => Some(status),
+                    // A closed session drops the sender, which cancels too.
+                    _ = self.epoch.wait_for(|current| *current != epoch) => None,
+                };
+                let output = String::from_utf8_lossy(&output).into_owned();
+                match ended {
+                    Some(Ok(status)) if status.success() => (schema::ToolCallStatus::Completed, output),
+                    Some(Ok(_)) => (schema::ToolCallStatus::Failed, output),
+                    Some(Err(e)) => (
+                        schema::ToolCallStatus::Failed,
+                        format!("cannot wait for the command: {e}"),
+                    ),
+                    None => (schema::ToolCallStatus::Failed, "cancelled".to_owned()),
                 }
             }
         };
@@ -531,7 +559,13 @@ async fn serve_v1() -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    const FLAGS: [&str; 4] = ["--system-prompt", "--options", "--background", "--unsupported"];
+    const FLAGS: [&str; 5] = [
+        "--system-prompt",
+        "--options",
+        "--background",
+        "--subagent",
+        "--unsupported",
+    ];
     let served = match args.as_slice() {
         [flag] if flag == "--v1" => serve_v1().await,
         flags if flags.iter().all(|f| FLAGS.contains(&f.as_str())) => {

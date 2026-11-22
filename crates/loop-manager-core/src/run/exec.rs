@@ -40,6 +40,9 @@ pub(super) struct RunExecutor {
     /// [`crate::config::Config::service_wait`] at the daemon start.
     pub service_wait: Duration,
     pub service_prefix: Vec<String>,
+    /// Takes the output of exec steps as it comes.
+    pub history: crate::history::History,
+    pub clock: crate::Clock,
 }
 
 impl Executor for RunExecutor {
@@ -60,7 +63,10 @@ impl Executor for RunExecutor {
                 Some("exec") => {
                     let msg = match self.hooks.played(payload) {
                         Some(exit) => super::exec_step::done(payload, exit, b"", b""),
-                        None => super::exec_step::run(&self.running, payload, self.hooks.socket()).await,
+                        None => {
+                            let sink = super::exec_step::sink(&self.history, self.clock, payload);
+                            super::exec_step::run(&self.running, payload, self.hooks.socket(), Some(sink)).await
+                        }
                     };
                     // A stopped writer drops the message; recovery (WP-20) finds the attempt on restart.
                     let _ = core.send(None, msg).await;

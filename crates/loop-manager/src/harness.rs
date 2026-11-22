@@ -4,6 +4,7 @@ use crate::daemon::Paths;
 use loop_manager_core::{
     config::{self, Config, EffectiveConfig, Name},
     driver::{Adapter, Driver, Setup},
+    history::History,
 };
 use std::{
     path::{Path, PathBuf},
@@ -51,9 +52,11 @@ pub(crate) fn driver(
     name: &str,
     harness: &config::Harness,
     paths: &Paths,
+    history: &History,
 ) -> Option<(Arc<dyn Driver>, PathBuf, &'static str)> {
     let Some(adapter) = adapter(name) else {
-        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket)).ok()?;
+        let (state, socket, history) = (&paths.state, Some(paths.socket.as_path()), Some(history.clone()));
+        let acp = loop_manager_acp::Acp::new(name, &harness.options, state, socket, history).ok()?;
         let command = harness.options["command"].as_str().unwrap_or_default().into();
         return Some((Arc::new(acp), command, "config"));
     };
@@ -82,7 +85,7 @@ fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option
         if harness.binary.is_some() {
             return Some("`binary`: an ACP harness names its agent executable by `command`".into());
         }
-        return loop_manager_acp::Acp::new(name, &harness.options, &paths.state, None).err();
+        return loop_manager_acp::Acp::new(name, &harness.options, &paths.state, None, None).err();
     };
     // The binary is not resolved for a check: no adapter reads it before a spawn.
     let binary = harness.binary.clone().unwrap_or_else(|| name.into());

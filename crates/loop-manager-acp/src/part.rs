@@ -61,7 +61,12 @@ pub(crate) fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(),
 /// The session part, in the shape of the ACP `session/new` parameters: `{cwd, mcpServers, systemPrompt}`, and the
 /// `model` and `effort` the session's config options take.
 pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan) -> Result<Value, Failure> {
-    let (SessionPlan::New { workdir, .. } | SessionPlan::Resume { workdir, .. }) = plan;
+    let (SessionPlan::New {
+        workdir, run, attempt, ..
+    }
+    | SessionPlan::Resume {
+        workdir, run, attempt, ..
+    }) = plan;
     let mut servers = Vec::new();
     for (name, server) in &config.mcp {
         let server = &server.value;
@@ -89,6 +94,9 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan) -> Result<Va
             .map(|t| json!({ "mode": "append", "content": [{ "type": "text", "text": t }] })),
         "model": text(&config.model),
         "effort": text(&config.effort),
+        // Not ACP: the run and attempt the session's history records belong to.
+        "run": run,
+        "attempt": attempt,
     }))
 }
 

@@ -14,7 +14,7 @@ async fn stopped(effect: Value, stop: Value) -> (Exit, String) {
     let running = Running::default();
     let command = tokio::spawn({
         let running = running.clone();
-        async move { run(&running, &effect, None).await }
+        async move { run(&running, &effect, None, None).await }
     });
     let started = Instant::now();
     while running.lock().unwrap().is_empty() {

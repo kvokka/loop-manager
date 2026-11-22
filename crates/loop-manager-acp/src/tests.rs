@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 async fn connected() -> (Acp, InstanceHandle, mpsc::UnboundedReceiver<String>) {
     let state = std::env::temp_dir();
     let options: toml::Table = toml::from_str("command = \"unused\"").unwrap();
-    let driver = Acp::new("fake", &options, &state, None).unwrap();
+    let driver = Acp::new("fake", &options, &state, None, None).unwrap();
     let (ours, theirs) = Channel::duplex();
     let (cancels, received) = mpsc::unbounded_channel();
     tokio::spawn(
@@ -37,6 +37,7 @@ async fn connected() -> (Acp, InstanceHandle, mpsc::UnboundedReceiver<String>) {
         events: child::Events::new("i1", sink),
         turn: Turn::default(),
         session: None,
+        record: None,
         started: true,
     }));
     let (conn_tx, conn_rx) = oneshot::channel();

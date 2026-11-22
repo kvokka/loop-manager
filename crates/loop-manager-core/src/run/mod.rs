@@ -80,6 +80,7 @@ pub fn start(
     let (exec_drivers, exec_trackers, exec_starts, service_wait) =
         (drivers.clone(), trackers.clone(), starts.clone(), config.service_wait);
     let service_prefix = config.service_prefix.clone();
+    let exec_history = history.clone();
     let executor = move |core| exec::RunExecutor {
         drivers: exec_drivers,
         trackers: exec_trackers,
@@ -91,6 +92,8 @@ pub fn start(
         service_wait,
         service_prefix,
         starts: exec_starts,
+        history: exec_history,
+        clock,
     };
     let (handle, task) = writer::start(
         conn,

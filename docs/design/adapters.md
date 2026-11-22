@@ -95,6 +95,10 @@ with the feature `unstable_protocol_v2`.
   and no retry signal. Any other update of the session or of a child session (a subagent) is `activity`, at most once
   a second, `tool_running` while a tool call is `pending` or `in_progress`; a child session never drives the state.
   The exit of the process in an open turn is `harness_crash`.
+- **The history.** The session part carries the run and attempt of the `SessionPlan` (not sent to the agent), and
+  the driver writes the session's messages, thoughts, tool calls, their output, terminals, state and subagents to the
+  run's [history](event-model.md#history) as the updates come, glued per text for up to 200 ms or 4 KiB; the text
+  open when the process exits is written before its `exited`. A driver made for a config check writes none.
 - **Permissions.** loop-manager answers a `session/request_permission` with the agent's `reject_once` option, else
   `cancelled`, and reports it as `permission_denied`: no person answers a run's request (decision 116).
 - **Stopping work.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. When an attempt ends,

@@ -124,6 +124,7 @@ pub(super) fn start(running: &Running, core: &CoreHandle<Msg>, p: &Value, wait: 
             timeout: Duration::MAX,
             keep: TAIL,
             stop: Some(&own),
+            sink: None,
         });
         tokio::pin!(out);
         let ended = tokio::select! {
@@ -226,6 +227,7 @@ async fn healthy(health: &Health, id: &str, port: u16, token: &str, env: &[(Stri
                 timeout: CHECK_WAIT,
                 keep: 0,
                 stop: None,
+                sink: None,
             })
             .await;
             out.exit == Exit::Code(0)

@@ -92,10 +92,36 @@ all of them share.
   | `attempt_end` | an attempt ends | `failure` (contracts 1.3), `null` when it did not fail |
   | `prompt` | the core decides to send a prompt ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager), `text` |
   | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`) |
+  | `exec_output` | the command of an exec step, or a step's check script, writes to its stdout or stderr: written by the runner of the command as the output comes, not by a transaction | `stream` (`stdout`, `stderr`), `text` (the output, invalid UTF-8 replaced) |
   | `outcome` | the finisher's outcome is accepted, or a step without a session (exec, drain, formula, await) has its outcome | `result`, `summary`, `data` |
   | `run` | the run is terminal | `state`, `class`, `reason` |
   | `truncated` | the run went over `[history] max_run_bytes` | `max_run_bytes` |
 
+- The output of a command is glued per stream into one `exec_output` record until 200 ms have passed since its first
+  unwritten chunk or 4 KiB wait, and what waits is written when the stream ends: a command that prints and then hangs
+  shows its output within about 200 ms. The step's `data` keeps its own last 4 KiB of each stream.
+- The driver of an [ACP harness](adapters.md#acp-v2-harnesses) writes what the agent reports in its session's
+  `session/update` notifications, as they come, with the run and attempt of the session (a driver does not know the
+  steps: its record takes the `step` of the run's last record). `update` is the ACP update as received, its type in
+  `sessionUpdate`:
+
+  | `kind` | ACP updates | Fields |
+  |---|---|---|
+  | `user` | `user_message_chunk`, `user_message` | `update` |
+  | `assistant` | `agent_message_chunk`, `agent_message` | `update` |
+  | `thought` | `agent_thought_chunk`, `agent_thought` | `update` |
+  | `tool_call` | `tool_call_update`: the call's title, kind, status, raw input and output, content, as the agent sends them | `update` |
+  | `tool_output` | `tool_call_content_chunk`, `terminal_output_chunk` (its base64 `data` decoded into `text`, invalid UTF-8 replaced) | `update` |
+  | `terminal` | `terminal_update`: a terminal's command, exit status, capabilities | `update` |
+  | `state` | `state_update`: `running`, `idle` with its stop reason, usage and background work | `update` |
+  | `subagent` | any of the above from a session of the agent other than the attempt's own (a subagent's) | `session`, `update` |
+
+  Plans, commands, config options and session info are left out (the protocol trace has them). The text chunks of
+  one message, thought, tool call or terminal are glued into one record, as the output of a command is (200 ms, 4
+  KiB); any other record of the session writes the glued text first, so the order holds. A tool call's failure is
+  its `failed` status; the attempt's failure is the core's `attempt_end`.
+- Nothing follows a run's `run` record: a record that comes later (output of a cancelled command, a late update of
+  an agent) is dropped.
 - A record whose line would be over 64 KiB is cut to it: the longest strings in it are shortened (at a character
   boundary) until it fits, and it gets `truncated: true`. A run whose file would grow over `[history] max_run_bytes`
   (default 64 MiB) gets one `truncated` record, and from then on only its boundary records (`step`, `attempt`,

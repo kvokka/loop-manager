@@ -94,7 +94,7 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
 /// The `doctor` probe of the ACP agent of harness `name`: `initialize`, no session.
 fn acp(name: &str, harness: &loop_manager_core::config::Harness, paths: &Paths) -> Value {
     let probe = async {
-        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket))?;
+        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket), None)?;
         acp.probe().await
     };
     let probed = match tokio::runtime::Handle::try_current() {

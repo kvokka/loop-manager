@@ -4,6 +4,7 @@
 #![deny(clippy::disallowed_methods)]
 
 mod part;
+mod record;
 mod session;
 mod trace;
 
@@ -19,6 +20,7 @@ use loop_manager_contract::{
         Capabilities, Driver, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized, ProcessPart,
         PromptKey, SessionPart, SessionPlan, SessionRef, Source, Split, Transcript, child,
     },
+    history::History,
     orphans,
 };
 use serde_json::{Map, Value, json};
@@ -52,6 +54,8 @@ pub struct Acp {
     socket: Option<PathBuf>,
     /// The directory of the protocol traces, when `trace = true`.
     trace: Option<PathBuf>,
+    /// The run histories the sessions write to; none for a check of the config.
+    history: Option<History>,
     instances: Arc<Mutex<HashMap<String, Arc<Instance>>>>,
 }
 
@@ -71,6 +75,8 @@ struct Shared {
     events: child::Events,
     turn: Turn,
     session: Option<SessionRef>,
+    /// The history writer of the session.
+    record: Option<record::Recorder>,
     /// The instance started: before, its process is the start's to account for, and tells the core nothing.
     started: bool,
 }
@@ -98,9 +104,15 @@ fn failed(error: &agent_client_protocol::Error) -> Failure {
 }
 
 impl Acp {
-    /// The driver of harness `name` on its `[harness.<name>]` keys, its traces under the daemon's `state` directory;
-    /// the error names the key that is wrong.
-    pub fn new(name: &str, options: &toml::Table, state: &Path, socket: Option<&Path>) -> Result<Self, String> {
+    /// The driver of harness `name` on its `[harness.<name>]` keys, its traces under the daemon's `state` directory,
+    /// what its sessions report written to `history`; the error names the key that is wrong.
+    pub fn new(
+        name: &str,
+        options: &toml::Table,
+        state: &Path,
+        socket: Option<&Path>,
+        history: Option<History>,
+    ) -> Result<Self, String> {
         let mut driver = Self {
             name: name.to_owned(),
             command: PathBuf::new(),
@@ -108,6 +120,7 @@ impl Acp {
             env: Map::new(),
             socket: socket.map(Path::to_owned),
             trace: None,
+            history,
             instances: Arc::default(),
         };
         for (key, value) in options {
@@ -177,6 +190,7 @@ impl Acp {
             events: child::Events::new(id, sink),
             turn: Turn::default(),
             session: None,
+            record: None,
             started: false,
         }));
         let transport = lines(&mut process, trace.clone());
@@ -196,6 +210,9 @@ impl Acp {
             let stderr = stderr.ok().and_then(Result::ok).unwrap_or_default();
             let (code, signal) = (status.and_then(|s| s.code()), status.and_then(|s| s.signal()));
             let mut shared = lock(&known);
+            if let Some(record) = &shared.record {
+                record.flush();
+            }
             let events = shared.turn.exited(code, signal, &stderr);
             shared.send(events);
         });
@@ -258,6 +275,7 @@ impl Acp {
         }
         let session = SessionRef(json!({ "session_id": session_id, "cwd": part["cwd"] }));
         let mut shared = lock(&known.shared);
+        shared.record = self.recorder(part, &session_id);
         shared.turn.session = Some(session_id);
         shared.session = Some(session.clone());
         Ok(session)
@@ -280,8 +298,22 @@ impl Acp {
             })?;
         let mut shared = lock(&known.shared);
         shared.turn.session = session.0["session_id"].as_str().map(str::to_owned);
+        shared.record = self.recorder(part, shared.turn.session.as_deref().unwrap_or_default());
         shared.session = Some(session.clone());
         Ok(())
+    }
+
+    /// The history writer of `session`, for the run and attempt the session part `part` names.
+    fn recorder(&self, part: &Value, session: &str) -> Option<record::Recorder> {
+        let (run, attempt) = (part["run"].as_str()?, part["attempt"].as_u64()?);
+        let attempt = u32::try_from(attempt).ok()?;
+        let history = self.history.clone()?;
+        Some(record::Recorder::new(
+            history,
+            run.to_owned(),
+            attempt,
+            session.to_owned(),
+        ))
     }
 
     async fn prompt(
@@ -348,7 +380,11 @@ async fn connect(
         .on_receive_notification(
             async move |n: schema::UpdateSessionNotification, _: ConnectionTo<Agent>| {
                 let mut shared = lock(&updates);
-                let events = shared.turn.update(&n.session_id.to_string(), &n.update, Instant::now());
+                let session = n.session_id.to_string();
+                if let Some(record) = &shared.record {
+                    record.update(&session, &n.update);
+                }
+                let events = shared.turn.update(&session, &n.update, Instant::now());
                 shared.send(events);
                 Ok(())
             },

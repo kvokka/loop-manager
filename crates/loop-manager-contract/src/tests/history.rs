@@ -97,18 +97,18 @@ async fn a_run_over_its_bytes_gets_one_truncated_record_and_then_only_its_bounda
     }
     history.append(record("attempt_end", json!({ "failure": null })));
     history.append(record("prompt", json!({ "text": "late" })));
-    history.append(record("run", json!({ "state": "passed" })));
     let records = all(&history).await;
     assert_eq!(
         kinds(&records),
-        ["step", "prompt", "prompt", "truncated", "attempt_end", "run"]
+        ["step", "prompt", "prompt", "truncated", "attempt_end"]
     );
     assert_eq!(records[3]["max_run_bytes"], 450);
     // A new writer learns the truncation from the file.
     let again = History::open(dir.path(), 450, Vec::new());
     again.append(record("prompt", json!({ "text": "after" })));
     again.append(record("step", json!({})));
-    assert_eq!(kinds(&all(&again).await[6..]), ["step"]);
+    again.append(record("run", json!({ "state": "passed" })));
+    assert_eq!(kinds(&all(&again).await[5..]), ["step", "run"]);
 }
 
 fn age(path: &Path, days: u64) {
@@ -156,4 +156,25 @@ async fn a_prune_takes_old_histories_of_ended_runs_and_old_files_of_the_aged_dir
     };
     assert_eq!(left(&histories), ["live.jsonl", "recent.jsonl"]);
     assert_eq!(left(&traces), ["new.jsonl"]);
+}
+
+#[tokio::test]
+async fn a_record_with_no_step_takes_the_last_one_and_nothing_follows_the_end_of_a_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let history = History::open(dir.path(), 1 << 20, Vec::new());
+    history.append(record("step", json!({})));
+    let mut driver = record("assistant", json!({ "text": "Hi" }));
+    driver.step = String::new();
+    history.append(driver);
+    history.flush().await;
+    // The writer of a restarted daemon learns the step from the file.
+    let again = History::open(dir.path(), 1 << 20, Vec::new());
+    let mut late = record("tool_output", json!({}));
+    late.step = String::new();
+    again.append(late);
+    again.append(record("run", json!({ "state": "passed" })));
+    again.append(record("assistant", json!({ "text": "late" })));
+    let records = all(&again).await;
+    assert_eq!(kinds(&records), ["step", "assistant", "tool_output", "run"]);
+    assert!(records.iter().all(|r| r["step"] == "work"), "{records:#?}");
 }

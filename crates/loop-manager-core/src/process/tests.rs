@@ -12,6 +12,7 @@ async fn sh(script: &str, stdin: &[u8], limit: Duration, keep: usize) -> Output 
         timeout: limit,
         keep,
         stop: None,
+        sink: None,
     })
     .await
 }
@@ -62,6 +63,7 @@ async fn a_missing_program_is_a_spawn_failure() {
         timeout: Duration::from_secs(1),
         keep: 10,
         stop: None,
+        sink: None,
     })
     .await;
     assert!(matches!(out.exit, Exit::SpawnFailed(_)));
@@ -149,4 +151,61 @@ fn an_empty_walk_ends_the_wait_only_once_confirmed() {
     assert_eq!(walks.after(false, true), None, "the walk before found processes");
     assert_eq!(walks.after(true, false), None);
     assert_eq!(walks.after(true, true), Some(false));
+}
+
+/// What a sink was given: the stream, the text, when.
+type Given = Arc<Mutex<Vec<(&'static str, String, Instant)>>>;
+
+/// A sink that keeps what it is given.
+fn keeping() -> (Sink, Given) {
+    let given = Arc::new(Mutex::new(Vec::new()));
+    let keep = given.clone();
+    let sink: Sink = Arc::new(move |stream, bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        keep.lock().unwrap().push((stream, text, Instant::now()));
+    });
+    (sink, given)
+}
+
+#[tokio::test]
+async fn the_sink_gets_output_that_waits_for_more_within_the_glue_time() {
+    let (sink, given) = keeping();
+    let command = [
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "printf a; sleep 1; printf b".to_owned(),
+    ];
+    let env = [("PATH".to_owned(), std::env::var("PATH").unwrap_or_default())];
+    let started = Instant::now();
+    let out = run(Spec {
+        command: &command,
+        cwd: Path::new("/"),
+        env: &env,
+        stdin: b"",
+        timeout: Duration::from_secs(5),
+        keep: 10,
+        stop: None,
+        sink: Some(sink),
+    })
+    .await;
+    assert_eq!(out.stdout, b"ab");
+    let given = given.lock().unwrap();
+    let texts: Vec<(&str, &str)> = given.iter().map(|(s, t, _)| (*s, t.as_str())).collect();
+    assert_eq!(texts, [("stdout", "a"), ("stdout", "b")]);
+    assert!(
+        given[0].2 - started < Duration::from_millis(900),
+        "`a` waited for the command"
+    );
+}
+
+#[test]
+fn a_character_cut_at_the_end_waits_for_its_rest_until_the_stream_ends() {
+    let (sink, given) = keeping();
+    let sink = (sink, "stdout");
+    let mut glued = "aé".as_bytes()[..2].to_vec();
+    assert!(give(Some(&sink), &mut glued, false).is_some());
+    glued.push("é".as_bytes()[1]);
+    assert!(give(Some(&sink), &mut glued, true).is_none());
+    let texts: Vec<String> = given.lock().unwrap().iter().map(|(_, t, _)| t.clone()).collect();
+    assert_eq!(texts, ["a", "é"]);
 }

@@ -1,11 +1,13 @@
 use super::Paths;
 use crate::harness::driver;
-use loop_manager_core::{config::Harness, driver::ProcessPart};
+use loop_manager_core::{config::Harness, driver::ProcessPart, history::History};
 use serde_json::json;
 use std::time::Duration;
 
-#[test]
-fn the_codex_settings_reach_the_driver_capabilities() {
+#[tokio::test]
+async fn the_codex_settings_reach_the_driver_capabilities() {
+    // Nothing is written: no file is made.
+    let history = History::open("/nonexistent/history".as_ref(), 1, Vec::new());
     let paths = Paths {
         config: "/nonexistent/config.toml".into(),
         state: "/nonexistent/state".into(),
@@ -19,7 +21,7 @@ fn the_codex_settings_reach_the_driver_capabilities() {
             options: toml::from_str(options).unwrap(),
             ..Harness::default()
         };
-        let (driver, _, _) = driver("codex", &harness, &paths).unwrap();
+        let (driver, _, _) = driver("codex", &harness, &paths, &history).unwrap();
         let caps = driver.capabilities(&ProcessPart(json!(null)));
         (caps.sessions_per_instance, caps.instance_idle)
     };

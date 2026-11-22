@@ -1085,9 +1085,11 @@ name = "loop-manager-acp"
 version = "0.0.1"
 dependencies = [
  "agent-client-protocol",
+ "base64",
  "futures",
  "loop-manager-contract",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "toml",

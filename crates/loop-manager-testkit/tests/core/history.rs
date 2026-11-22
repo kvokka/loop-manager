@@ -40,6 +40,23 @@ async fn history(w: &World, run: &str) -> Vec<Value> {
     .await
 }
 
+/// Starts a run of the formula `formula` of the project `shop`.
+async fn start(w: &World, formula: &str) -> String {
+    let create = Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: formula.into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: 0,
+        parent_run: None,
+        token: None,
+        continue_from: None,
+    };
+    let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
+    reply["run"].as_str().unwrap().to_owned()
+}
+
 /// Runs `flow` to its end: the first session of its ai step dies under its prompt and the test retries it with a new
 /// session, whose turn declares `pass`.
 async fn run_with_a_retry(w: &World) -> String {
@@ -59,19 +76,7 @@ async fn run_with_a_retry(w: &World) -> String {
             background: false,
         }),
     ]);
-    let create = Create {
-        project: "shop".into(),
-        rig: Some("web".into()),
-        formula: "flow".into(),
-        inputs: serde_json::Map::new(),
-        correlation: None,
-        depth: 0,
-        parent_run: None,
-        token: None,
-        continue_from: None,
-    };
-    let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
-    let run = reply["run"].as_str().unwrap().to_owned();
+    let run = start(w, "flow").await;
     w.until(Some(&run), "run.attempt_failed", 0).await;
     let retry = Decision::NewSession {
         after: Duration::ZERO,
@@ -157,4 +162,51 @@ async fn a_run_of_an_exec_and_an_ai_step_with_a_retried_attempt_is_numbered_with
         (&"passed".into(), &"pass".into()),
         "{end}"
     );
+}
+
+#[tokio::test]
+async fn the_output_of_an_exec_step_is_in_the_history_while_its_command_still_runs() {
+    let hang = "name = \"hang\"\n[[step]]\nname = \"say\"\nkind = \"exec\"\n\
+        command = [\"sh\", \"-c\", \"echo hello; echo oops >&2; exec sleep 60\"]\ntimeout = \"120s\"\n";
+    let w = world(&[("shop/formulas/hang.toml", hang)]);
+    let run = start(&w, "hang").await;
+
+    let records = until("the output of the command", || {
+        let all = w.history.cursor(&run, 1).read().unwrap();
+        let both = ["stdout", "stderr"]
+            .iter()
+            .all(|s| all.iter().any(|r| r["kind"] == "exec_output" && r["stream"] == *s));
+        both.then_some(all)
+    })
+    .await;
+    // The command sleeps on: its step has no outcome yet.
+    assert!(
+        records.iter().all(|r| r["kind"] != "outcome" && r["kind"] != "run"),
+        "{records:#?}"
+    );
+    let output: Vec<(&Value, &Value, &Value, &Value)> = records
+        .iter()
+        .filter(|r| r["kind"] == "exec_output")
+        .map(|r| (&r["step"], &r["attempt"], &r["stream"], &r["text"]))
+        .collect();
+    assert_eq!(output.len(), 2, "{records:#?}");
+    assert!(
+        output.contains(&(&"say".into(), &1.into(), &"stdout".into(), &"hello\n".into())),
+        "{records:#?}"
+    );
+    assert!(
+        output.contains(&(&"say".into(), &1.into(), &"stderr".into(), &"oops\n".into())),
+        "{records:#?}"
+    );
+    let attempt = records.iter().position(|r| r["kind"] == "attempt").unwrap();
+    let first = records.iter().position(|r| r["kind"] == "exec_output").unwrap();
+    assert!(attempt < first, "{records:#?}");
+
+    let cancel = Msg::Cancel {
+        run: run.clone(),
+        reason: "operator".into(),
+    };
+    w.core.send(None, cancel).await.unwrap();
+    let end = history(&w, &run).await.pop().unwrap();
+    assert_eq!(end["state"], "cancelled", "{end}");
 }

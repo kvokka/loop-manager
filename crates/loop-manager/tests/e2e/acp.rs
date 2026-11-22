@@ -357,3 +357,78 @@ async fn an_mcp_server_of_a_transport_the_agent_does_not_advertise_fails_the_att
         "{text}"
     );
 }
+
+/// The records of the history of `run` written so far: the stream from the first record until `caught_up`, or its end.
+async fn history_now(d: &Daemon, run: &str) -> Vec<Value> {
+    let mut events = d.client.stream(&format!("/v1/runs/{run}/history")).await.unwrap();
+    let mut records = Vec::new();
+    while let Some(event) = tokio::time::timeout(common::WAIT, events.next())
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        if event.event == "caught_up" {
+            break;
+        }
+        records.push(serde_json::from_str(&event.data).unwrap());
+    }
+    records
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_attaching_while_a_tool_hangs_sees_what_the_agent_reported_so_far() {
+    let section = format!(
+        "command = \"{}\"\nargs = [\"--subagent\"]\n[harness.fake.env]\nACP_AGENT_COMMAND = \"echo printed-before-the-hang; \
+         sleep 600\"\n",
+        agent().display()
+    );
+    let d = daemon("fake", &section, "").await;
+    let run = d.create("build", None).await;
+    let printed = |r: &Value| {
+        r["kind"] == "tool_output" && r["update"]["content"]["content"]["text"] == "printed-before-the-hang\n"
+    };
+    let deadline = Instant::now() + common::WAIT;
+    let records = loop {
+        let records = history_now(&d, &run).await;
+        if records.iter().any(printed) {
+            break records;
+        }
+        assert!(Instant::now() < deadline, "{records:#?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    // The command still runs: the history has what came before the hang.
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["state"], "running");
+    let find = |kind: &str| {
+        records
+            .iter()
+            .find(|r| r["kind"] == kind)
+            .unwrap_or_else(|| panic!("no {kind}: {records:#?}"))
+    };
+    let echo = find("assistant");
+    assert!(
+        echo["update"]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Echo: Build"),
+        "{echo}"
+    );
+    assert_eq!(echo["step"], find("attempt")["step"]);
+    let sub = find("subagent");
+    assert!(sub["session"].as_str().unwrap().ends_with("-sub"), "{sub}");
+    assert!(
+        sub["update"]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Sub: Build"),
+        "{sub}"
+    );
+    let call = find("tool_call");
+    assert_eq!(call["update"]["status"], "in_progress", "{call}");
+    assert_eq!(find("state")["update"]["state"], "running");
+    let numbers: Vec<u64> = records.iter().map(|r| r["n"].as_u64().unwrap()).collect();
+    assert_eq!(numbers, (1..=records.len() as u64).collect::<Vec<_>>());
+    d.post(&format!("/v1/runs/{run}/cancel"), serde_json::json!({}), None)
+        .await
+        .unwrap();
+    d.until_state(&run, "cancelled").await;
+}

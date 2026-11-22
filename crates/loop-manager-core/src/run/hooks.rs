@@ -338,6 +338,7 @@ async fn invoke(hook: &Value, event: &Value, socket: Option<&Path>, marker: Opti
         timeout,
         keep: usize::try_from(MAX_STDOUT).unwrap_or(usize::MAX),
         stop: None,
+        sink: None,
     })
     .await;
     let cut = out.stderr.len().saturating_sub(STDERR_TAIL);

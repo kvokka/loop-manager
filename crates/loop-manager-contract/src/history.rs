@@ -21,7 +21,8 @@ pub const MAX_RECORD: usize = 64 * 1024;
 /// The kinds still written once a run is over its `max_run_bytes`.
 const BOUNDARIES: [&str; 4] = ["step", "attempt", "attempt_end", "run"];
 
-/// A record before the writer numbers it. `data` holds the fields of its kind; they go next to the common ones.
+/// A record before the writer numbers it. `data` holds the fields of its kind; they go next to the common ones. An
+/// empty `step` (a record of a harness driver, which does not know the steps) takes the step of the run's last record.
 pub struct Record {
     pub run: String,
     pub ts_ms: i64,
@@ -148,6 +149,10 @@ struct Run {
     last: u64,
     bytes: u64,
     truncated: bool,
+    /// The step of the last record.
+    step: String,
+    /// The last record is the run's `run` record: nothing more is written.
+    ended: bool,
 }
 
 struct Writer {
@@ -180,7 +185,7 @@ impl Writer {
         self.dir.join(format!("{run}.jsonl"))
     }
 
-    fn append(&mut self, record: Record) -> io::Result<()> {
+    fn append(&mut self, mut record: Record) -> io::Result<()> {
         if !self.runs.contains_key(&record.run) {
             let found = learn(&self.path(&record.run))?;
             self.runs.insert(record.run.clone(), found);
@@ -189,8 +194,12 @@ impl Writer {
         let max = self.max_run_bytes;
         let run = self.runs.get_mut(&record.run).expect("learnt above");
         let boundary = BOUNDARIES.contains(&record.kind);
-        if run.truncated && !boundary {
+        if run.ended || (run.truncated && !boundary) {
             return Ok(());
+        }
+        match record.step.is_empty() {
+            true => record.step.clone_from(&run.step),
+            false => run.step.clone_from(&record.step),
         }
         let mut line = line(run.last + 1, &record);
         if !boundary && run.bytes + line.len() as u64 > max {
@@ -210,15 +219,15 @@ impl Writer {
         file.write_all(line.as_bytes())?;
         run.last += 1;
         run.bytes += line.len() as u64;
-        if record.kind == "run" {
-            // Nothing follows the end of a run; a late record learns the file again.
-            self.runs.remove(&record.run);
-        }
+        // Nothing follows the end of a run: a late record of a driver is dropped.
+        run.ended = record.kind == "run";
         self.count.send_modify(|c| *c += 1);
         Ok(())
     }
 
-    fn prune(&self, keep: Duration) {
+    fn prune(&mut self, keep: Duration) {
+        // An ended run is learnt again from its file, if it still has one, at a late record.
+        self.runs.retain(|_, run| !run.ended);
         let Some(before) = SystemTime::now().checked_sub(keep) else {
             return;
         };
@@ -286,6 +295,8 @@ fn longest(data: &mut Map<String, Value>) -> Option<&mut String> {
 struct Head {
     n: u64,
     kind: String,
+    #[serde(default)]
+    step: String,
 }
 
 /// The last `n`, the size and the truncation of the file at `path`. A torn last line (a write cut short by a crash or
@@ -295,6 +306,8 @@ fn learn(path: &Path) -> io::Result<Run> {
         last: 0,
         bytes: 0,
         truncated: false,
+        step: String::new(),
+        ended: false,
     };
     let file = match File::open(path) {
         Ok(file) => file,
@@ -316,6 +329,8 @@ fn learn(path: &Path) -> io::Result<Run> {
         if let Ok(head) = serde_json::from_slice::<Head>(&line) {
             run.last = head.n;
             run.truncated |= head.kind == "truncated";
+            run.ended = head.kind == "run";
+            run.step = head.step;
         }
     }
     Ok(run)

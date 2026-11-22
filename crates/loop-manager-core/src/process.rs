@@ -22,6 +22,12 @@ use tokio::{
 const GRACE: Duration = Duration::from_secs(2);
 /// How long the pipes may stay open once the leader has exited (a descendant may hold them).
 const DRAIN: Duration = Duration::from_secs(1);
+/// Output for a [`Sink`] is glued until this long has passed since its first unwritten chunk, or [`GLUE_BYTES`] wait.
+const GLUE: Duration = Duration::from_millis(200);
+const GLUE_BYTES: usize = 4 * 1024;
+
+/// Takes the output of a command as it comes, glued: the stream (`stdout`, `stderr`) and its bytes.
+pub(crate) type Sink = Arc<dyn Fn(&'static str, &[u8]) + Send + Sync>;
 
 pub(crate) struct Spec<'a> {
     /// The argv; `command[0]` is looked up on the `PATH` of `env`.
@@ -36,6 +42,8 @@ pub(crate) struct Spec<'a> {
     pub(crate) keep: usize,
     /// Ends the command early, as its timeout would.
     pub(crate) stop: Option<&'a Notify>,
+    /// Sees the output as it comes, besides the kept tail.
+    pub(crate) sink: Option<Sink>,
 }
 
 /// What a command gets from the daemon's environment: nothing else is inherited.
@@ -106,9 +114,10 @@ pub(crate) async fn run(spec: Spec<'_>) -> Output {
     let (out, err) = (Shared::default(), Shared::default());
     let input = spec.stdin.to_vec();
     let stdin = child.stdin.take();
+    let sink = |stream| spec.sink.clone().map(|sink| (sink, stream));
     let pumps = (
-        pump(child.stdout.take(), spec.keep, out.clone()),
-        pump(child.stderr.take(), spec.keep, err.clone()),
+        pump(child.stdout.take(), spec.keep, out.clone(), sink("stdout")),
+        pump(child.stderr.take(), spec.keep, err.clone(), sink("stderr")),
     );
     let mut io = tokio::spawn(async move {
         let feed = async move {
@@ -172,16 +181,54 @@ fn spawn_failed(text: String) -> Output {
     }
 }
 
-async fn pump(from: Option<impl AsyncRead + Unpin>, keep: usize, into: Shared) {
+async fn pump(from: Option<impl AsyncRead + Unpin>, keep: usize, into: Shared, sink: Option<(Sink, &'static str)>) {
     let Some(mut from) = from else { return };
     let mut chunk = [0u8; 8192];
-    while let Ok(n @ 1..) = from.read(&mut chunk).await {
+    // What the sink has not seen yet, and since when.
+    let (mut glued, mut since) = (Vec::new(), None);
+    loop {
+        let read = match since {
+            Some(first) => match tokio::time::timeout_at(first + GLUE, from.read(&mut chunk)).await {
+                Ok(read) => read,
+                Err(_) => {
+                    since = give(sink.as_ref(), &mut glued, false);
+                    continue;
+                }
+            },
+            None => from.read(&mut chunk).await,
+        };
+        let Ok(n @ 1..) = read else { break };
         let mut tail = into.lock().unwrap_or_else(PoisonError::into_inner);
         tail.total += n as u64;
         tail.bytes.extend_from_slice(&chunk[..n]);
         let cut = tail.bytes.len().saturating_sub(keep);
         tail.bytes.drain(..cut);
+        drop(tail);
+        if sink.is_some() {
+            glued.extend_from_slice(&chunk[..n]);
+            since.get_or_insert_with(tokio::time::Instant::now);
+            if glued.len() >= GLUE_BYTES {
+                since = give(sink.as_ref(), &mut glued, false);
+            }
+        }
     }
+    give(sink.as_ref(), &mut glued, true);
+}
+
+/// Gives the sink what is glued; short of the `end` of the stream, a character cut at the end waits for its rest.
+/// Returns since when the rest waits.
+fn give(sink: Option<&(Sink, &'static str)>, glued: &mut Vec<u8>, end: bool) -> Option<tokio::time::Instant> {
+    let whole = match std::str::from_utf8(glued) {
+        Err(e) if !end && e.error_len().is_none() => e.valid_up_to(),
+        _ => glued.len(),
+    };
+    if let Some((sink, stream)) = sink
+        && whole > 0
+    {
+        sink(stream, &glued[..whole]);
+    }
+    glued.drain(..whole);
+    (!glued.is_empty()).then(tokio::time::Instant::now)
 }
 
 /// Waits until the process `pid` started at `start_time` is gone (docs/design/event-model.md); `false` if it outlives

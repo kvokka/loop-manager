@@ -3,7 +3,9 @@
 
 use super::{Exit, Msg, Outcome, RunHandler, Verdict, row::Row};
 use crate::{
+    Clock,
     driver::{Failure, FailureKind, Scope, Source},
+    history::{History, Record},
     process::{self, Spec},
     writer::{Error, Tx},
 };
@@ -89,7 +91,7 @@ impl RunHandler {
             );
         };
         let payload = json!({
-            "op": "exec", "run": row.id, "attempt": row.attempt, "command": command, "check": check,
+            "op": "exec", "run": row.id, "attempt": row.attempt, "step": row.step, "command": command, "check": check,
             "cwd": row.workdir, "env": env, "inherit_env": exec["inherit_env"] == true, "context": context,
             "timeout_ms": timeout_ms, "marker": format!("x-{}", &token[..16]),
         });
@@ -182,7 +184,7 @@ impl RunHandler {
 pub(super) type Running = Arc<Mutex<HashMap<String, Arc<Notify>>>>;
 
 /// Runs the command of an `exec` effect to its end and tells the core how it ended.
-pub(super) async fn run(running: &Running, payload: &Value, socket: Option<&Path>) -> Msg {
+pub(super) async fn run(running: &Running, payload: &Value, socket: Option<&Path>, sink: Option<process::Sink>) -> Msg {
     let command: Vec<String> = serde_json::from_value(payload["command"].clone()).unwrap_or_default();
     // The order of decision 137: the base or the daemon's whole environment, `env`, then loop-manager's own variables; a
     // later pair wins over an earlier of its name.
@@ -219,10 +221,32 @@ pub(super) async fn run(running: &Running, payload: &Value, socket: Option<&Path
         timeout: Duration::from_millis(payload["timeout_ms"].as_u64().unwrap_or_default()),
         keep: TAIL,
         stop: Some(&stop),
+        sink,
     })
     .await;
     lock().remove(&key);
     done(payload, out.exit, &out.stdout, &out.stderr)
+}
+
+/// Writes the output of the command of an `exec` effect to the history of its run as it comes: the record
+/// `exec_output` (docs/design/event-model.md, "History"). Output is not state, so it goes past the writer.
+pub(super) fn sink(history: &History, clock: Clock, payload: &Value) -> process::Sink {
+    let history = history.clone();
+    let run = payload["run"].as_str().unwrap_or_default().to_owned();
+    let step = payload["step"].as_str().unwrap_or_default().to_owned();
+    let attempt = super::exec::attempt(payload);
+    Arc::new(move |stream, bytes| {
+        let text = String::from_utf8_lossy(bytes);
+        let data = serde_json::Map::from_iter([("stream".to_owned(), json!(stream)), ("text".to_owned(), json!(text))]);
+        history.append(Record {
+            run: run.clone(),
+            ts_ms: clock.now_ms(),
+            attempt,
+            step: step.clone(),
+            kind: "exec_output",
+            data,
+        });
+    })
 }
 
 /// The message for a command that cannot start because its environment cannot be made: the step's attempt fails as
