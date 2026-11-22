@@ -152,8 +152,8 @@ Open questions the code must not lean on without an experiment
   Codex agents running `br`.
 - Whether claude's `result.usage` counts one turn or the whole process.
 - The stop of what a session left running, beyond the fake providers of one version pair: codex 0.167.2
-  (`thread/backgroundTerminals/clean` was run on 0.168.0 only), claude's `stop_task` while a background
-  subagent is alive, and whether the MCP servers of a codex thread, which carry the attempt token, die with it.
+  (`thread/backgroundTerminals/clean` was run on 0.168.0 only), a background subagent of claude, which
+  `claude-agent-acp` offers no cancel for, so it ends only with the process, and whether the MCP servers of a codex thread, which carry the attempt token, die with it.
 - opencode altogether.
 
 ## Risks the owner accepted
@@ -164,6 +164,6 @@ Open questions the code must not lean on without an experiment
 | Vendor protocols drift: codex app-server is experimental, harnesses ship weekly | release lines in `mise.toml`, the minimum supported version of each adapter, contract tests, a narrow subset of the protocol |
 | Subscription policy: headless use spends subscription limits, and vendor terms limit commercial and hosted use | API keys are supported; the install guide says keeping to the vendor's terms is the user's responsibility and [what claude's entrypoint label does](../guide/install.md#what-loop-manager-runs) |
 | br in a public project: one author, no outside PRs, a license with a rider | br is installed apart; the license warning in the README, the install guide and `doctor`; a narrow tracker interface |
-| A daemon's death cuts claude sessions | `--resume`, a drain on a planned restart |
+| A daemon's death cuts claude sessions | `session/resume` through `claude-agent-acp`, a drain on a planned restart |
 | Vendors close the niche | the rule "check the vendor first" and the stop conditions of the [code rules](rules-code.md#less-code) |
 | The core grows by "one more mechanism" | the mechanism and policy boundary checked by `scripts/core-boundary.sh` |

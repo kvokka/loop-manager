@@ -26,7 +26,7 @@ loop-manager run show <run>                        # TOON by default, --json for
 `loop-manager run show` gives the run's `class` (`agent`, `check`, `hollow_done`, `infrastructure`) and `reason`, the
 `bead` it worked on, its `workdir`, and its `attempts`: for each one the `kind` (`new_session` or `resume`), the
 `failure_kind` ([failure kinds](../design/contracts.md#44-failure-kinds)) and the `session`, the harness's own
-reference (claude `{session_id, config_dir, workdir}`, codex `{thread_id, codex_home}`). With it you can read or open
+reference (claude `{session_id, cwd, home?}`, codex `{thread_id, codex_home}`). With it you can read or open
 the conversation with the harness's own tools. `loop-manager run list --state failed` gives the same view for
 every run in the list. A run of a formula with children (a `drain` or `formula` step) lists them with
 `loop-manager run list --parent <run>`.

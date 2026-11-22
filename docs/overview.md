@@ -68,7 +68,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id", and a [history](design/event-model.md#history) of each run's steps, attempts, prompts and outcomes |
 | opencode | The next release, after a spike ([experiments](design/experiments.md)) |
 | pi and other harnesses | Not planned |
-| ACP for claude and codex | Their native protocols; a harness the build has no adapter for is an ACP v2 agent named in the config ([adapters](design/adapters.md#acp-v2-harnesses)) |
+| ACP for codex | Its native app-server protocol; claude runs through `claude-agent-acp`, and a harness the build has no adapter for is an ACP v2 agent named in the config ([adapters](design/adapters.md#acp-v2-harnesses)) |
 | A human joining a live session, handover of control | An operator takes a run over and hands it back (`run takeover`, `run continue`); the run's orchestration stands meanwhile ([contracts 6.1](design/contracts.md#61-states)). Instructions to the session from a client are not supported |
 | An ACP hub "up" for editors | Not planned |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
