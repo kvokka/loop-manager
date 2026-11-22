@@ -207,7 +207,7 @@ fn the_cli_tests_pass_inside_a_session_of_an_outer_loop_manager() {
 #[tokio::test]
 async fn the_config_from_the_cli_lists_explains_checks_and_reloads() {
     const CONFIG: &str =
-        "projects = [\"shop\"]\n[harness.claude]\nbinary = \"true\"\n[settings]\nenv = { LANG = \"C\" }\n";
+        "projects = [\"shop\"]\n[harness.claude]\ncommand = \"true\"\n[settings]\nenv = { LANG = \"C\" }\n";
     let d = Daemon::start(|dir| {
         let loop_manager = dir.join("config/loop-manager");
         fs::write(loop_manager.join("config.toml"), CONFIG).unwrap();
@@ -254,8 +254,9 @@ async fn the_config_from_the_cli_lists_explains_checks_and_reloads() {
         "shop.dev",
         "the daemon keeps its config"
     );
-    // The adapter checks its own settings: claude takes none, codex its sessions and idle time (contracts 4.5).
-    let claude = CONFIG.replace("binary = \"true\"\n", "binary = \"true\"\nmax_sessions = 3\n");
+    // The adapter checks its own settings: claude those of an ACP harness, codex its sessions and idle time
+    // (contracts 4.5).
+    let claude = CONFIG.replace("command = \"true\"\n", "command = \"true\"\nmax_sessions = 3\n");
     let codex = |extra: &str| format!("{CONFIG}[harness.codex]\n{extra}");
     for (text, error) in [
         (claude, Some("`harness.claude`: unknown key `max_sessions`")),
@@ -274,6 +275,16 @@ async fn the_config_from_the_cli_lists_explains_checks_and_reloads() {
             None => assert!(out.status.success(), "{text}: {checked}"),
         }
     }
+    // The executable of claude is its ACP adapter's `command`: `binary` is one error, said once.
+    fs::write(&file, CONFIG.replace("command = ", "binary = ")).unwrap();
+    let out = d.cli(&["config", "check"], &[]);
+    let checked = String::from_utf8_lossy(&out.stdout);
+    let errors: Vec<&str> = checked.lines().filter(|l| l.contains("harness.claude")).collect();
+    let want = "`harness.claude`: `binary`: an ACP harness names its agent executable by `command`";
+    assert!(
+        !out.status.success() && errors.len() == 1 && errors[0].contains(want),
+        "{checked}"
+    );
 
     fs::write(&file, CONFIG).unwrap();
     let trigger = "[[trigger]]\nname = \"tick\"\nevery = \"1h\"\nrun = \"check\"\nrig = \"web\"\n";

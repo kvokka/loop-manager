@@ -32,7 +32,7 @@ async fn a_secret_reaches_the_step_and_is_stored_nowhere() {
     let files = [
         (
             "config.toml",
-            "projects = [\"shop\"]\n[harness.claude]\nbinary = \"true\"\n[exec]\nenv = { TOKEN = \"${LOOP_MANAGER_E2E_SECRET}\" }\n",
+            "projects = [\"shop\"]\n[harness.claude]\ncommand = \"true\"\n[exec]\nenv = { TOKEN = \"${LOOP_MANAGER_E2E_SECRET}\" }\n",
         ),
         ("shop/loop-manager.toml", "[rigs.web]\npath = \"web\"\n"),
         ("shop/web/.keep", ""),

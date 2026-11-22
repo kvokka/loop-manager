@@ -10,6 +10,7 @@ use std::{num::NonZeroU32, path::Path, sync::Arc, time::Duration};
 
 pub const ADAPTER: Adapter = Adapter {
     name: "codex",
+    command: "codex",
     models: MODELS,
     minimum: MINIMUM,
     agent_types: &["default", "explorer", "worker"],

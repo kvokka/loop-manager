@@ -643,6 +643,7 @@ fn user_config(user_mailbox: &Path) -> String {
 fn shop(dir: &Path, rig: &Path, base_url: &str) -> (String, [String; 2]) {
     fs::create_dir_all(dir.join("path")).unwrap();
     std::os::unix::fs::symlink(common::EXE, dir.join("path/loop-manager")).unwrap();
+    super::claude::mise(dir);
     let shop = dir.join("config/loop-manager/shop");
     let files = [
         (

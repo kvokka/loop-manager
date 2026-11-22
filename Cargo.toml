@@ -7,7 +7,6 @@ default-members = [
   "crates/loop-manager",
   "crates/loop-manager-acp",
   "crates/loop-manager-br",
-  "crates/loop-manager-claude",
   "crates/loop-manager-codex",
   "crates/loop-manager-contract",
   "crates/loop-manager-core",

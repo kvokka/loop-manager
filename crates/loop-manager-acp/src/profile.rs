@@ -2,7 +2,7 @@
 //! knows by name at the points of a session, beyond what it does for any agent. A harness of no profile gets the
 //! generic one: what the config names, and a refusal of what the driver has no mechanism for.
 
-mod claude;
+pub(crate) mod claude;
 
 use crate::part;
 use agent_client_protocol::v2::schema::Notice;
@@ -23,6 +23,8 @@ pub(crate) type Env = Vec<(String, String)>;
 pub(crate) struct Profile {
     /// The harness the profile serves.
     pub(crate) name: &'static str,
+    /// The oldest version of the agent the profile supports, `(major, minor, patch)`.
+    pub(crate) minimum: (u32, u32, u32),
     /// The process part of a session (`part::process` and what the profile delivers through the process); `state` is
     /// the daemon's state directory.
     pub(crate) process: fn(&str, Setup, &EffectiveConfig, &SessionPlan, &Path) -> Result<Value, Failure>,
@@ -49,6 +51,7 @@ pub(crate) struct Profile {
 /// The ACP agents the driver knows by name.
 pub(crate) const PROFILES: &[Profile] = &[Profile {
     name: "claude",
+    minimum: claude::MINIMUM,
     process: claude::process,
     session: claude::session,
     env: claude::env,
@@ -64,6 +67,7 @@ pub(crate) const PROFILES: &[Profile] = &[Profile {
 /// The profile of a harness known by its config alone.
 pub(crate) const GENERIC: Profile = Profile {
     name: "",
+    minimum: (0, 0, 0),
     process: |harness, setup, config, plan, _| part::process(harness, setup, config, plan),
     session: |_, _, _, _| Ok(()),
     env: part::env,
@@ -77,9 +81,14 @@ pub(crate) const GENERIC: Profile = Profile {
 };
 
 impl Profile {
+    /// The own profile of harness `name`, if it has one.
+    pub(crate) fn own(name: &str) -> Option<&'static Self> {
+        PROFILES.iter().find(|p| p.name == name)
+    }
+
     /// The profile of harness `name`: its own, else the generic one.
     pub(crate) fn of(name: &str) -> &'static Self {
-        PROFILES.iter().find(|p| p.name == name).unwrap_or(&GENERIC)
+        Self::own(name).unwrap_or(&GENERIC)
     }
 }
 

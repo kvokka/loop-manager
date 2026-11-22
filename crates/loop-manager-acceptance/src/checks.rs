@@ -50,8 +50,8 @@ pub(crate) const ALL: &[Scenario] = &[
         run: |env| {
             Box::pin(tests(
                 env,
-                "-p loop-manager-claude -p loop-manager-codex -p loop-manager-br -E binary(contract)|test(/^contract::/)|test(/^models::/)",
-                41,
+                "-p loop-manager-acp -p loop-manager-codex -p loop-manager-br -E binary(contract)|test(/^contract::/)|test(/^models::/)",
+                45,
             ))
         },
     },

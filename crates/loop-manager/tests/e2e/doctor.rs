@@ -12,6 +12,16 @@ pub(crate) fn script(path: &Path, body: &str) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// A fake claude adapter at `path` printing `version` for `--version`, else the `acp-agent` fixture.
+pub(crate) fn adapter(path: &Path, version: &str) {
+    let agent = Path::new(common::EXE).with_file_name("acp-agent");
+    let body = format!(
+        "[ \"$1\" = --version ] && echo '{version}' && exit 0\nexec {} \"$@\"",
+        agent.display()
+    );
+    script(path, &body);
+}
+
 /// The XDG tree of the daemon tests with claude at an explicit path and codex where a fake mise says it is.
 pub(crate) fn tree(extra: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -21,11 +31,11 @@ pub(crate) fn tree(extra: &str) -> tempfile::TempDir {
         fs::write(d.join(path), text).unwrap();
     }
     let config = format!(
-        "projects = [\"shop\"]\n[harness.claude]\nbinary = \"{}\"\n[harness.codex]\n{extra}",
+        "projects = [\"shop\"]\n[harness.claude]\ncommand = \"{}\"\n[harness.codex]\n{extra}",
         d.join("tools/claude").display()
     );
     fs::write(d.join("config/loop-manager/config.toml"), config).unwrap();
-    script(&d.join("tools/claude"), "echo '2.1.329 (Claude Code)'");
+    adapter(&d.join("tools/claude"), "0.109.1");
     script(&d.join("tools/codex"), "echo 'codex-cli 0.171.0'");
     let codex = d.join("tools/codex").display().to_string();
     script(
@@ -84,6 +94,55 @@ pub(crate) fn level<'a>(found: &'a [(String, String, String)], check: &str) -> (
     (f.1.as_str(), f.2.as_str())
 }
 
+/// The claude adapter mise found is a node script: it runs, for its version and its `initialize`, with the `node` of
+/// mise first on its `PATH`, which the daemon's own `PATH` lacks.
+#[test]
+fn the_claude_adapter_from_mise_runs_on_the_node_of_mise() {
+    let dir = tree("");
+    let d = dir.path();
+    let config = "projects = [\"shop\"]\n[harness.claude]\n[harness.codex]\n";
+    fs::write(d.join("config/loop-manager/config.toml"), config).unwrap();
+    let agent = Path::new(common::EXE).with_file_name("acp-agent");
+    // The runtime gets the script first, as `env` hands it on.
+    let node = format!(
+        "shift\n[ \"$1\" = --version ] && echo '0.109.1' && exit 0\nexec {} \"$@\"",
+        agent.display()
+    );
+    script(&d.join("tools/node/node"), &node);
+    fs::write(d.join("tools/claude-agent-acp"), "#!/usr/bin/env node\n").unwrap();
+    fs::set_permissions(d.join("tools/claude-agent-acp"), fs::Permissions::from_mode(0o755)).unwrap();
+    let mise = |node: bool| {
+        let mut body = format!(
+            "[ \"$1 $2\" = 'which claude-agent-acp' ] && echo {} && exit 0\n\
+             [ \"$1 $2\" = 'which codex' ] && echo {} && exit 0\n",
+            d.join("tools/claude-agent-acp").display(),
+            d.join("tools/codex").display()
+        );
+        if node {
+            body += &format!(
+                "[ \"$1 $2\" = 'which node' ] && echo {} && exit 0\n",
+                d.join("tools/node/node").display()
+            );
+        }
+        script(&d.join("bin/mise"), &format!("{body}exit 1"));
+    };
+    mise(true);
+    let (passed, found) = doctor(d);
+    assert!(passed, "{found:?}");
+    let (claude, detail) = level(&found, "claude");
+    assert!(
+        claude == "ok" && detail.ends_with("tools/claude-agent-acp `0.109.1` (from mise)"),
+        "{found:?}"
+    );
+    assert_eq!(level(&found, "claude acp").0, "ok", "{found:?}");
+    // With no `node` in mise the script finds none.
+    mise(false);
+    let (passed, found) = doctor(d);
+    assert!(!passed, "{found:?}");
+    assert_eq!(level(&found, "claude").0, "warning", "{found:?}");
+    assert_eq!(level(&found, "claude acp").0, "error", "{found:?}");
+}
+
 #[test]
 fn harnesses_resolve_from_the_config_and_from_mise_and_a_missing_one_fails() {
     let dir = tree("");
@@ -91,9 +150,12 @@ fn harnesses_resolve_from_the_config_and_from_mise_and_a_missing_one_fails() {
     assert!(passed, "{found:?}");
     let (claude, path) = level(&found, "claude");
     assert!(
-        claude == "ok" && path.contains("tools/claude `") && path.ends_with("` (from config)"),
+        claude == "ok" && path.ends_with("tools/claude `0.109.1` (from config)"),
         "{found:?}"
     );
+    // claude is an ACP agent: its `initialize` is probed too.
+    let (probe, detail) = level(&found, "claude acp");
+    assert!(probe == "ok" && detail.contains("ACP protocol 2"), "{found:?}");
     let (codex, path) = level(&found, "codex");
     assert!(
         codex == "ok" && path.ends_with("tools/codex `codex-cli 0.171.0` (from mise)"),

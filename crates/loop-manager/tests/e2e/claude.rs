@@ -11,6 +11,30 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A `mise` first on the `PATH` of the daemon under `dir` that finds the claude adapter and its `node` where the real
+/// mise installed them: the daemon resolves claude as under a service manager, which the test's own `HOME` would
+/// hide from the real mise.
+pub(super) fn mise(dir: &Path) {
+    let which = |tool: &str| {
+        let out = common::program("mise").args(["which", tool]).output().unwrap();
+        assert!(
+            out.status.success(),
+            "mise which {tool}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    };
+    let (adapter, node) = (which("claude-agent-acp"), which("node"));
+    let script = format!(
+        "#!/bin/sh\ncase \"$1 $2\" in\n'which claude-agent-acp') echo '{adapter}' ;;\n'which node') echo '{node}' ;;\n\
+         *) exit 1 ;;\nesac\n"
+    );
+    let path = dir.join("path/mise");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
+
 /// A daemon whose `build` formula is a prompt run of a claude agent on the fake `provider`.
 async fn daemon(provider: &Provider) -> Daemon {
     daemon_with(provider, "", "").await
@@ -54,49 +78,64 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, agent: &str) -> Da
             fs::write(path, text).unwrap();
         }
         br(&shop, &["init", "--prefix", "t", "-q"]);
+        mise(dir);
     })
     .await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn watch_chat_replays_and_follows_a_running_tool() {
+async fn the_history_of_a_run_replays_and_follows_a_running_tool() {
     let provider = Provider::start(vec![Reply::Turn(vec![
         Reply::Bash(super::chat::command()),
         Reply::Text("Готово.".into()),
     ])])
     .await;
-    super::chat::check(&daemon(&provider).await, "Bash").await;
+    super::chat::history(&daemon(&provider).await).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_claude_session_that_calls_the_finisher_passes_its_run() {
-    let finish = format!("{} finish pass --summary built", common::EXE);
+    let finish = format!("env > command-env; {} finish pass --summary built", common::EXE);
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;
-    let d = daemon(&provider).await;
+    let hook = "[hooks.seen]\nevent = \"PreToolUse\"\nmatcher = \"Bash\"\ncommand = \"env > hook-env\"\n";
+    let d = daemon_with(&provider, "", hook).await;
     let run = d.create("build", None).await;
     let view = d.until_state(&run, "passed").await;
     assert_eq!(view["step_kind"], "ai");
+    // The hook and the command see the attempt's environment.
+    let rig = d.dir.path().join("config/loop-manager/shop/web");
+    for file in ["hook-env", "command-env"] {
+        let env = fs::read_to_string(rig.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert!(
+            env.lines().any(|l| l == format!("LOOP_MANAGER_RUN={run}")),
+            "{file}: {env}"
+        );
+        assert!(
+            env.lines().any(|l| l.starts_with("LOOP_MANAGER_ATTEMPT_TOKEN=")),
+            "{file}: {env}"
+        );
+    }
     // Only the finisher passes a prompt run: the second model request carries the result of its Bash call.
     let requests = provider.requests();
     let result = requests[1].body["messages"].to_string();
     assert!(result.contains("tool_result"), "{result}");
 }
 
+/// The live view relays the run's events and ends with the run. The ACP driver relays no raw message of the
+/// session there: the run's history has them (`the_history_of_a_run_replays_and_follows_a_running_tool`).
 #[tokio::test(flavor = "multi_thread")]
-async fn the_live_view_of_a_run_relays_its_session_and_ends_with_the_run() {
-    // The command sleeps first, so the view taps the session before the tool result comes back.
+async fn the_live_view_of_a_run_relays_its_events_and_ends_with_the_run() {
+    // The command sleeps first, so the view taps the run before the tool result comes back.
     let finish = format!("sleep 1 && {} finish pass --summary built", common::EXE);
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;
     let d = daemon(&provider).await;
     let run = d.create("build", None).await;
     let mut live = d.client.stream(&format!("/v1/runs/{run}/live")).await.unwrap();
-    let (mut events, mut harness) = (Vec::new(), Vec::new());
+    let mut events = Vec::new();
     let watched = tokio::time::timeout(Duration::from_secs(60), async {
         while let Some(event) = live.next().await.unwrap() {
-            let data: Value = serde_json::from_str(&event.data).unwrap();
-            match event.id {
-                Some(_) => events.push(data),
-                None => harness.push((event.event, data)),
+            if event.id.is_some() {
+                events.push(serde_json::from_str::<Value>(&event.data).unwrap());
             }
         }
     });
@@ -104,16 +143,13 @@ async fn the_live_view_of_a_run_relays_its_session_and_ends_with_the_run() {
     assert!(events.iter().all(|e| e["run"] == run.as_str()), "{events:?}");
     assert_eq!(events[0]["type"], "run.queued");
     assert_eq!(events.last().unwrap()["type"], "run.passed");
-    // The raw stream-json of the session: the tool result of the Bash call at least.
-    assert!(harness.iter().all(|(kind, _)| kind == "harness"), "{harness:?}");
-    assert!(harness.iter().any(|(_, m)| m["type"] == "user"), "{harness:?}");
     let attempt = &d.until_state(&run, "passed").await["attempts"][0];
     assert_eq!(attempt["harness"], "claude");
     assert!(attempt["session"]["session_id"].is_string(), "{attempt}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn run_watch_on_a_going_run_prints_its_session_and_exits_with_the_run() {
+async fn run_watch_on_a_going_run_exits_with_the_run() {
     // The command sleeps first, so `run watch` attaches while the turn is still going.
     let finish = format!("sleep 2 && {} finish pass --summary built", common::EXE);
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;
@@ -139,16 +175,10 @@ async fn run_watch_on_a_going_run_prints_its_session_and_exits_with_the_run() {
         .unwrap();
     assert!(out.status.success(), "{:?}", out.status);
     let watched = String::from_utf8(out.stdout).unwrap();
-    let mut events = watched.trim_end().split("\n\n");
-    let last = events.clone().last().unwrap();
+    let last = watched.trim_end().split("\n\n").last().unwrap();
     assert!(
         last.lines().any(|l| l == "type: run.passed") && last.lines().any(|l| l == format!("run: {run}")),
         "{last}"
-    );
-    // The tool result of the Bash call arrives as a live harness message.
-    assert!(
-        events.any(|e| e.lines().any(|l| l == "event: harness") && e.lines().any(|l| l == "  type: user")),
-        "{watched}"
     );
 }
 
@@ -267,8 +297,33 @@ fn of_run(run: &str, dir: &Path) -> Vec<(i32, String)> {
         .collect()
 }
 
-/// Criterion 9: `kill -9` of claude while its Bash tool runs is typed within a second, the session is resumed
-/// and the run reaches its outcome. Criterion 16: the claim on the run's bead holds through the death of the session
+/// The processes whose environment holds `LOOP_MANAGER_INSTANCE=<instance>`.
+fn of_instance(instance: &str) -> Vec<i32> {
+    let needle = format!("{}={instance}", loop_manager_core::orphans::INSTANCE_ENV);
+    let entries = fs::read_dir("/proc").unwrap().flatten();
+    entries
+        .filter_map(|e| {
+            let pid: i32 = e.file_name().to_str()?.parse().ok()?;
+            let env = fs::read(e.path().join("environ")).ok()?;
+            String::from_utf8_lossy(&env)
+                .split('\0')
+                .any(|v| v == needle)
+                .then_some(pid)
+        })
+        .collect()
+}
+
+/// The instance marker in the environment of process `pid`.
+fn instance_of(pid: i32) -> String {
+    let env = fs::read(format!("/proc/{pid}/environ")).unwrap();
+    let prefix = format!("{}=", loop_manager_core::orphans::INSTANCE_ENV);
+    let env = String::from_utf8_lossy(&env);
+    let marker = env.split('\0').find_map(|v| v.strip_prefix(&prefix));
+    marker.expect("the instance carries its marker").to_owned()
+}
+
+/// Criterion 9: `kill -9` of the claude adapter while its Bash tool runs is typed within a second, its descendants
+/// go with it, the session is resumed and the run reaches its outcome. Criterion 16: the claim on the run's bead holds through the death of the session
 /// and the resumed session closes it; the session has the path of the tracker's database.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
@@ -293,7 +348,7 @@ async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
     let started = Instant::now();
     let claude = loop {
         let procs = of_run(&run, d.dir.path());
-        let claude = procs.iter().find(|(_, cmd)| cmd.contains("--session-id"));
+        let claude = procs.iter().find(|(_, cmd)| cmd.contains("claude-agent-acp"));
         // The shell's own command line names `sleep 20` from its start: the file tells the `printf` is done.
         let in_command =
             project.join("web/beads-dir").exists() && procs.iter().any(|(_, cmd)| cmd.contains("sleep 20"));
@@ -310,11 +365,18 @@ async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
     let killed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap();
+    let instance = instance_of(claude);
     let status = std::process::Command::new("kill")
         .args(["-9", &claude.to_string()])
         .status();
     assert!(status.unwrap().success());
     let event = next(&mut events, "run.attempt_failed").await;
+    // claude and its command carry the marker of the instance killed, and are killed by it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !of_instance(&instance).is_empty() {
+        assert!(Instant::now() < deadline, "left behind: {:?}", of_instance(&instance));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let failure = &event["data"]["failure"];
     assert_eq!(failure["kind"], "harness_crash", "{failure}");
     let at = loop_manager_core::parse_rfc3339_ms(event["ts"].as_str().unwrap()).unwrap();

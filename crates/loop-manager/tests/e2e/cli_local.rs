@@ -164,7 +164,7 @@ fn write_project(root: &std::path::Path) -> std::path::PathBuf {
         fs::write(path, text).unwrap();
     }
     let files = root.join("config/loop-manager");
-    let claude = "projects = [\"shop\"]\n[harness.claude]\nbinary = \"true\"\n";
+    let claude = "projects = [\"shop\"]\n[harness.claude]\ncommand = \"true\"\n";
     fs::write(files.join("config.toml"), claude).unwrap();
     fs::create_dir_all(files.join("shop/agents/dev")).unwrap();
     fs::write(

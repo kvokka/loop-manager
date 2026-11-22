@@ -27,7 +27,7 @@ error in every file.
   instance stops with reason `config` only when no agent of the new config, on any rig, starts
   sessions on its fingerprint (a changed MCP restarts only the instances it is part of). It emits `config.reloaded`
   with the generation (1 at daemon start), then goes through the queue again: a run waiting for a limit the reload
-  lifts starts at once. A change of the set of harnesses, a harness `binary` or any adapter setting
+  lifts starts at once. A change of the set of harnesses, a harness `binary` or `command` or any adapter setting
   such as `max_sessions` (a harness `model` is fine), of which projects have a `.beads` tracker, or of
   `[history] max_run_bytes` is refused: drivers, trackers and the history writer are made at daemon start.
 
@@ -37,8 +37,8 @@ One table shape for every layer (see "Effective config"): `[settings]` of the or
 the `[agent]` contribution of an addon; the top level of `agent.toml`; an agent variant `[agents.<name>]`; and the
 edit of an agent `[agents.<agent>]`. A pack's `[settings]` takes only the three launch settings: `harness`, `model`,
 `effort`; an ai step takes them and `native.<harness>`. There is no `provider` key: a layer that has one is an unknown field. No neutral key
-holds a value only one harness understands: the permission mode is claude's `--permission-mode` and codex's approval
-policy, with different values, so it is set in the harness's own block (`[settings.native.codex] approval_policy =
+holds a value only one harness understands: the permission mode is claude's `mode` session option and codex's
+approval policy, with different values, so it is set in the harness's own block (`[settings.native.codex] approval_policy =
 "never"`), never as a shared `permission_mode`.
 
 | Key | Type | Merge |
@@ -52,7 +52,7 @@ policy, with different values, so it is set in the harness's own block (`[settin
 | `skills.<name>` | `{path}` (must exist) or `{enabled = false}` | named list |
 | `addons` | array of `{name, params = {..}, enabled = true}`: attaches a declared addon (see "Addon") | by name: an attachment keeps the place of its first mention, `params` merge by key, the strongest `enabled` decides |
 | `description`, `subagents` | string; array of agent and variant names and patterns: keys of an agent only — `agent.toml`, a variant and an edit take them, any `[settings]` table does not (see "Subagents") | scalar; the list is replaced whole by the strongest layer that sets it |
-| `native.<harness>` | any table, passed to the adapter as is; `native.claude` is a table of claude settings keys, delivered with `--settings` together with the hooks, except `permission_mode`, which goes as `--permission-mode`; `native.codex` is a table of codex `config.toml` keys (`approval_policy` is the thread's approval policy), delivered to the app-server as `-c key=value` flags (so it is part of the process fingerprint) | by key |
+| `native.<harness>` | any table, passed to the adapter as is; `native.claude` is a table of claude settings keys, delivered as the session's `settings` together with the hooks, except `permission_mode`, which sets the session's permission mode; `native.codex` is a table of codex `config.toml` keys (`approval_policy` is the thread's approval policy), delivered to the app-server as `-c key=value` flags (so it is part of the process fingerprint) | by key |
 
 A harness hook (`hooks.<name>`) delivered to claude also fires inside every subagent of the session (its input carries
 `agent_id` and `agent_type`); it cannot be switched off per subagent. codex reads the same hook config but behaves
@@ -86,24 +86,29 @@ prints goes into the step's result in the journal, so a command must not print a
 
 A run is unattended: nothing waits for a human, and every permission is decided by the harness from the config set
 before the start, in the `native.<harness>` block of any settings layer (the orchestrator, a project, a rig, an agent
-or its variant, a formula's ai step). The defaults are permissive: claude runs with `--permission-mode bypassPermissions`, codex with
-`approval_policy = "never"` (beside `sandbox_mode = "danger-full-access"`, "Host inheritance"). What a stricter config
+or its variant, a formula's ai step). The defaults are permissive: claude runs in the permission mode
+`bypassPermissions`, codex with `approval_policy = "never"` (beside `sandbox_mode = "danger-full-access"`, "Host inheritance"). What a stricter config
 does not allow is denied at once, and the agent sees the denial; each denial the adapter learns of is journaled as
 `run.permission_denied` ([contracts](contracts.md#13-payloads)).
 
-- claude: `native.claude.permission_mode` (or `permissions.defaultMode`), the rules `permissions.allow`, `deny` and
-  `ask` (an `ask` rule is a denial here: claude runs with `--permission-prompts none`), and the harness hooks
-  `PermissionRequest` and `PreToolUse`.
+- claude: `native.claude.permission_mode` (or `permissions.defaultMode`), one of the modes `claude-agent-acp`
+  offers: `default`, `acceptEdits`, `plan` and, by the model and the host, `auto` and `bypassPermissions`; then the
+  rules `permissions.allow`, `deny` and `ask`, and the harness hooks `PermissionRequest` and `PreToolUse`. The mode
+  is set on the session after it starts and again on every resume ([contracts 4.6](contracts.md#46-harness-specifics-the-contract-relies-on)).
+  Outside `bypassPermissions`, what the rules do not allow, an `ask` rule included, comes to loop-manager as a
+  permission request, which it declines at once. `dontAsk` is not offered: a config that names it fails the attempt
+  with `config_error` naming `mode`; `default` with the `permissions.allow` rules the agents need denies the rest
+  the same way.
 - codex: `native.codex.approval_policy` (its granular form included), `sandbox_mode`, and the `PreToolUse` hook. Under
   a policy other than `never`, a command or file change that needs approval is declined.
 - A hook may ask loop-manager or another agent for the decision through the CLI or the MCP of loop-manager: the session
   environment carries `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the run has a
   bead, `LOOP_MANAGER_BEAD`.
 
-claude refuses `bypassPermissions` when it runs as root (a container, CI): it exits before `init` with
-"--dangerously-skip-permissions cannot be used with root/sudo privileges", and the attempt fails. Under root, either
-tell claude it runs in a sandbox, `env = { IS_SANDBOX = "1" }`, which keeps the default, or name another mode in
-`native.claude.permission_mode` (as `dontAsk` or `acceptEdits`) with the `permissions.allow` rules the agents need.
+`claude-agent-acp` does not offer `bypassPermissions` when it runs as root (a container, CI): setting the default
+mode fails the attempt with `config_error` naming `mode`. Under root, either tell it the session runs in a sandbox,
+`env = { IS_SANDBOX = "1" }`, which keeps the default, or name another mode in `native.claude.permission_mode` (as
+`default` or `acceptEdits`) with the `permissions.allow` rules the agents need.
 
 `loop-manager finish` is a shell call of the agent. The default lets it through; a strict config must allow it
 explicitly, for claude `permissions = { allow = ["Bash(loop-manager finish *)"] }`.
@@ -330,10 +335,13 @@ does not assemble cannot be shown to set it and is named too.
 With inheritance off, credentials still come from the host; a session whose `env` carries a credential of its
 own uses that one instead.
 
-- claude (`crates/loop-manager-claude/src/part.rs`): an own `CLAUDE_CONFIG_DIR` and `--setting-sources project,local`;
-  the subscription access token is read from the host's `.credentials.json` at every spawn and passed as
-  `CLAUDE_CODE_OAUTH_TOKEN`, so a token the host refreshed reaches the next process. Own credentials:
-  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`.
+- claude (the `claude` profile of the ACP driver, `crates/loop-manager-acp/src/profile/claude.rs`,
+  [adapters](adapters.md#profiles)): an own `CLAUDE_CONFIG_DIR` (the `home` of the session in the state directory,
+  kept for its resumes), `settingSources: ["project", "local"]` in `_meta.claudeCode.options` of the session, and
+  `claudeMdExcludes` of the host's `CLAUDE.md` and rules in its `settings`; the subscription access token is read
+  from the host's `.credentials.json` at every spawn and passed as `CLAUDE_CODE_OAUTH_TOKEN`, so a token the host
+  refreshed reaches the next process. Own credentials: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`.
 - codex (`crates/loop-manager-codex/src/part.rs`): an own `CODEX_HOME` and `HOME`; the host's `auth.json` is linked into
   that `CODEX_HOME`, and the model provider the host config selects comes as the first `-c` flags, its `env_key`
   variable passed from the daemon's environment (`host_provider`). The same variable is passed when inheriting.
@@ -361,11 +369,12 @@ api_tcp = "127.0.0.1:7171"          # the API on TCP too (off by default; loopba
 timezone = "Europe/Berlin"          # IANA zone `cron` is read in (default: the system zone; an unknown name is an error)
 rounds = 3                          # the rounds of a formula that sets none (default 3, see "Formula")
 
-[harness.claude]                    # optional: only the defaults of the harness
+[harness.claude]                    # optional: claude through its ACP adapter, the keys of an ACP harness
 model = "sonnet"                    # default model of the harness
-binary = "/opt/claude/bin/claude"   # optional explicit path; otherwise mise, then `PATH`
+command = "/opt/claude-agent-acp"   # optional explicit path; otherwise `mise which claude-agent-acp`, then `PATH`
+env = { IS_SANDBOX = "1" }          # `args`, `env` and `trace` as for an ACP harness below; `binary` is an error
 
-[harness.codex]                     # keys beyond `model` and `binary` are the adapter's; claude takes none
+[harness.codex]                     # keys beyond `model` and `binary` are the adapter's
 max_sessions = 8                    # codex: threads per app-server before a second one starts (default 8)
 instance_idle_s = 60                # codex: seconds an app-server without threads lives on (default 60; 0 stops it at once)
 
@@ -648,8 +657,8 @@ entry of the resolved list (`kit.qa`, a variant's name). A definition holds the 
 the session has is the session's, a hook equal to one of the session's runs already (the session's hooks fire inside
 its subagents too). The services of a target with an MCP server are bound with the session's. The targets' skills
 join the session's and are visible to the whole session. A target's `env` and native block do not reach its
-subagent: it lives in the caller's process. claude: the definitions go in `--agents` (a file beside the session's
-settings), and `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` removes the built-in agent types (`general-purpose`,
+subagent: it lives in the caller's process. claude: the definitions go in `agents` of the session's
+`_meta.claudeCode.options`, and `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` removes the built-in agent types (`general-purpose`,
 `Explore`, `Plan`), so with no target only claude's own `fork` is left. Nesting is the harness's: claude goes two
 levels deep unless `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` in the agent's `env` says otherwise. codex: each target is
 an agent role of the thread (`config.agents.<type>`: the `description` and a generated role file with the role
@@ -706,7 +715,7 @@ title = "Implement the requested change"   # optional display title for an ai st
 timeout = "4h"                      # optional (default 4h)
 model = "opus"                      # optional, ai steps only: layer 8, the launch settings `harness`,
                                     # `model`, `effort`
-native.claude = { permission_mode = "dontAsk" }  # optional, ai steps only: layer 8, merged by key
+native.claude = { permission_mode = "default" }  # optional, ai steps only: layer 8, merged by key
 last_comments = 6                   # optional, ai steps only: the prompt shows the last 6 comments of the bead
                                     # and of each of its parents (default: all)
 
@@ -1057,8 +1066,8 @@ runs whose agent attaches it, and get the params in force for that agent in `LOO
 directory in `LOOP_MANAGER_ADDON_DATA`; the events of no agent go to the addons `[settings]` of the orchestrator and
 the project attach (contracts 3.1).
 
-A Claude Code plugin directory (`--plugin-dir`) cannot be handed over: the adapter takes that flag for skills, so an
-addon gives its skills, hooks and MCP servers through `[agent]`. Beyond its `[agent]` an addon gives its attached
+A Claude Code plugin directory cannot be handed over: the claude profile hands claude one plugin of its own, with
+the skills, so an addon gives its skills, hooks and MCP servers through `[agent]`. Beyond its `[agent]` an addon gives its attached
 agents two things, in attachment order: the text of its `prompt` file, after the system prompt the layers give (each
 fragment after a blank line); and its `bin/` directory, when it has one, ahead of `PATH` (the `PATH` a layer sets, or
 else the daemon's). The daemon's `PATH` taken this way becomes part of the effective config: it is in the run's

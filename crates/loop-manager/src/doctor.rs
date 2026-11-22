@@ -5,8 +5,10 @@
 
 use crate::{
     daemon::Paths,
-    harness::{adapter, agents, binary, load},
+    harness::{adapter, agents, binary, load, resolve},
 };
+use loop_manager_acp::Acp;
+use loop_manager_core::driver::Setup;
 use loop_manager_front::cli::Service;
 use serde_json::{Value, json};
 use std::{
@@ -40,13 +42,28 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
             for (name, harness) in &config.harnesses {
                 // A harness with no adapter `load` let through is an ACP agent.
                 let Some(adapter) = adapter(name) else {
-                    found.push(acp(name, harness, paths));
+                    let socket = Some(paths.socket.as_path());
+                    found.push(acp(name, Acp::new(name, &harness.options, &paths.state, socket, None)));
                     continue;
                 };
-                let (path, source) = binary(name, harness.binary.as_deref());
-                found.push(binary_check(name, &path, source, |p| {
-                    loop_manager_core::supported_version(p, adapter.minimum)
-                }));
+                let (path, source, runtime) = resolve(adapter, harness);
+                let checked = binary_check(name, &path, source, |p| {
+                    loop_manager_core::supported_version(p, runtime.as_deref(), adapter.minimum)
+                });
+                let probe = loop_manager_acp::profiled(name) && checked["level"] != "error";
+                found.push(checked);
+                // An adapter that is an ACP agent: its `initialize`, as for the ACP agents of the config.
+                if probe {
+                    let setup = Setup {
+                        binary: path,
+                        path: runtime,
+                        options: &harness.options,
+                        state: &paths.state,
+                        socket: Some(&paths.socket),
+                        history: None,
+                    };
+                    found.push(acp(name, Acp::of_adapter(name, &setup)));
+                }
                 let checks = (adapter.doctor)(&agents(&config, name));
                 found.extend(checks.into_iter().map(|c| check(c.check, c.level, c.detail)));
             }
@@ -91,12 +108,9 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
     found
 }
 
-/// The `doctor` probe of the ACP agent of harness `name`: `initialize`, no session.
-fn acp(name: &str, harness: &loop_manager_core::config::Harness, paths: &Paths) -> Value {
-    let probe = async {
-        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket), None)?;
-        acp.probe().await
-    };
+/// The `doctor` probe of the ACP agent `acp` of harness `name`: `initialize`, no session.
+fn acp(name: &str, acp: Result<Acp, String>) -> Value {
+    let probe = async { acp?.probe().await };
     let probed = match tokio::runtime::Handle::try_current() {
         // The daemon answers `GET /v1/doctor` in `block_in_place` on a worker of its own runtime.
         Ok(runtime) => runtime.block_on(probe),

@@ -37,6 +37,7 @@ async fn a_claude_session_of_a_worktree_formula_works_in_its_worktree() {
     let provider = Provider::start(vec![Reply::Bash(finish), Reply::Text("Done.".into())]).await;
     let base_url = provider.base_url();
     let d = Daemon::start(|dir| {
+        super::claude::mise(dir);
         let shop = dir.join("config/loop-manager/shop");
         let files = [
             (

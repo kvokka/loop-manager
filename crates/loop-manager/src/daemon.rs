@@ -108,10 +108,11 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     loop_manager_core::orphans::adopt_orphans().map_err(|e| format!("cannot become the child subreaper: {e}"))?;
     let mut drivers: Vec<Arc<dyn Driver>> = Vec::new();
     for (name, harness) in &config.harnesses {
-        let Some((driver, binary, _)) = driver(name, harness, &paths, &history) else {
+        let Some((driver, binary, path)) = driver(name, harness, &paths, &history) else {
             continue;
         };
-        if let Some(Err(why)) = minimum(&driver).map(|m| loop_manager_core::supported_version(&binary, m)) {
+        let version = |m| loop_manager_core::supported_version(&binary, path.as_deref(), m);
+        if let Some(Err(why)) = minimum(&driver).map(version) {
             eprintln!("loop-manager daemon: warning: {why}");
         }
         drivers.push(driver);

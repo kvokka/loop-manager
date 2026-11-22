@@ -11,7 +11,7 @@ async fn the_replies_fit_their_schemas() {
         let loop_manager = dir.join("config/loop-manager");
         fs::write(
             loop_manager.join("config.toml"),
-            "projects = [\"shop\"]\n[harness.claude]\nbinary = \"true\"\n",
+            "projects = [\"shop\"]\n[harness.claude]\ncommand = \"true\"\n",
         )
         .unwrap();
         fs::create_dir_all(loop_manager.join("shop/agents/dev")).unwrap();

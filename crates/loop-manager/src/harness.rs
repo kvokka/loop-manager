@@ -7,6 +7,7 @@ use loop_manager_core::{
     history::History,
 };
 use std::{
+    ffi::OsString,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -28,41 +29,78 @@ pub(crate) fn binary(name: &str, explicit: Option<&Path>) -> (PathBuf, &'static 
     }
 }
 
+/// The `PATH` of a harness process whose binary `source` found, with `mise` its runtime: the directory of the `node`
+/// mise installed first, as an adapter that is a node script finds no `node` on the `PATH` of a daemon under a
+/// service manager (docs/guide/install.md); `None` for another source or no `node` in mise.
+fn runtime_path(source: &str) -> Option<OsString> {
+    if source != "mise" {
+        return None;
+    }
+    let (node, _) = binary("node", None);
+    let dir = node.parent().filter(|d| !d.as_os_str().is_empty())?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(dir.to_owned()).chain(std::env::split_paths(&path))).ok()
+}
+
+/// The explicit binary of `[harness.<name>]`: `command` for an ACP harness, `binary` for another.
+fn explicit(name: &str, harness: &config::Harness) -> Option<PathBuf> {
+    match loop_manager_acp::profiled(name) {
+        true => harness
+            .options
+            .get("command")
+            .and_then(|c| c.as_str())
+            .map(PathBuf::from),
+        false => harness.binary.clone(),
+    }
+}
+
+/// Where the binary of harness `name` on `adapter` is, who said so, and the `PATH` its process gets.
+pub(crate) fn resolve(adapter: &Adapter, harness: &config::Harness) -> (PathBuf, &'static str, Option<OsString>) {
+    let (path, source) = binary(adapter.command, explicit(adapter.name, harness).as_deref());
+    (path, source, runtime_path(source))
+}
+
 /// The adapters of this build: a harness is a row here, and nothing else in the root knows its name.
-const ADAPTERS: &[&Adapter] = &[&loop_manager_claude::ADAPTER, &loop_manager_codex::ADAPTER];
+const ADAPTERS: &[&Adapter] = &[&loop_manager_acp::CLAUDE, &loop_manager_codex::ADAPTER];
 
 /// The adapter of harness `name`.
 pub(crate) fn adapter(name: &str) -> Option<&'static Adapter> {
     ADAPTERS.iter().copied().find(|a| a.name == name)
 }
 
-fn setup<'a>(binary: PathBuf, harness: &'a config::Harness, paths: &'a Paths) -> Setup<'a> {
+fn setup<'a>(binary: PathBuf, path: Option<OsString>, harness: &'a config::Harness, paths: &'a Paths) -> Setup<'a> {
     Setup {
         binary,
+        path,
         options: &harness.options,
         state: &paths.state,
         socket: Some(&paths.socket),
+        history: None,
     }
 }
 
-/// The driver of harness `name` on its resolved binary, with the binary and its source; `None` for a harness loop-manager
-/// has no adapter for or settings it does not take, which `load` refused. A harness with no adapter and a `command` is
-/// an ACP v2 agent (docs/design/adapters.md); its binary is that command.
+/// The driver of harness `name` on its resolved binary, with the binary and the `PATH` it runs with; `None` for a
+/// harness loop-manager has no adapter for or settings it does not take, which `load` refused. A harness with no
+/// adapter and a `command` is an ACP v2 agent (docs/design/adapters.md); its binary is that command.
 pub(crate) fn driver(
     name: &str,
     harness: &config::Harness,
     paths: &Paths,
     history: &History,
-) -> Option<(Arc<dyn Driver>, PathBuf, &'static str)> {
+) -> Option<(Arc<dyn Driver>, PathBuf, Option<OsString>)> {
     let Some(adapter) = adapter(name) else {
         let (state, socket, history) = (&paths.state, Some(paths.socket.as_path()), Some(history.clone()));
         let acp = loop_manager_acp::Acp::new(name, &harness.options, state, socket, history).ok()?;
         let command = harness.options["command"].as_str().unwrap_or_default().into();
-        return Some((Arc::new(acp), command, "config"));
+        return Some((Arc::new(acp), command, None));
     };
-    let (binary, source) = binary(name, harness.binary.as_deref());
-    let driver = (adapter.new)(&setup(binary.clone(), harness, paths)).ok()?;
-    Some((driver, binary, source))
+    let (binary, _, path) = resolve(adapter, harness);
+    let setup = Setup {
+        history: Some(history.clone()),
+        ..setup(binary.clone(), path.clone(), harness, paths)
+    };
+    let driver = (adapter.new)(&setup).ok()?;
+    Some((driver, binary, path))
 }
 
 /// The oldest harness version the adapter of `driver` supports, inclusive; `None` for an ACP harness of the config,
@@ -70,6 +108,9 @@ pub(crate) fn driver(
 pub(crate) fn minimum(driver: &Arc<dyn Driver>) -> Option<(u32, u32, u32)> {
     adapter(driver.harness()).map(|a| a.minimum)
 }
+
+/// The error of `binary` in the section of an ACP harness.
+const NO_BINARY: &str = "`binary`: an ACP harness names its agent executable by `command`";
 
 /// What is wrong with `[harness.<name>]`: settings its adapter does not take, or, with no adapter, no ACP agent
 /// `command` or a key the ACP driver does not take.
@@ -83,13 +124,16 @@ fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option
             ));
         }
         if harness.binary.is_some() {
-            return Some("`binary`: an ACP harness names its agent executable by `command`".into());
+            return Some(NO_BINARY.into());
         }
         return loop_manager_acp::Acp::new(name, &harness.options, &paths.state, None, None).err();
     };
+    if harness.binary.is_some() && loop_manager_acp::profiled(name) {
+        return Some(NO_BINARY.into());
+    }
     // The binary is not resolved for a check: no adapter reads it before a spawn.
-    let binary = harness.binary.clone().unwrap_or_else(|| name.into());
-    (adapter.new)(&setup(binary, harness, paths)).err()
+    let binary = explicit(name, harness).unwrap_or_else(|| adapter.command.into());
+    (adapter.new)(&setup(binary, None, harness, paths)).err()
 }
 
 /// The config of `paths` with the parameters of the bundled addons checked, or every error in it.

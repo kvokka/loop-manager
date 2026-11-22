@@ -18,8 +18,8 @@ use loop_manager_contract::{
     BoxFuture,
     config::EffectiveConfig,
     driver::{
-        Capabilities, Driver, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized, ProcessPart,
-        PromptKey, SessionPart, SessionPlan, SessionRef, Source, Split, Transcript, child,
+        Adapter, Capabilities, Driver, EventSink, Failure, FailureKind, Health, InstanceHandle, Normalized,
+        ProcessPart, PromptKey, SessionPart, SessionPlan, SessionRef, Setup, Source, Split, Transcript, child,
     },
     history::History,
     orphans,
@@ -155,6 +155,21 @@ impl Acp {
             true => Err("`command` names the agent executable".into()),
             false => Ok(driver),
         }
+    }
+
+    /// The driver of the profiled harness `name` on what the root resolved: its `command` the binary of `setup`
+    /// unless `[harness.<name>]` names one, its environment's `PATH` the one of `setup` unless the harness sets one.
+    pub fn of_adapter(name: &str, setup: &Setup) -> Result<Self, String> {
+        let mut options = setup.options.clone();
+        let binary = setup.binary.to_string_lossy().into_owned();
+        options.entry("command").or_insert(binary.into());
+        if let Some(path) = &setup.path {
+            let env = options.entry("env").or_insert(toml::Table::new().into());
+            if let Some(env) = env.as_table_mut() {
+                env.entry("PATH").or_insert(path.to_string_lossy().into_owned().into());
+            }
+        }
+        Self::new(name, &options, setup.state, setup.socket, setup.history.clone())
     }
 
     fn instance(&self, id: &str) -> Result<Arc<Instance>, Failure> {
@@ -541,6 +556,26 @@ async fn stopped(handle: &InstanceHandle, failure: Failure) -> Failure {
     failure
 }
 
+/// claude through its ACP adapter `claude-agent-acp`, as the root of the build lists it (docs/design/adapters.md,
+/// "Profiles").
+pub const CLAUDE: Adapter = Adapter {
+    name: "claude",
+    command: "claude-agent-acp",
+    // claude itself takes the short names (`fable`, `opus`, `sonnet`, `haiku`) for the latest model of the family.
+    models: &[],
+    minimum: profile::claude::MINIMUM,
+    agent_types: &["general-purpose", "Explore", "Plan", "claude"],
+    subagents_inherit: false,
+    new: |setup| Ok(Arc::new(Acp::of_adapter("claude", setup)?)),
+    doctor: profile::claude::doctor,
+};
+
+/// Whether the driver has a profile for harness `name`: then the harness is an adapter of the build, and its
+/// `[harness.<name>]` takes the keys of an ACP harness.
+pub fn profiled(name: &str) -> bool {
+    Profile::own(name).is_some()
+}
+
 /// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, by key:
 /// the same refusal as at an attempt's start, said when the config loads (docs/design/config.md).
 pub fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), String> {
@@ -645,7 +680,7 @@ impl Driver for Acp {
         Capabilities {
             sessions_per_instance: 1,
             instance_idle: Duration::ZERO,
-            min_version: (0, 0, 0),
+            min_version: self.profile.minimum,
         }
     }
 

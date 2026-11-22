@@ -1059,7 +1059,6 @@ dependencies = [
  "loop-manager-acp",
  "loop-manager-addons",
  "loop-manager-br",
- "loop-manager-claude",
  "loop-manager-codex",
  "loop-manager-core",
  "loop-manager-front",
@@ -1090,7 +1089,6 @@ dependencies = [
  "agent-client-protocol",
  "base64",
  "futures",
- "loop-manager-claude",
  "loop-manager-contract",
  "loop-manager-testkit",
  "rustix",
@@ -1122,19 +1120,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "loop-manager-claude"
-version = "0.0.1"
-dependencies = [
- "loop-manager-contract",
- "loop-manager-testkit",
- "rustix",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
 ]
 
 [[package]]

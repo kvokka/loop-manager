@@ -57,6 +57,7 @@ async fn daemon_with(addons: &str, agent: &str) -> Daemon {
         }
         fs::create_dir_all(dir.join("path")).unwrap();
         std::os::unix::fs::symlink(common::EXE, dir.join("path/loop-manager")).unwrap();
+        super::claude::mise(dir);
         br(&shop, &["init", "--prefix", "t", "-q"]);
     })
     .await

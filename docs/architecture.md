@@ -26,11 +26,12 @@ These are checked by the build, not kept by agreement.
   are written against, and `loop-manager-core`, the engine over them. The core depends on no adapter, frontend or addon,
   and neither crate names a harness or a tracker (`codex`, `br`, `max_sessions`, `BEADS_DIR`, `.beads`): what the core
   needs comes through the driver's capabilities and the tracker interface, and `scripts/core-boundary.sh` checks the
-  sources of both in CI, and that the adapters (`loop-manager-acp`, `loop-manager-claude`, `loop-manager-codex`,
-  `loop-manager-br`, `loop-manager-addons`) build without `loop-manager-core`.
+  sources of both in CI, and that the adapters (`loop-manager-acp`, `loop-manager-codex`, `loop-manager-br`,
+  `loop-manager-addons`) build without `loop-manager-core`.
 - A harness is an abstraction to the core. The root of the build holds the one table of adapters
-  (`crates/loop-manager/src/harness.rs`), the only place that names a harness; a name outside it with a `command` goes
-  to the ACP driver.
+  (`crates/loop-manager/src/harness.rs`), and the ACP driver the table of its profiles
+  (`crates/loop-manager-acp/src/profile.rs`): these are the places that name a harness. A name outside them with a
+  `command` goes to the ACP driver.
 - Adapters and frontends only translate protocols.
 - Policy (retry, park, refuse) lives in addons and config, judgement ("is the work done well") in prompts and the
   checks of addons; the core keeps only mechanisms
@@ -42,9 +43,8 @@ These are checked by the build, not kept by agreement.
 |---|---|---|
 | `loop-manager-contract` | the contracts of the core: config assembly, the driver and tracker interfaces, the event envelope, the run history writer, templates and schedules, the registry of child processes. The adapters, `loop-manager-br`, `loop-manager-addons` and the test doubles depend on it, not on the engine | [contracts](design/contracts.md), [config](design/config.md) |
 | `loop-manager-core` | the engine, the single writer of the runtime state: runs, attempts, triggers, deadlines, gates, the instance registry, hook execution, recovery. It re-exports the modules of `loop-manager-contract` | [event model](design/event-model.md), [invariants](design/invariants.md) |
-| `loop-manager-claude` | the claude adapter: one `claude -p` process per session, stream-json | [adapters](design/adapters.md), [contracts 4.6](design/contracts.md#46-harness-specifics-the-contract-relies-on) |
-| `loop-manager-codex` | the codex adapter: one `codex app-server` per fingerprint over stdio, a thread per session | the same |
-| `loop-manager-acp` | the ACP v2 driver: a harness the config names by `command`, one agent process per session over stdio | [adapters](design/adapters.md#acp-v2-harnesses) |
+| `loop-manager-acp` | the ACP v2 driver: a harness the config names by `command`, and claude through its ACP adapter `claude-agent-acp` (the `claude` profile); one agent process per session over stdio | [adapters](design/adapters.md#acp-v2-harnesses), [contracts 4.6](design/contracts.md#46-harness-specifics-the-contract-relies-on) |
+| `loop-manager-codex` | the codex adapter: one `codex app-server` per fingerprint over stdio, a thread per session | [adapters](design/adapters.md), [contracts 4.6](design/contracts.md#46-harness-specifics-the-contract-relies-on) |
 | `loop-manager-br` | the br tracker adapter: every call is one `br` process on the project's database | [tracker](design/tracker-br.md) |
 | `loop-manager-front` | the frontends: the HTTP API on the daemon's unix socket, the CLI and its client, the MCP server | [frontends](api/frontends.md), [MCP](api/mcp.md), [OpenAPI](api/openapi.json) |
 | `loop-manager-addons` | the bundled addons `default-policy` and `worktree`, in-process executors of the hook contract | [config: bundled addons](design/config.md#bundled-addons-builtinname), [contracts 10](design/contracts.md#10-default-policy-as-decisions) |

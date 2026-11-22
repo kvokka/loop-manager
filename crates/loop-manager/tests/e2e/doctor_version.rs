@@ -2,7 +2,7 @@
 //! from the minimum of its adapter up, br within its tested range (docs/design/contracts.md 4.5,
 //! docs/design/tracker-br.md).
 
-use super::doctor::{doctor, level, script, tree};
+use super::doctor::{adapter, doctor, level, script, tree};
 use crate::common;
 use loop_manager_front::client::Client;
 use std::{
@@ -32,25 +32,25 @@ async fn a_harness_below_its_minimum_warns_and_the_minimum_and_newer_do_not() {
     let dir = tree("");
     let d = dir.path();
     let config = format!(
-        "projects = [\"shop\"]\n[harness.claude]\nbinary = \"{}\"\n[harness.codex]\nbinary = \"{}\"\n",
+        "projects = [\"shop\"]\n[harness.claude]\ncommand = \"{}\"\n[harness.codex]\nbinary = \"{}\"\n",
         d.join("tools/claude").display(),
         d.join("tools/codex").display()
     );
     fs::write(d.join("config/loop-manager/config.toml"), config).unwrap();
     // Each harness: below its minimum, at it, and above it, with no upper bound.
     for [claude, codex] in [
-        ["2.1.328 (Claude Code)", "codex-cli 0.171.0"],
-        ["2.1.329 (Claude Code)", "codex-cli 0.170.9"],
-        ["3.0.0 (Claude Code)", "codex-cli 1.0.0"],
-        ["2.1.400 (Claude Code)", "codex-cli 0.172.0"],
+        ["0.109.0", "codex-cli 0.171.0"],
+        ["0.109.1", "codex-cli 0.170.9"],
+        ["1.0.0", "codex-cli 1.0.0"],
+        ["0.110.0", "codex-cli 0.172.0"],
     ] {
-        script(&d.join("tools/claude"), &format!("echo '{claude}'"));
+        adapter(&d.join("tools/claude"), claude);
         script(&d.join("tools/codex"), &format!("echo '{codex}'"));
         let (passed, found) = doctor(d);
         assert!(passed, "warnings do not fail: {found:?}");
         let stderr = daemon_stderr(d).await;
         for (name, out, minimum, below) in [
-            ("claude", claude, "2.1.329", claude.starts_with("2.1.328")),
+            ("claude", claude, "0.109.1", claude == "0.109.0"),
             ("codex", codex, "0.171.0", codex.ends_with("0.170.9")),
         ] {
             let path = d.join("tools").join(name).display().to_string();

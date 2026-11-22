@@ -2,8 +2,9 @@
 //! [`Adapter`] per harness and knows no harness by name.
 
 use super::Driver;
-use crate::config::EffectiveConfig;
+use crate::{config::EffectiveConfig, history::History};
 use std::{
+    ffi::OsString,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -12,12 +13,17 @@ use std::{
 pub struct Setup<'a> {
     /// The resolved harness binary.
     pub binary: PathBuf,
+    /// The `PATH` the harness process gets when the root decided one: mise found the binary, and the runtime mise
+    /// installed for it goes first. `None`: the process gets the daemon's.
+    pub path: Option<OsString>,
     /// The keys of `[harness.<name>]` beyond `binary` and `model`: the adapter's own settings.
     pub options: &'a toml::Table,
     /// The daemon's state directory: the generated files of sessions live under it.
     pub state: &'a Path,
     /// The API socket a session gets in `LOOP_MANAGER_SOCKET`.
     pub socket: Option<&'a Path>,
+    /// The run histories the sessions write to; none for a check of the config.
+    pub history: Option<History>,
 }
 
 /// One `loop-manager doctor` finding; `level` is `ok`, `warning` or `error`.
@@ -45,8 +51,10 @@ pub type DoctorAgents<'a> = &'a [(String, Option<EffectiveConfig>)];
 /// One harness adapter.
 #[derive(Debug)]
 pub struct Adapter {
-    /// The harness name: the `[harness.<name>]` table and the binary mise resolves.
+    /// The harness name: the `[harness.<name>]` table.
     pub name: &'static str,
+    /// The executable of the harness, the name mise resolves (docs/design/config.md).
+    pub command: &'static str,
     /// Short model names and the full names they stand for, the latest of each family; any other name goes to the
     /// harness as it is.
     pub models: &'static [(&'static str, &'static str)],

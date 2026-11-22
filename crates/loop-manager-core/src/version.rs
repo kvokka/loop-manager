@@ -2,13 +2,14 @@
 //! with no upper bound (contracts 4.5); a tracker binary within the range its adapter was tested on. The daemon warns
 //! at start, and `loop-manager doctor` does, when a binary fails its check.
 
-use std::path::Path;
+use std::{ffi::OsStr, path::Path};
 
 type Version = (u32, u32, u32);
 
-/// The `--version` output of `binary`, or why it is not `minimum` or newer.
-pub fn supported_version(binary: &Path, minimum: Version) -> Result<String, String> {
-    let out = version_output(binary)?;
+/// The `--version` output of `binary`, run with `path` as its `PATH` when given (the root resolved the runtime of a
+/// script), or why it is not `minimum` or newer.
+pub fn supported_version(binary: &Path, path: Option<&OsStr>, minimum: Version) -> Result<String, String> {
+    let out = version_output(binary, path)?;
     if supported(&out, minimum) {
         return Ok(out);
     }
@@ -21,7 +22,7 @@ pub fn supported_version(binary: &Path, minimum: Version) -> Result<String, Stri
 
 /// The `--version` output of `binary`, or why it is not a tested version.
 pub fn tested_version(binary: &Path, tested: [Version; 2]) -> Result<String, String> {
-    let out = version_output(binary)?;
+    let out = version_output(binary, None)?;
     match parse(&out) {
         Some(v) if (tested[0]..=tested[1]).contains(&v) => Ok(out),
         _ => Err(format!(
@@ -33,9 +34,13 @@ pub fn tested_version(binary: &Path, tested: [Version; 2]) -> Result<String, Str
     }
 }
 
-/// The trimmed standard output of `binary --version`.
-fn version_output(binary: &Path) -> Result<String, String> {
-    match crate::orphans::output_std(std::process::Command::new(binary).arg("--version")) {
+/// The trimmed standard output of `binary --version`, with `path` as its `PATH` when given.
+fn version_output(binary: &Path, path: Option<&OsStr>) -> Result<String, String> {
+    let mut command = std::process::Command::new(binary);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    match crate::orphans::output_std(command.arg("--version")) {
         Ok(out) => Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned()),
         Err(e) => Err(format!("{}: {e}", binary.display())),
     }

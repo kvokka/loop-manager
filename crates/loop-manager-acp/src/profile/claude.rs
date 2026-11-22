@@ -7,7 +7,10 @@ use crate::{part, session};
 use agent_client_protocol::v2::schema::Notice;
 use loop_manager_contract::{
     config::{EffectiveConfig, Hook, Sourced},
-    driver::{Failure, FailureKind, Fingerprint, ProcessPart, SessionPlan, Source, child::config_error},
+    driver::{
+        Check, DoctorAgents, Failure, FailureKind, Fingerprint, ProcessPart, SessionPlan, Source, child::config_error,
+        host_mcp_check, login_check,
+    },
 };
 use serde_json::{Map, Value, json};
 use std::{
@@ -285,7 +288,7 @@ pub(super) fn env_with(p: &Value, id: &str, socket: Option<&Path>, host: &Path) 
 }
 
 /// The host's claude config directory: the daemon's `CLAUDE_CONFIG_DIR`, else `~/.claude`.
-fn host_dir() -> PathBuf {
+pub(super) fn host_dir() -> PathBuf {
     match std::env::var_os("CLAUDE_CONFIG_DIR") {
         Some(dir) => dir.into(),
         None => Path::new(&std::env::var_os("HOME").unwrap_or_default()).join(".claude"),
@@ -461,4 +464,43 @@ pub(super) fn notice(notice: &Notice) -> Option<Failure> {
         None => notice.title.clone(),
     };
     Some(failure)
+}
+
+/// The oldest `claude-agent-acp` the profile supports: the version its contract suite runs on.
+pub(crate) const MINIMUM: (u32, u32, u32) = (0, 109, 1);
+
+/// The host checks of `loop-manager doctor`: whether a session can log in, and the stdio MCP servers of the host's
+/// settings.
+pub(crate) fn doctor(agents: DoctorAgents) -> Vec<Check> {
+    // Inherited or delivered, every session without a key of its own gets the host's login.
+    let file = host_dir().join(".credentials.json");
+    vec![
+        login_check("claude", &file, &CREDENTIALS, agents),
+        host_mcp(&claude_json()),
+    ]
+}
+
+/// The user file of claude: in `$CLAUDE_CONFIG_DIR` when set, else `~/.claude.json`.
+fn claude_json() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".claude.json"),
+        |d| PathBuf::from(d).join(".claude.json"),
+    )
+}
+
+/// The stdio MCP servers of the host's user file (docs/design/config.md): with host inheritance on, each starts in
+/// every session, and the shared MCP of `loop-manager` does not cover them.
+fn host_mcp(file: &Path) -> Check {
+    let user: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap_or_default()).unwrap_or_default();
+    let projects = (user["projects"].as_object().into_iter().flatten()).map(|(_, p)| &p["mcpServers"]);
+    let mut names: Vec<&str> = std::iter::once(&user["mcpServers"])
+        .chain(projects)
+        .filter_map(Value::as_object)
+        .flatten()
+        .filter(|(_, s)| !s["command"].is_null())
+        .map(|(n, _)| n.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    host_mcp_check("claude", &names)
 }

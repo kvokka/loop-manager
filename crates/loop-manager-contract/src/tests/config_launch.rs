@@ -9,6 +9,7 @@ use crate::{
 
 static CLAUDE: Adapter = Adapter {
     name: "claude",
+    command: "claude",
     models: &[],
     minimum: (0, 0, 0),
     agent_types: &["Explore"],
@@ -18,6 +19,7 @@ static CLAUDE: Adapter = Adapter {
 };
 static CODEX: Adapter = Adapter {
     name: "codex",
+    command: "codex",
     models: &[("luna", "gpt-6-luna")],
     minimum: (0, 0, 0),
     agent_types: &["worker"],

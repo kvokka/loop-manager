@@ -223,30 +223,32 @@ fn a_resume_takes_the_home_of_the_session() {
     assert_eq!(value(&env, "CLAUDE_CONFIG_DIR"), Some(home));
 }
 
+/// The accounts of the gates are those the native claude driver had: the same hashes of the same sources.
 #[test]
 fn the_account_is_the_native_drivers() {
-    let native = loop_manager_claude::Claude::new("claude".into(), "/state".into(), None);
     let acp = driver(Path::new("/state"));
     let mut config = typical(false);
-    let same = |config: &EffectiveConfig| {
-        let ours = acp.account(&acp.split(config, &plan()).unwrap().process);
-        let theirs = native.account(&native.split(config, &plan()).unwrap().process);
-        assert_eq!(ours, theirs);
-        ours.unwrap()
-    };
-    let host = same(&config);
-    assert_eq!(host, same(&typical(true)), "inherited or delivered, the host's login");
+    let account = |config: &EffectiveConfig| acp.account(&acp.split(config, &plan()).unwrap().process).unwrap();
+    // The host's login is the hash of the host's claude directory, which this machine decides.
+    let source = ProcessPart(json!({ "host": claude::host_dir() }));
+    let host = loop_manager_contract::driver::Fingerprint::of("claude", &source).0[..16].to_owned();
+    assert_eq!(account(&config), host);
+    assert_eq!(
+        account(&typical(true)),
+        host,
+        "inherited or delivered, the host's login"
+    );
     config.env.insert(
         "ANTHROPIC_API_KEY".into(),
         serde_json::from_value(sourced(json!("${SHOP_KEY}"))).unwrap(),
     );
-    assert_ne!(same(&config), host);
+    assert_eq!(account(&config), "db8f617dfdc23603");
     config.env.clear();
     config.env.insert(
         "CLAUDE_CODE_OAUTH_TOKEN".into(),
         serde_json::from_value(sourced(json!("${TOKEN}"))).unwrap(),
     );
-    same(&config);
+    assert_eq!(account(&config), "978f64bdc883b6e8");
 }
 
 /// The errors of the adapter by code, message and data, and the kind each stands for.
