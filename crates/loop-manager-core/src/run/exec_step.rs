@@ -127,7 +127,14 @@ impl RunHandler {
             failure.raw = stderr.to_owned();
             failure
         };
+        // The operator's Stop, if one was asked, is done: the command ended.
+        let stopped = tx.sql().execute(
+            "UPDATE attempts SET stop_ms = NULL WHERE run = ?1 AND n = ?2 AND stop_ms IS NOT NULL",
+            params![row.id, attempt],
+        )? > 0;
         let (result, summary, code) = match exit {
+            // Stopped by the operator: the command failed, as one killed by a signal does, and is no runaway.
+            Exit::TimedOut if stopped => (Verdict::Fail, "stopped by the operator".to_owned(), None),
             Exit::TimedOut => return self.attempt_failed(tx, row, failure(FailureKind::RunawayTurn, None)),
             Exit::SpawnFailed(text) => {
                 return self.attempt_failed(tx, row, failure(FailureKind::WorkspaceFailure, Some(text)));

@@ -109,14 +109,18 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   gives the outcomes of the steps it went through as `steps`. A bridge that may send an outcome twice sets `--key`:
   without a key, a late repeat could resolve the step again after a round brought the run back to it.
 - `loop-manager run takeover <run> --attempt <n>` (`POST /v1/runs/{id}/takeover`), `loop-manager run say <run>
-  --attempt <n> <text>` (`POST /v1/runs/{id}/instruct`) and `loop-manager run continue <run> --attempt <n> [--unsent
-  send|withdraw]` (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the operator,
-  send its agent an instruction and hand it back ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's
+  --attempt <n> <text>` (`POST /v1/runs/{id}/instruct`), `loop-manager run stop <run> --attempt <n>` (`POST
+  /v1/runs/{id}/stop`), `loop-manager run permit <run> --attempt <n> --request <id> (--option <id> | --decline)`
+  (`POST /v1/runs/{id}/permission`) and `loop-manager run continue <run> --attempt <n> [--unsent send|withdraw]`
+  (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the operator, send its agent an
+  instruction, stop its turn or command, answer a permission request of its session and hand it back
+  ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's
   `attempt` as last seen: a run at another attempt answers `stale_attempt` and nothing changes. They print the answer
   (`accepted`, with the instruction's `key` and `state`; `returning` for a Continue that waits for the instructions
   to go in; `stale_attempt`, `run_terminal`, `no_live_session` for an instruction to a step with no live AI session,
-  `not_manual` for a Continue of a run not taken over, `unsent_input` with the instructions not yet taken in) and
-  exit 1 unless it is `accepted` or `returning`.
+  `nothing_to_stop` for a Stop with no turn in flight and no command running, `already_answered`, `unknown_request`
+  or `unknown_option` for an answer, `not_manual` for a Continue of a run not taken over, `unsent_input` with the
+  instructions not yet taken in) and exit 1 unless it is `accepted` or `returning`.
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
@@ -213,8 +217,8 @@ requests.
   gives the outcome of an `await` step (`loop-manager run resolve`), by hand or through a bridge from another system
   (demo 3's `demos/3-review-gate/bridge.sh` from GitHub, with an idempotency key per round); the skill `awaiting` of the
   loop-manager plugin for Claude Code and Codex (`plugins/loop-manager/`) shows a user's agent the runs that wait and passes on the
-  user's outcome or cancel. A human answers no permission request: the harness decides them from the config
-  ([config](../design/config.md#permissions)).
+  user's outcome or cancel. Under loop-manager a human answers no permission request: the harness decides them from
+  the config, and the policy declines what reaches loop-manager ([config](../design/config.md#permissions)).
 - The state of a run shows each attempt's `session`: the harness's own session reference (claude and
   codex `{session_id, cwd, home?}`). After the run a human may open that conversation
   with the harness's own tools.
@@ -237,6 +241,14 @@ requests.
   harness has not taken in needs a choice: `--unsent send` (`unsent: "send"`, `/lm-continue send`) hands the run back
   once they are in, `--unsent withdraw` takes back those loop-manager still holds, never to be sent, and hands it back
   now; without one the answer is `unsent_input` with the instructions, and nothing changes.
+- A human stops what works in a run (`loop-manager run stop <id> --attempt <n>`, `POST /v1/runs/{id}/stop`), which
+  takes a run under loop-manager over first: a turn in flight is cancelled through its session and the agent's
+  process stays (`manual.stop` is `pending` until the turn ends; a harness that ignores the cancel leaves it so), and
+  the command of an exec step is stopped, its outcome `fail` applied on Continue. With no turn in flight and no
+  command running the answer is `nothing_to_stop`.
+- The permission requests of the session of a manual run wait for the human: the run's state lists them as
+  `permissions`, and `loop-manager run permit <id> --attempt <n> --request <r> --option <o>` (or `--decline`; `POST
+  /v1/runs/{id}/permission`) answers one, once. On Continue the policy declines those left open.
 
 ## Verified by
 

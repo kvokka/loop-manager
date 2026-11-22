@@ -17,6 +17,7 @@ mod lineage;
 mod machine;
 mod manual;
 mod msg;
+mod permissions;
 mod prompts;
 mod queue;
 mod read;
@@ -150,6 +151,13 @@ impl Handler for RunHandler {
             Msg::Takeover { run, attempt } => return self.takeover(tx, &run, attempt),
             Msg::Continue { run, attempt, unsent } => return self.hand_back(tx, &run, attempt, unsent),
             Msg::Instruct { run, attempt, text } => return self.instruct(tx, &run, attempt, &text),
+            Msg::Stop { run, attempt } => return self.stop(tx, &run, attempt),
+            Msg::Permission {
+                run,
+                attempt,
+                request,
+                option,
+            } => return self.permit(tx, &run, attempt, &request, option.as_deref()),
             Msg::Fire { project, rig, trigger } => return self.fire_by_hand(tx, &project, &rig, &trigger),
             Msg::SwitchTrigger {
                 project,

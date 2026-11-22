@@ -111,6 +111,25 @@ pub enum RunCommand {
         control: Control,
         text: String,
     },
+    /// Stop the turn in flight of the run's session, whose process lives on, or the command of its exec step; a run
+    /// under loop-manager is taken over first. Prints `accepted`, or `stale_attempt`, `run_terminal` or
+    /// `nothing_to_stop` (no turn is in flight and no command runs).
+    Stop(Control),
+    /// Answer a permission request the run's session waits on (`permissions` in `run show`). Prints `accepted`, or
+    /// `stale_attempt`, `run_terminal`, `already_answered`, `unknown_request` or `unknown_option`.
+    Permit {
+        #[command(flatten)]
+        control: Control,
+        /// The request's `id`.
+        #[arg(long)]
+        request: String,
+        /// The `id` of the option to select.
+        #[arg(long, required_unless_present = "decline", conflicts_with = "decline")]
+        option: Option<String>,
+        /// Decline the request.
+        #[arg(long)]
+        decline: bool,
+    },
 }
 
 /// What a Continue does with the instructions the harness has not taken in.
@@ -121,7 +140,7 @@ pub enum UnsentChoice {
     Withdraw,
 }
 
-/// A takeover, a Continue or an instruction of a run.
+/// A takeover, a Continue, an instruction, a Stop or an answer to a permission request of a run.
 #[derive(clap::Args)]
 pub struct Control {
     id: String,
@@ -266,16 +285,7 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             summary,
             data,
             idempotency,
-        } => {
-            let data = match super::finish::data_arg(data) {
-                Ok(data) => data,
-                Err(e) => return Ok(super::fail(json, "usage", &e)),
-            };
-            let body = json!({ "step": step, "outcome": super::finish::outcome(result, summary, data) });
-            let path = run_path(&id, "/resolve");
-            let reply = client.request("POST", &path, Some(&body), idempotency.as_deref());
-            print(json, &reply.await?);
-        }
+        } => return resolve(client, json, (&id, step, idempotency), (result, summary, data)).await,
         RunCommand::Takeover(control) => return self::control(client, json, "/takeover", control, json!({})).await,
         RunCommand::Continue { control, unsent } => {
             return self::control(client, json, "/continue", control, json!({ "unsent": unsent })).await;
@@ -283,12 +293,40 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
         RunCommand::Say { control, text } => {
             return self::control(client, json, "/instruct", control, json!({ "text": text })).await;
         }
+        RunCommand::Stop(control) => return self::control(client, json, "/stop", control, json!({})).await,
+        RunCommand::Permit {
+            control,
+            request,
+            option,
+            decline: _,
+        } => {
+            let body = json!({ "request": request, "option": option });
+            return self::control(client, json, "/permission", control, body).await;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
 
-/// A takeover, a Continue or an instruction, `body` with the attempt added: exits 0 when it was accepted or the run
-/// is returning, 1 when it was refused.
+/// `run resolve`: the outcome of the await step `step` of run `id`.
+async fn resolve(
+    client: &Client,
+    json: bool,
+    (id, step, idempotency): (&str, String, Option<String>),
+    (result, summary, data): (super::Verdict, String, Option<String>),
+) -> Result<ExitCode, ClientError> {
+    let data = match super::finish::data_arg(data) {
+        Ok(data) => data,
+        Err(e) => return Ok(super::fail(json, "usage", &e)),
+    };
+    let body = json!({ "step": step, "outcome": super::finish::outcome(result, summary, data) });
+    let path = run_path(id, "/resolve");
+    let reply = client.request("POST", &path, Some(&body), idempotency.as_deref());
+    print(json, &reply.await?);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One command of the operator, `body` with the attempt added: exits 0 when it was accepted or the run is returning,
+/// 1 when it was refused.
 async fn control(
     client: &Client,
     json: bool,

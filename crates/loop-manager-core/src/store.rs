@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 28;
+const VERSION: i32 = 29;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -117,6 +117,8 @@ CREATE TABLE attempts (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     step TEXT NOT NULL DEFAULT '1',
     skipped INTEGER NOT NULL DEFAULT 0,
+    -- When the operator asked to stop the attempt's turn or command; NULL: not asked, or it stopped.
+    stop_ms INTEGER,
     PRIMARY KEY (run, n)
 );
 CREATE INDEX attempts_instance ON attempts (instance);

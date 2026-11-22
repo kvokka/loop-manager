@@ -31,6 +31,15 @@ pub(super) fn busy(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<bool, Error> 
     )?)
 }
 
+/// A turn of the session of the attempt is in flight: a prompt of it is `acked`.
+pub(super) fn in_turn(tx: &Tx<'_>, run: &str, attempt: u32) -> Result<bool, Error> {
+    Ok(tx.sql().query_row(
+        "SELECT EXISTS (SELECT 1 FROM prompts WHERE run = ?1 AND attempt = ?2 AND state = 'acked')",
+        params![run, attempt],
+        |r| r.get(0),
+    )?)
+}
+
 /// Records the decision to send prompt `n` of the attempt; a decision taken again (after a crash) replaces it. The
 /// history gets the record `prompt` (docs/design/event-model.md, "History").
 pub(super) fn intent(

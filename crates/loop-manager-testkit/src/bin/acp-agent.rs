@@ -14,6 +14,8 @@
 //!   `model` and `thought_level`;
 //! - `--background`: after the command, a turn leaves `sleep 600` running as a background terminal that advertises
 //!   `cancel`; `terminal/cancel` kills it, then the session goes idle without background;
+//! - `--permission`: before the command, `session/request_permission` offers `allow` (`allow_once`) and `reject`
+//!   (`reject_once`); the command runs only when `allow` is selected, and a `session/cancel` takes the request back;
 //! - `--subagent`: after the echo, a child session `<session>-sub` reports an `agent_message_chunk` `Sub: <prompt>`;
 //! - `--unsupported`: answers `initialize` with `-32022`;
 //! - `--v1`: serves only protocol version 1, answering any `initialize` with `protocolVersion: 1`.
@@ -315,7 +317,9 @@ impl Worker {
                     schema::SessionUpdate::AgentMessageChunk(chunk),
                 ))?;
         }
-        if let Some(command) = self.script.command.clone() {
+        if let Some(command) = self.script.command.clone()
+            && (!self.script.flag("--permission") || self.permitted(&command, turn.epoch).await)
+        {
             self.run_command(&command, turn.epoch).await?;
         }
         if self.cancelled(turn) {
@@ -355,6 +359,30 @@ impl Worker {
                 .capabilities(capabilities),
         ))?;
         Ok(id)
+    }
+
+    /// Asks the client for a permission to run the command, offering `allow` and `reject`: whether `allow` was
+    /// selected. A `session/cancel` meanwhile takes the request back.
+    async fn permitted(&mut self, command: &str, epoch: u64) -> bool {
+        let id = self.script.state().next_id("tool");
+        let request = serde_json::json!({ "sessionId": self.session_id, "title": command,
+            "options": [{ "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+                { "optionId": "reject", "name": "Reject", "kind": "reject_once" }],
+            "subject": { "type": "tool_call", "toolCall": { "toolCallId": id, "rawInput": { "command": command } } } });
+        let Ok(request) = serde_json::from_value::<schema::RequestPermissionRequest>(request) else {
+            return false;
+        };
+        let sent = self.connection.send_request(request);
+        let cancel = sent.cancellation_handle();
+        let answer = tokio::select! {
+            answer = sent.block_task() => answer.ok(),
+            _ = self.epoch.wait_for(|current| *current != epoch) => {
+                let _ = cancel.cancel();
+                None
+            }
+        };
+        let selected = answer.map(|a| serde_json::to_value(a.outcome).unwrap_or_default());
+        selected.is_some_and(|o| o["outcome"] == "selected" && o["optionId"] == "allow")
     }
 
     /// Runs the command as a tool call.
@@ -559,10 +587,11 @@ async fn serve_v1() -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    const FLAGS: [&str; 5] = [
+    const FLAGS: [&str; 6] = [
         "--system-prompt",
         "--options",
         "--background",
+        "--permission",
         "--subagent",
         "--unsupported",
     ];

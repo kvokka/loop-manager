@@ -81,6 +81,16 @@ impl ScriptedDriver {
         self.lock().prompts_in_turn = true;
     }
 
+    /// From now on the harness ignores `cancel_turn`: the turn goes on and no prompt it holds is dropped.
+    pub fn deaf_to_cancel(&self) {
+        self.lock().deaf = true;
+    }
+
+    /// How many times the core asked to cancel a turn so far.
+    pub fn cancels(&self) -> usize {
+        self.lock().cancels
+    }
+
     /// Every answer the core gave to a permission request so far, in order: the request and the option (`None`:
     /// declined).
     pub fn permission_answers(&self) -> Vec<(String, Option<String>)> {

@@ -135,11 +135,13 @@ that agent's [profile](#profiles).
 - **Permissions.** A `session/request_permission` is `permission.requested` with an id of the instance (`p1`, `p2`,
   …), the request's title as `tool`, the tool call's id and raw input, and the options it offers; it waits for
   `answer_permission`, which selects an option or declines it (the agent's `reject_once` option, else `cancelled`).
-  The core's policy declines every request at once: no person answers a run's request (decision 116). An agent that
+  Under loop-manager the core's policy declines every request at once; the request of a run an operator has taken
+  over waits for the operator's answer ([contracts 6.1](contracts.md#61-states)). An agent that
   takes its request back (`$/cancel_request`, after `session/cancel`) gets `cancelled`, and the driver reports
   `permission.withdrawn`; a later answer is nothing. A request that comes before the instance started is declined by
   the driver itself.
-- **Stopping work.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. When an attempt ends,
+- **Stopping work.** `cancel_turn` is `session/cancel` and `close_session` is `session/close`. The operator's Stop of
+  a turn is `cancel_turn` alone: the agent's process and session stay, and an agent that ignores the cancel goes on. When an attempt ends,
   the core's `stop` effect (these two) and the `stop_instance` of its instance run on separate queues; with a process
   per session the agent may get the EOF on its stdin, then the group's `SIGTERM`, before or instead of
   `session/cancel`. `stop_background` cancels the background work of the session's last `idle` that the agent made
@@ -188,10 +190,13 @@ The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`
 prompt and runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, which sees the session's system prompt and
 config options in its environment; its sessions die with its process. Flags make it advertise `systemPrompt`
 (`--system-prompt`), offer `model` and `effort` options (`--options`), leave a cancellable background terminal after a
-turn (`--background`), answer `initialize` with `-32022` (`--unsupported`) or speak only protocol version 1 (`--v1`).
+turn (`--background`), ask a permission before the command and run it only when `allow` is selected (`--permission`),
+answer `initialize` with `-32022` (`--unsupported`) or speak only protocol version 1 (`--v1`).
 `crates/loop-manager/tests/e2e/acp.rs` runs formulas on it: through the finisher, with the role, model and effort,
 with a background terminal cancelled, killed in a turn (`harness_crash`, then the resume finds no session), cancelled
 in a turn; and checks the version refusals, the capability checks and the redacted trace.
+`crates/loop-manager/tests/e2e/manual.rs` runs it under an operator: a request declined under loop-manager, one the
+operator allows, and a Stop that cancels the turn while the agent's process stays.
 `crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates, `src/tests.rs` the driver's calls
 against an agent in the test's process.
 

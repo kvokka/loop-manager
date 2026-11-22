@@ -75,14 +75,17 @@ Shared objects:
   since when, the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`,
   `check_refused`, or null), and whether a Continue waits for the operator's input to go in (6.1); `manual` is null
   under `lm`. The read API adds `manual.unsent`: the operator's prompts of the live attempt the harness has not taken
-  in, `[{key, text, state}]` with `state` `queued`, `intent` or `sent` (6.4), oldest first. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
+  in, `[{key, text, state}]` with `state` `queued`, `intent` or `sent` (6.4), oldest first, and `manual.stop`:
+  `pending` from the operator's Stop until the turn or the command ends, else null. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`{input_tokens, output_tokens}`, summed
   over every attempt) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the
   oldest closure of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the
   formula's checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`
-  return sets 1; `attempt` stays the attempt of the session).
+  return sets 1; `attempt` stays the attempt of the session) and `permissions` (the permission requests of the live
+  attempt that wait for the operator's answer, `[{id, tool, tool_use_id, input, options}]` as in 4.3, oldest first;
+  empty under `lm`, whose requests the policy answers at once).
 - `Failure`: `{kind, text, scope, retry_at, retried_by_harness, source, raw, account, provider_model}`: `kind` from
   see 4.4, `text` set only for `unknown`, `scope` one of `session | instance | account | provider_model | run | rig`,
   `retry_at` time or null, `source` one of `harness | adapter | core`, `raw` the harness text cut to 4 KiB,
@@ -118,9 +121,12 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.cancelled` | `{run, reason, usage}` |
 | `run.taken_over` | `{run}`; an operator took the run over (6.1): its orchestration stands until `run.handed_back` |
 | `run.instructed` | `{run, key, state: "queued"\|"intent"}`; the operator's prompt `key` to the run's session (6.1): `queued` while loop-manager holds it for the turn's end, `intent` when it goes now |
+| `run.stop_requested` | `{run, target: "turn"\|"command"}`; the operator stopped the turn in flight of the run's session or the command of its exec step (6.1) |
+| `run.permission_requested` | `{run, request: {id, tool, tool_use_id, input, options}}`; a permission request of the session of a manual run (4.3) waits for the operator's answer (6.1) |
+| `run.permission_answered` | `{run, request, by: "operator"\|"harness", option}`; the operator answered the request `request` of a manual run with `option` (null: declined), or the harness took it back (`by: harness`, `option` null) |
 | `run.handed_back` | `{run, deferred, unsent: {withdrawn: [key], kept: [key]}}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied; `unsent` names the operator's prompts the Continue took back and those the harness still holds, which stay part of the attempt |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
-| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the policy declined a permission request of the agent (4.3) at once, so nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` why it was declined |
+| `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the policy declined a permission request of the agent (4.3): at once under `lm`, and on Continue each one the operator left open, so nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` why it was declined |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
 | `trigger.skipped` | `{trigger, cause_seq, reason: "overlap"\|"input_unresolved"\|"depth"\|"nothing_ready"\|"rejected", detail}` |
 | `trigger.switched` | `{trigger, enabled}`; the operator switched a trigger on a rig off or back on (`POST /v1/triggers/disable`, `/enable`): off, neither its schedule nor its events fire it, a hand firing still does, and the switch outlives restarts and reloads |
@@ -367,7 +373,8 @@ never retries a turn, parks or decides an outcome (adapter duties in 4.4–4.6 a
 semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fails with a typed failure (4.4).
 `send_prompt` returns once the request is written: the harness holds a prompt sent while a turn is in flight, and
 inserts it into that turn when `prompts_in_turn` is true, else after the turn ends; the insertion is `prompt.acked`, a
-drop `prompt.dropped` (4.3). A permission request of a session waits for `answer_permission`. The interface has no
+drop `prompt.dropped` (4.3); `cancel_turn` carries the operator's Stop as well (6.1). A permission request of a session
+waits for `answer_permission`, given by the core's policy or by the operator of a manual run. The interface has no
 model change inside a live session; a human joins a live session only through the core, whose `send_prompt` carries
 an operator's instruction as any prompt (6.1, [frontends](../api/frontends.md#humans-and-runs)).
 
@@ -433,8 +440,8 @@ the stop reason of a turn and a permission request reach the policy and the obse
 | `state` | `state: running \| idle`, `background: bool` | "idle without background" = `idle` and `background == false`; the adapter applies the harness rule. `idle` with `background` after the turn ended and with the outcome declared makes the core call `stop_background` (6.3) |
 | `usage` | `input_tokens, output_tokens, rate_limit: {utilization, resets_at} \| null` | the core adds the tokens (increments) to the attempt; keeps the last `rate_limit` per account key (`account:<harness>/<id>`, one row, replaced by each report); still activity for the watchdog |
 | `retrying` | `attempt, delay, text` | in `running`: journals `run.retrying` (`next_retry_at` = now + `delay`) and sets the silence deadline to silence + `delay` (an announced pause is not silence) |
-| `permission.requested` | `id, tool, tool_use_id, input, options: [{id, name, kind}]` | `id` names the request within the instance, `tool` is the harness's title of it, `kind` of an option `allow_once`, `allow_always`, `reject_once`, `reject_always` or the harness's own. For the attempt of the session in any state of the run (a background tool may ask while it is `finishing`): the policy declines it at once (`answer_permission` with no option, the harness's `reject_once`, else `cancelled`) and journals `run.permission_denied`; still activity for the watchdog in `running` |
-| `permission.withdrawn` | `id` | the harness took the request back (after a `session/cancel`): no answer is awaited |
+| `permission.requested` | `id, tool, tool_use_id, input, options: [{id, name, kind}]` | `id` names the request within the instance, `tool` is the harness's title of it, `kind` of an option `allow_once`, `allow_always`, `reject_once`, `reject_always` or the harness's own. For the attempt of the session in any state of the run (a background tool may ask while it is `finishing`): under `lm` the policy declines it at once (`answer_permission` with no option, the harness's `reject_once`, else `cancelled`) and journals `run.permission_denied`; a manual run's waits for the operator (6.1); still activity for the watchdog in `running` |
+| `permission.withdrawn` | `id` | the harness took the request back (after a `session/cancel`): no answer is awaited; one still open is answered `by: harness` (`run.permission_answered`) |
 | `activity` | `tool_running: bool` | watchdog only: moves the silence deadline, kept in memory, no transaction; the adapter coalesces it to at most one per second per session |
 | `failure` | `Failure` (see 1.3) | ends the attempt with `run.attempt_failed`; a failed single tool call is never sent (the harness hands it back to the model), `tool_failure` means a tool is gone for the whole session (4.4) |
 | `exited` | `code, signal` | the instance process is gone: every session on it gets `harness_crash` unless a failure was already reported |
@@ -813,8 +820,10 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   an attempt of an earlier step is stale.
 
 Manual mode. An operator takes a run over (`POST /v1/runs/{id}/takeover`, `loop-manager run takeover <id> --attempt
-<n>`), sends its session instructions (`POST /v1/runs/{id}/instruct`, `loop-manager run say`) and hands it back (`POST
-/v1/runs/{id}/continue`, `loop-manager run continue`). It is no state of its own: the run keeps its state, its work in
+<n>`), sends its session instructions (`POST /v1/runs/{id}/instruct`, `loop-manager run say`), stops its turn or
+command (`POST /v1/runs/{id}/stop`, `loop-manager run stop`), answers the permission requests of its session (`POST
+/v1/runs/{id}/permission`, `loop-manager run permit`) and hands it back (`POST /v1/runs/{id}/continue`, `loop-manager
+run continue`). It is no state of its own: the run keeps its state, its work in
 flight keeps its course, and `control` of the `RunView` is `manual` ([invariant 21](invariants.md)).
 
 - Each command carries `attempt`, the attempt of the run the client saw, and goes through the single writer with its
@@ -836,6 +845,25 @@ flight keeps its course, and `control` of the `RunView` is `manual` ([invariant 
   turn works on it: the end of the turn before and its paused step timeout are cleared, the decision on it is no
   longer awaited (one that comes later is refused, 3.4) and an event deferred for it (`settled`, `decision`) goes; a
   declared outcome stays. The operator's prompts do not count toward the remarks ceiling.
+- A Stop (`{attempt}`) takes a run under `lm` over first, as an instruction does, and stays manual whatever the
+  answer. In an `ai` step `running` with a turn in flight (a prompt of the attempt `acked`, 6.4) it records `stop`
+  (`target: turn`), journals `run.stop_requested` and cancels the turn through its session (`cancel_turn`, again on a
+  repeat); `manual.stop` is `pending` until the turn ends, however it ends. The harness's process is never stopped for
+  it, nor the attempt ended: a harness that ignores the cancel leaves the Stop `pending`. The turn's end, `cancelled`
+  as any other, is deferred (`settled`) for Continue; the cancel drops the prompts the harness holds (`withdrawn` by
+  the harness, 6.4), while those loop-manager holds (`queued`) go at the end of the stopped turn as at any boundary. In
+  an exec step `running` it stops the command (`target: command`); the stopped command's outcome is `fail` with the
+  summary `stopped by the operator` and `data: {exit_code: null, stdout, stderr}`, no attempt failure, and it waits
+  for Continue (`outcome`) like any outcome while manual. Between turns, while a step check script runs, and in a step
+  with no process (`drain`, `formula`, `await`, a run not started) the answer is `nothing_to_stop`; the background a
+  session left is not touched either.
+- A permission request of the session of a manual run waits for the operator, however long (`permissions` of the read
+  API, `run.permission_requested`); under `lm` the policy answers each at once (4.3), so a request that comes after
+  the takeover is the operator's. An answer (`{attempt, request, option}`, `option` null to decline) takes no run
+  over. The first answer to a request is the one (`run.permission_answered`, `by: operator`); a later one, or one to a
+  request the harness took back (`by: harness`), gets `already_answered`; `unknown_request` and `unknown_option` name
+  what the attempt does not have. On Continue the policy declines each request still open, as under `lm`
+  (`run.permission_denied`). The end of the attempt, a daemon restart among them, closes its requests.
 - The takeover commits, with the history record `control` and `run.taken_over`, before anything else happens. The
   run's deadlines go (`state`, silence, `decide`); the scheduler passes a manual run over (a queued one waits with
   `waiting_for = "manual"`), and a started one keeps its slot and its place in its rig. Up the chain of `parent_run`,
@@ -932,6 +960,8 @@ cancel); a pass or a failure of the parent leaves them alone.
 | any non-terminal, manual | Continue at the current `attempt` (6.1), no operator's input out or `withdraw` | where the deferred event leads, in the same attempt | `run.handed_back`; whole budgets, then the deferred event; `withdraw` withdraws the `queued` prompts |
 | any non-terminal, manual | Continue with the operator's input out and no `unsent` / `send` | the same state, manual / manual and returning | `unsent_input`, nothing else / once no input is out, on `prompt.acked` or `prompt.dropped`, the Continue above |
 | any non-terminal | instruction at the current `attempt` (6.1) | the same state, manual | takeover if under `lm`; with a live AI session the prompt is `queued` or `intent` with its effect and `run.instructed`, else `no_live_session` |
+| any non-terminal | Stop at the current `attempt` (6.1) | the same state, manual | takeover if under `lm`; a turn in flight: `run.stop_requested{turn}` and `cancel_turn`, `manual.stop` pending until `turn.ended`; an exec command: `run.stop_requested{command}` and its stop, outcome `fail` deferred; else `nothing_to_stop` |
+| any live, manual | `permission.requested` | the same state | `run.permission_requested`; the request waits for the operator's answer (`run.permission_answered`) or the harness's `permission.withdrawn`; Continue declines it (`run.permission_denied`) |
 | `running`, manual or not | `prompt.acked` of an operator's prompt | `running` | the turn's end, the paused step timeout, the decision awaited and the deferred `settled` or `decision` go; under `lm` the step and silence clocks run again |
 | `starting`, `running` | turn ended, or `prompt.dropped`, the session holding no prompt | the same | the oldest `queued` prompt goes `intent`, with its effect |
 

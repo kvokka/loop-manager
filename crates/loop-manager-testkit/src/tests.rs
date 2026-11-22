@@ -131,6 +131,11 @@ async fn a_hang_sends_nothing_after_the_ack_until_cancelled() {
             stop_reason: StopReason::Cancelled
         })
     );
+    let idle = Normalized::State {
+        state: SessionState::Idle,
+        background: false,
+    };
+    assert_eq!(next(&mut s.events).await, Some(idle));
     // With no scenario queued, the next prompt hangs right after the ack.
     s.prompt(2).await;
     assert_eq!(next(&mut s.events).await, Some(Normalized::PromptAcked { key: key(2) }));

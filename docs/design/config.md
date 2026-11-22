@@ -84,26 +84,29 @@ prints goes into the step's result in the journal, so a command must not print a
 
 ### Permissions
 
-A run is unattended: nothing waits for a human, and every permission is decided by the harness from the config set
-before the start, in the `native.<harness>` block of any settings layer (the orchestrator, a project, a rig, an agent or
+A run under loop-manager is unattended: nothing waits for a human, and every permission is decided by the harness from
+the config set before the start, in the `native.<harness>` block of any settings layer (the orchestrator, a project, a rig, an agent or
 its variant, a formula's ai step). The defaults are permissive: claude runs in the permission mode `bypassPermissions`,
 codex with `approval_policy = "never"` beside `sandbox_mode = "danger-full-access"` ("Host inheritance"), the mode
-`agent-full-access`. What a stricter config does not allow is denied at once, and the agent sees the denial; each denial
-the adapter learns of is journaled as `run.permission_denied` ([contracts](contracts.md#13-payloads)).
+`agent-full-access`. What a stricter config does not allow comes to loop-manager as a permission request, which its
+policy declines at once, and the agent sees the denial; each denial is journaled as `run.permission_denied`
+([contracts](contracts.md#13-payloads)). There are no other policy settings. A run an operator has taken over is the
+exception: its session's requests wait for the operator's answer (`POST /v1/runs/{id}/permission`, `loop-manager run
+permit`), and on Continue the policy declines those still open ([contracts 6.1](contracts.md#61-states)).
 
 - claude: `native.claude.permission_mode` (or `permissions.defaultMode`), one of the modes `claude-agent-acp`
   offers: `default`, `acceptEdits`, `plan` and, by the model and the host, `auto` and `bypassPermissions`; then the
   rules `permissions.allow`, `deny` and `ask`, and the harness hooks `PermissionRequest` and `PreToolUse`. The mode
   is set on the session after it starts and again on every resume ([contracts 4.6](contracts.md#46-harness-specifics-the-contract-relies-on)).
   Outside `bypassPermissions`, what the rules do not allow, an `ask` rule included, comes to loop-manager as a
-  permission request, which it declines at once. `dontAsk` is never offered: an agent whose config names it is a load
+  permission request, which it declines at once (in a manual run, the operator answers it). `dontAsk` is never offered: an agent whose config names it is a load
   error naming the agent and the key, reported by `config check`, `doctor` and the daemon's start; `default` with
   the `permissions.allow` rules the agents need denies the rest the same way.
 - codex: `native.codex.approval_policy` and `sandbox_mode` choose the session's permission mode (the table below),
   which `codex-acp` applies on every turn; then the `PreToolUse` hook. The mode is set on the session after it starts
   and again on every resume ([contracts 4.6](contracts.md#46-harness-specifics-the-contract-relies-on)). Under
   `workspace-write` and `read-only`, what the sandbox does not allow comes to loop-manager as a permission request,
-  which it declines at once, under `never` too.
+  which it declines at once, under `never` too (in a manual run, the operator answers it).
 - A hook may ask loop-manager or another agent for the decision through the CLI or the MCP of loop-manager: the session
   environment carries `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the run has a
   bead, `LOOP_MANAGER_BEAD`.

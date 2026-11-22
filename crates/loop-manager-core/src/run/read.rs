@@ -59,7 +59,15 @@ impl Reader {
         let mut view = row.view();
         if row.manual {
             view["manual"]["unsent"] = json!(super::prompts::unsent(&conn, id, row.attempt)?);
+            let stop: bool = conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM attempts WHERE run = ?1 AND n = ?2 AND ended_ms IS NULL \
+                 AND stop_ms IS NOT NULL)",
+                params![id, row.attempt],
+                |r| r.get(0),
+            )?;
+            view["manual"]["stop"] = json!(stop.then_some("pending"));
         }
+        view["permissions"] = json!(super::permissions::open(&conn, id, row.attempt)?);
         view["project"] = json!(row.project);
         view["rig"] = json!(row.rig);
         view["correlation"] = json!(row.correlation);

@@ -25,6 +25,10 @@ impl RunHandler {
         for id in &instances {
             Self::stop_instance(tx, id, "recovery")?;
         }
+        // No request of those processes waits for an answer any more, and no turn or command of theirs for a stop.
+        tx.sql().execute("DELETE FROM permissions", [])?;
+        tx.sql()
+            .execute("UPDATE attempts SET stop_ms = NULL WHERE stop_ms IS NOT NULL", [])?;
         // A hook still queued may be running in its own process group, left by the dead daemon: it is killed by its
         // marker now, before it runs again — no effect of this daemon has started yet.
         let hooks: BTreeSet<String> = {
@@ -79,7 +83,7 @@ impl RunHandler {
             // What the attempt still had queued belongs to a process that is gone.
             tx.sql().execute(
                 "DELETE FROM effects WHERE key = ?1 AND json_extract(payload, '$.op') IN ('launch', \
-                'prompt', 'stop_background')",
+                'prompt', 'cancel', 'stop_background')",
                 [id],
             )?;
             let row = Row::load(tx, id)?;

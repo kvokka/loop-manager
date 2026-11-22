@@ -370,3 +370,26 @@ async fn an_instruction_and_a_continue_with_its_choice_from_the_cli() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn a_stop_and_an_answer_to_a_permission_request_from_the_cli() {
+    let d = Daemon::start(|_| {}).await;
+    let run = d.create("slow", None).await;
+    let attempt = d.until_state(&run, "running").await["attempt"].to_string();
+    let reply = |out: Output| {
+        let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+        (out.status.code(), reply["answer"].clone())
+    };
+    // No such request: the command says so by its exit; `--option` or `--decline` is required.
+    let permit = ["run", "permit", &run, "--attempt", &attempt, "--request", "p1"];
+    let out = d.cli(&[&permit[..], &["--decline", "--json"]].concat(), &[]);
+    assert_eq!(reply(out), (Some(1), json!("unknown_request")));
+    assert!(!d.cli(&permit, &[]).status.success());
+    let out = d.cli(&["run", "stop", &run, "--attempt", &attempt, "--json"], &[]);
+    assert_eq!(reply(out), (Some(0), json!("accepted")));
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(view["control"], "manual");
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}

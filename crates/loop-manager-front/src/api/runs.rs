@@ -1,9 +1,10 @@
-//! Runs: start a formula, list, state, cancel, the finisher, takeover, the operator's instructions and Continue
+//! Runs: start a formula, list, state, cancel, the finisher, takeover, the operator's instructions, Stop, answers to
+//! permission requests and Continue
 //! (docs/api/frontends.md, contracts 6).
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Control, Failed, Finished, Instructed, Keyed, Run, Started},
+    replies::{Control, Failed, Finished, Instructed, Keyed, Permitted, Run, Started, Stopped},
 };
 use axum::{
     Json,
@@ -305,5 +306,62 @@ pub(crate) async fn instruct(
     Body(InstructRun { attempt, text }): Body<InstructRun>,
 ) -> Reply {
     let msg = Msg::Instruct { run, attempt, text };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+/// Stops what works in the run: a turn in flight is cancelled through its session, whose process lives on, and
+/// `manual.stop` of the run view is `pending` until the turn ends; the command of an exec step is stopped and its
+/// outcome is `fail`, applied on Continue. A run under loop-manager is taken over first, as by `takeover`, and stays
+/// manual whatever the answer. Between turns, during a check script or in a step with no process the answer is
+/// `nothing_to_stop` (docs/design/contracts.md 6.1).
+#[utoipa::path(post, path = "/v1/runs/{id}/stop", request_body = ControlRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Stopped),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn stop(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(ControlRun { attempt }): Body<ControlRun>,
+) -> Reply {
+    let msg = Msg::Stop { run, attempt };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct PermitRun {
+    /// The attempt of the run the client saw (`attempt` of the run view).
+    attempt: u32,
+    /// The request's `id` in `permissions` of the run view.
+    request: String,
+    /// The `id` of one of the request's options; `null` declines the request.
+    option: Option<String>,
+}
+
+/// The operator's answer to a permission request a session of a manual run waits on (`permissions` of the run
+/// view): the first answer is the one; the request answered or taken back by the harness gets `already_answered`.
+/// Under loop-manager the policy answers every request at once (docs/design/config.md, Permissions).
+#[utoipa::path(post, path = "/v1/runs/{id}/permission", request_body = PermitRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Permitted),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn permit(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(PermitRun {
+        attempt,
+        request,
+        option,
+    }): Body<PermitRun>,
+) -> Reply {
+    let msg = Msg::Permission {
+        run,
+        attempt,
+        request,
+        option,
+    };
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }

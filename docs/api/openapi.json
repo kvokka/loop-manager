@@ -2160,6 +2160,114 @@
         }
       }
     },
+    "/v1/runs/{id}/permission": {
+      "post": {
+        "summary": "The operator's answer to a permission request a session of a manual run waits on (`permissions` of the run\nview): the first answer is the one; the request answered or taken back by the harness gets `already_answered`.\nUnder loop-manager the policy answers every request at once (docs/design/config.md, Permissions).",
+        "operationId": "permit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Permitted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{id}/resolve": {
       "post": {
         "summary": "Gives the outcome of the `await` step a run waits on (contracts 6.3).",
@@ -2238,6 +2346,114 @@
           },
           "409": {
             "description": "`rejected`: the run does not wait on that step, or the outcome is over its limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/stop": {
+      "post": {
+        "summary": "Stops what works in the run: a turn in flight is cancelled through its session, whose process lives on, and\n`manual.stop` of the run view is `pending` until the turn ends; the command of an exec step is stopped and its\noutcome is `fail`, applied on Continue. A run under loop-manager is taken over first, as by `takeover`, and stays\nmanual whatever the answer. Between turns, during a check script or in a step with no process the answer is\n`nothing_to_stop` (docs/design/contracts.md 6.1).",
+        "operationId": "stop",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stopped"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
             "content": {
               "application/json": {
                 "schema": {
@@ -3606,6 +3822,13 @@
             "type": "string",
             "description": "Since when."
           },
+          "stop": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`pending` from the operator's Stop until the turn or the command ends, else null."
+          },
           "unsent": {
             "type": "array",
             "items": {
@@ -3712,6 +3935,101 @@
           "token": {
             "type": "string",
             "description": "The attempt token of the session; a stale one is rejected."
+          }
+        }
+      },
+      "PermissionOption": {
+        "type": "object",
+        "description": "One answer a permission request offers.",
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`allow_once`, `allow_always`, `reject_once` or `reject_always`."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PermissionRequest": {
+        "type": "object",
+        "description": "A permission request of a session (docs/design/contracts.md 4.3).",
+        "required": [
+          "id",
+          "tool",
+          "input",
+          "options"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Names the request within the attempt: the `request` of an answer."
+          },
+          "input": {
+            "description": "The tool's input as the harness gives it: any JSON."
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionOption"
+            }
+          },
+          "tool": {
+            "type": "string",
+            "description": "The harness's title of the request."
+          },
+          "tool_use_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PermitRun": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "request"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt of the run the client saw (`attempt` of the run view).",
+            "minimum": 0
+          },
+          "option": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `id` of one of the request's options; `null` declines the request."
+          },
+          "request": {
+            "type": "string",
+            "description": "The request's `id` in `permissions` of the run view."
+          }
+        }
+      },
+      "Permitted": {
+        "type": "object",
+        "description": "The answer to the operator's answer to a permission request (docs/design/contracts.md 6.1).",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`; `stale_attempt`, `run_terminal`, `already_answered` (answered before, or taken back by the\nharness), `unknown_request` (no such request of the attempt) or `unknown_option` (the request offers no such\noption)."
           }
         }
       },
@@ -3837,7 +4155,8 @@
           "steps",
           "attempts",
           "usage",
-          "control"
+          "control",
+          "permissions"
         ],
         "properties": {
           "agent": {
@@ -3946,6 +4265,13 @@
               "null"
             ]
           },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionRequest"
+            },
+            "description": "The permission requests of the live attempt that wait for the operator's answer, oldest first; under\nloop-manager the policy answers each at once, so none waits."
+          },
           "project": {
             "type": "string"
           },
@@ -4035,6 +4361,19 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "Stopped": {
+        "type": "object",
+        "description": "The answer to a Stop (docs/design/contracts.md 6.1).",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`; `stale_attempt`, `run_terminal` or `nothing_to_stop` (no turn is in flight and no command of an exec\nstep runs: nothing was sent, the run is manual)."
           }
         }
       },

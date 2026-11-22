@@ -59,12 +59,12 @@ enum ExitDef {
 /// The longest text of an operator's prompt.
 const MAX_INSTRUCTION: usize = 64 * 1024;
 
-fn answer(a: &str) -> Value {
+pub(super) fn answer(a: &str) -> Value {
     json!({ "answer": a })
 }
 
 /// Why a command of a client that saw `attempt` does not apply to `row`.
-fn refusal(row: &Row, attempt: u32) -> Option<&'static str> {
+pub(super) fn refusal(row: &Row, attempt: u32) -> Option<&'static str> {
     if !row.live() {
         Some("run_terminal")
     } else if row.attempt != attempt {
@@ -190,6 +190,8 @@ impl RunHandler {
             "run.handed_back",
             json!({ "run": row.view(), "deferred": kind, "unsent": unsent }),
         )?;
+        // The requests the operator left open get the policy's answer, as under loop-manager.
+        Self::decline_open(tx, &row)?;
         // A failure or an outcome ended the step's work, and a prompt that renders arms its own wait.
         if !matches!(deferred, Some(Deferred::Failed | Deferred::Outcome | Deferred::Prepare)) {
             self.arm(tx, &row)?;
@@ -271,6 +273,53 @@ impl RunHandler {
             json!({ "run": row.view(), "key": key, "state": state }),
         )?;
         Ok(json!({ "answer": "accepted", "key": key, "state": state }))
+    }
+
+    /// The operator stops what works in `run`: a turn in flight is cancelled through its session, whose process lives
+    /// on, and `manual.stop` stays `pending` until the turn ends; the command of an exec step is stopped and its outcome
+    /// is `fail`. A run under loop-manager is taken over first, in the same transaction, whatever the answer. Between
+    /// turns, in a check script or a step with no process there is `nothing_to_stop`.
+    pub(super) fn stop(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32) -> Result<Value, Error> {
+        let row = Row::load(tx, run)?;
+        if let Some(refused) = refusal(&row, attempt) {
+            return Ok(answer(refused));
+        }
+        self.takeover(tx, run, attempt)?;
+        let row = Row::load(tx, run)?;
+        type Live = (Option<String>, Option<String>, String);
+        let live: Option<Live> = tx
+            .sql()
+            .query_row(
+                "SELECT handle, session, harness FROM attempts WHERE run = ?1 AND n = ?2 AND ended_ms IS NULL",
+                params![row.id, row.attempt],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((handle, session, harness)) = live.filter(|_| row.state == "running") else {
+            return Ok(answer("nothing_to_stop"));
+        };
+        let (target, dedupe, payload) = match (row.step_kind.as_str(), handle, session) {
+            ("exec", _, _) => (
+                "command",
+                format!("stop_exec:{}:operator", row.attempt),
+                json!({ "op": "stop_exec", "run": row.id, "attempt": row.attempt }),
+            ),
+            ("ai", Some(handle), Some(session)) if prompts::in_turn(tx, &row.id, row.attempt)? => {
+                let json = |v: &str| serde_json::from_str::<Value>(v).unwrap_or_default();
+                let payload = json!({ "op": "cancel", "run": row.id, "attempt": row.attempt, "harness": harness,
+                    "handle": json(&handle), "session": json(&session) });
+                ("turn", format!("cancel:{}:{}", row.attempt, tx.now_ms()), payload)
+            }
+            _ => return Ok(answer("nothing_to_stop")),
+        };
+        tx.sql().execute(
+            "UPDATE attempts SET stop_ms = ?3 WHERE run = ?1 AND n = ?2",
+            params![row.id, row.attempt, tx.now_ms()],
+        )?;
+        tx.effect(&row.id, &dedupe, &payload)?;
+        row.record(tx, "stop", json!({ "target": target }));
+        row.emit(tx, "run.stop_requested", json!({ "run": row.view(), "target": target }))?;
+        Ok(answer("accepted"))
     }
 
     /// An operator's prompt went into the session of `row` while it runs: a turn works on it, so no decision on the

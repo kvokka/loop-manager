@@ -25,6 +25,7 @@ mod git_cache;
 mod guides;
 mod history;
 mod lessons;
+mod manual;
 mod mcp;
 mod replies;
 mod review_gate;

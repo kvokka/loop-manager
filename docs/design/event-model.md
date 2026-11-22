@@ -92,7 +92,8 @@ all of them share.
   | `prompt` | the core decides to send a prompt, or takes an operator's instruction ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager; `operator`: an instruction), `text` |
   | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`queued`: loop-manager holds an instruction for the turn's end; `intent`: a `queued` one goes; `sent`, `acked`, `settled`, `withdrawn`); `by` with `withdrawn` (`harness`: the harness dropped it before it took it; `operator`: a Continue withdrew it; `attempt_end`: its attempt ended while loop-manager held it) |
   | `permission` | the harness asks for a permission | `id`, `tool`, `tool_use_id`, `input`, `options` |
-  | `permission_answer` | a permission request is answered | `id`, `by` (`policy`), `option` (absent: declined) |
+  | `permission_answer` | a permission request is answered, or the harness takes it back | `id`, `by` (`policy`: declined under loop-manager or on Continue; `operator`: answered in manual mode; `harness`: taken back), `option` (`null`: declined, or taken back) |
+  | `stop` | the operator's Stop is accepted ([contracts 6.1](contracts.md#61-states)) | `target` (`turn`: a turn in flight is cancelled; `command`: the command of an exec step is stopped) |
   | `exec_output` | the command of an exec step, or a step's check script, writes to its stdout or stderr: written by the runner of the command as the output comes, not by a transaction | `stream` (`stdout`, `stderr`), `text` (the output, invalid UTF-8 replaced), `check: true` for a check script's |
   | `outcome` | the finisher's outcome is accepted, or a step without a session (exec, drain, formula, await) has its outcome | `result`, `summary`, `data` |
   | `control` | an operator takes the run over, or hands it back ([contracts 6.1](contracts.md#61-states)) | `control` (`manual`, `lm`) |

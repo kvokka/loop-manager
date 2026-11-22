@@ -209,6 +209,22 @@ pub enum Msg {
         attempt: u32,
         text: String,
     },
+    /// The operator stops the turn of the session of `run` at `attempt`, or the command of its exec step; a run under
+    /// loop-manager is taken over first. The reply is `{"answer": "accepted"|"stale_attempt"|"run_terminal"|
+    /// "nothing_to_stop"}` (contracts 6.1).
+    Stop {
+        run: String,
+        attempt: u32,
+    },
+    /// The operator answers the permission request `request` of the session of `run` at `attempt`: `option` selects
+    /// one of its options, `None` declines it. The reply is `{"answer": "accepted"|"stale_attempt"|"run_terminal"|
+    /// "already_answered"|"unknown_request"|"unknown_option"}` (contracts 6.1).
+    Permission {
+        run: String,
+        attempt: u32,
+        request: String,
+        option: Option<String>,
+    },
 }
 
 /// What a Continue does with the operator's input the harness has not taken in.

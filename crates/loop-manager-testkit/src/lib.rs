@@ -65,6 +65,10 @@ struct State {
     stoppable: bool,
     /// Set by [`ScriptedDriver::inserts_in_turn`].
     prompts_in_turn: bool,
+    /// Set by [`ScriptedDriver::deaf_to_cancel`].
+    deaf: bool,
+    /// Calls of `cancel_turn`.
+    cancels: usize,
     /// Every call of `answer_permission`: the request and the option.
     permission_answers: Vec<(String, Option<String>)>,
     /// Calls of `stop_background`.
@@ -335,8 +339,14 @@ impl Driver for ScriptedDriver {
         instance: &'a InstanceHandle,
         session: &'a SessionRef,
     ) -> BoxFuture<'a, Result<(), Failure>> {
-        let playing = Self::live_session(&mut self.lock(), instance, session)
+        let mut state = self.lock();
+        state.cancels += 1;
+        if state.deaf {
+            return ready(Ok(()));
+        }
+        let playing = Self::live_session(&mut state, instance, session)
             .map(|s| (s.in_turn, s.playing.take(), std::mem::take(&mut s.held)));
+        drop(state);
         ready(playing.map(|(in_turn, playing, held)| {
             if let Some(playing) = playing {
                 playing.abort();
@@ -345,12 +355,17 @@ impl Driver for ScriptedDriver {
             for key in held {
                 self.emit(&instance.id, Some(session), Normalized::PromptDropped { key });
             }
-            // A real harness ends only a turn that is in flight; an idle session sees nothing.
+            // A real harness ends only a turn that is in flight, and comes to idle; an idle session sees nothing.
             if in_turn {
                 let ended = Normalized::TurnEnded {
                     stop_reason: StopReason::Cancelled,
                 };
                 self.emit(&instance.id, Some(session), ended);
+                let idle = Normalized::State {
+                    state: SessionState::Idle,
+                    background: false,
+                };
+                self.emit(&instance.id, Some(session), idle);
             }
         }))
     }

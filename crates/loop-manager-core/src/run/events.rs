@@ -151,17 +151,20 @@ impl RunHandler {
 
     fn session_event(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, event: Normalized) -> Result<(), Error> {
         // In every state of the run: a background tool may ask while it is `finishing` (contracts 4.3).
-        if let Normalized::PermissionRequested {
-            id,
-            tool,
-            tool_use_id,
-            input,
-            options,
-        } = &event
-        {
-            let request = json!({ "id": id, "tool": tool, "tool_use_id": tool_use_id, "input": input,
-                "options": options });
-            Self::permission_requested(tx, run, attempt, id, request)?;
+        match &event {
+            Normalized::PermissionRequested {
+                id,
+                tool,
+                tool_use_id,
+                input,
+                options,
+            } => {
+                let request = json!({ "id": id, "tool": tool, "tool_use_id": tool_use_id, "input": input,
+                    "options": options });
+                Self::permission_requested(tx, run, attempt, id, request)?;
+            }
+            Normalized::PermissionWithdrawn { id } => Self::permission_withdrawn(tx, run, attempt, id)?,
+            _ => {}
         }
         let Some(mut row) = Self::current(tx, run, attempt)? else {
             return Ok(());
@@ -230,8 +233,9 @@ impl RunHandler {
                     StopReason::Cancelled => 2,
                     StopReason::Failed => 3,
                 };
+                // The operator's Stop, if one was asked, is done: the turn ended, however.
                 tx.sql().execute(
-                    "UPDATE attempts SET turn_ended = ?3 WHERE run = ?1 AND n = ?2",
+                    "UPDATE attempts SET turn_ended = ?3, stop_ms = NULL WHERE run = ?1 AND n = ?2",
                     params![row.id, attempt, ended],
                 )?;
                 // The turn's boundary: the oldest prompt loop-manager holds for it goes now.
@@ -267,41 +271,6 @@ impl RunHandler {
             Normalized::PromptDropped { key } => super::prompts::withdraw(tx, &row.id, row.attempt, *key, "harness"),
             _ => Ok(()),
         }
-    }
-
-    /// The permission request `request` (`{id, tool, tool_use_id, input, options}`) of the session of `attempt`: the
-    /// policy answers it at once and declines it (docs/design/config.md, Permissions); the denial is told as
-    /// `run.permission_denied`. A request already recorded is no news.
-    fn permission_requested(tx: &mut Tx<'_>, run: &str, attempt: u32, id: &str, request: Value) -> Result<(), Error> {
-        let answer = json!({ "by": "policy", "option": null });
-        let added = tx.sql().execute(
-            "INSERT OR IGNORE INTO permissions (run, attempt, id, body, answer) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![run, attempt, id, request.to_string(), answer.to_string()],
-        )?;
-        if added == 0 {
-            return Ok(());
-        }
-        let row = Row::load(tx, run)?;
-        row.record(tx, "permission", request.clone());
-        row.record(
-            tx,
-            "permission_answer",
-            json!({ "id": id, "by": "policy", "option": null }),
-        );
-        let (harness, handle): (String, Option<String>) = tx.sql().query_row(
-            "SELECT harness, handle FROM attempts WHERE run = ?1 AND n = ?2",
-            params![run, attempt],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let handle: Value = handle.and_then(|h| serde_json::from_str(&h).ok()).unwrap_or_default();
-        // A queue of its own: the answer does not wait behind a launch or a stop of the run.
-        let payload = json!({ "op": "permit", "run": run, "attempt": attempt, "harness": harness, "handle": handle,
-            "request": id, "option": null });
-        tx.effect(&format!("permit:{run}"), &format!("{attempt}:{id}"), &payload)?;
-        let data = json!({ "run": row.view(), "tool": request["tool"], "tool_use_id": request["tool_use_id"],
-            "input": request["input"], "reason": "loop-manager answers no permission request of a run" });
-        row.emit(tx, "run.permission_denied", data)?;
-        Ok(())
     }
 
     /// Idle without background: a turn that ended settles; one that has not ended yet is no news.

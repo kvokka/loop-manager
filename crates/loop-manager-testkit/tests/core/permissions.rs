@@ -1,16 +1,18 @@
-//! Permission requests and the delivery of prompts the harness holds (docs/design/contracts.md 4.3, 6.4): the core
-//! answers a request by the policy, and a turn's end settles only the prompts the harness took in.
+//! Permission requests and the delivery of prompts the harness holds (docs/design/contracts.md 4.3, 6.1, 6.4): the
+//! core answers a request by the policy under loop-manager, a manual run's waits for the operator, and a turn's end
+//! settles only the prompts the harness took in.
 
 use crate::common;
 
 use common::{Hanging, POLICY, World, hollow_turn, last, world_with};
 use loop_manager_core::{
     driver::{Normalized, PermissionOption, PromptKey, StopReason},
-    run::{Decision, HookRunner, Msg, Outcome, Verdict},
+    run::{Decision, HookRunner, Msg, Outcome, Reader, Verdict},
 };
 use loop_manager_testkit::Step;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
+use tokio::sync::Notify;
 
 fn requested(id: &str) -> Step {
     Step::Emit(Normalized::PermissionRequested {
@@ -135,4 +137,161 @@ async fn a_turn_end_leaves_a_held_prompt_and_a_dropped_one_is_withdrawn() {
     assert_eq!(withdrawn["by"], "harness");
     let events = w.events(&run, Duration::ZERO).await;
     assert_eq!(last(&events, "run.state_changed")["to"], "running");
+}
+
+/// The core's answer to the operator's `option` (`None`: decline) for the request `request` of `run` at `attempt`.
+async fn permit(w: &World, run: &str, attempt: u32, request: &str, option: Option<&str>) -> Value {
+    let msg = Msg::Permission {
+        run: run.into(),
+        attempt,
+        request: request.into(),
+        option: option.map(str::to_owned),
+    };
+    w.core.send(None, msg).await.unwrap()["answer"].clone()
+}
+
+/// Takes `run` over at attempt 1.
+async fn take_over(w: &World, run: &str) {
+    let msg = Msg::Takeover {
+        run: run.into(),
+        attempt: 1,
+    };
+    assert_eq!(w.core.send(None, msg).await.unwrap()["answer"], "accepted");
+}
+
+/// The state of `run` as `GET /v1/runs/{id}` gives it.
+fn view(w: &World, run: &str) -> Value {
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    reader.run(run).unwrap().unwrap()
+}
+
+/// A turn that asks for each of `ids` once `ask` is notified, then works for 100 hours.
+fn asking(ask: &Arc<Notify>, ids: &[&str]) -> Vec<Step> {
+    let mut steps = vec![Step::Emit(Normalized::TurnStarted), Step::Await(ask.clone())];
+    steps.extend(ids.iter().map(|id| requested(id)));
+    steps.push(Step::Wait(Duration::from_secs(360_000)));
+    steps
+}
+
+/// A request that comes after the takeover waits for the operator however long it takes: the policy gives no answer,
+/// the run view shows it. Unknown requests and options are refused; of two answers at once the first is the one, the
+/// other is `already_answered`, and the driver gets that one answer.
+#[tokio::test(start_paused = true)]
+async fn a_request_of_a_manual_run_waits_for_the_operator_whose_first_answer_is_the_one() {
+    let w = world_with(&[], Arc::new(common::Lost));
+    let ask = Arc::new(Notify::new());
+    w.driver.script(asking(&ask, &["p1"]));
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    take_over(&w, &run).await;
+    ask.notify_one();
+    tokio::time::sleep(Duration::from_secs(10 * 3600)).await;
+    assert_eq!(w.driver.permission_answers(), []);
+    let open = view(&w, &run)["permissions"].clone();
+    assert_eq!(
+        (&open[0]["id"], &open[0]["tool_use_id"], &open[0]["options"][0]["id"]),
+        (&json!("p1"), &json!("toolu_1"), &json!("allow"))
+    );
+    let events = w.events(&run, Duration::ZERO).await;
+    assert_eq!(last(&events, "run.permission_requested")["request"]["id"], "p1");
+    assert!(!events.iter().any(|(t, _)| t == "run.permission_denied"));
+
+    assert_eq!(permit(&w, &run, 1, "p9", None).await, "unknown_request");
+    assert_eq!(permit(&w, &run, 1, "p1", Some("deny")).await, "unknown_option");
+    assert_eq!(permit(&w, &run, 2, "p1", None).await, "stale_attempt");
+    let (allow, decline) = tokio::join!(
+        permit(&w, &run, 1, "p1", Some("allow")),
+        permit(&w, &run, 1, "p1", None)
+    );
+    let mut answers = [allow.clone(), decline];
+    answers.sort_by_key(ToString::to_string);
+    assert_eq!(answers, [json!("accepted"), json!("already_answered")]);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let given = if allow == "accepted" {
+        Some("allow".to_owned())
+    } else {
+        None
+    };
+    assert_eq!(w.driver.permission_answers(), [("p1".to_owned(), given)]);
+    assert_eq!(view(&w, &run)["permissions"], json!([]));
+    let answered = w.until(Some(&run), "run.permission_answered", 0).await;
+    assert_eq!(
+        (&answered["request"], &answered["by"]),
+        (&json!("p1"), &json!("operator"))
+    );
+    // Nothing is left open for the policy to decline on Continue.
+    let back = Msg::Continue {
+        run: run.clone(),
+        attempt: 1,
+        unsent: None,
+    };
+    assert_eq!(w.core.send(None, back).await.unwrap()["answer"], "accepted");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.driver.permission_answers().len(), 1);
+    assert!(w.all("run.permission_denied").is_empty());
+}
+
+/// A request the harness takes back is answered by it: the operator's answer comes too late. Continue has the policy
+/// decline the request still open, told as `run.permission_denied`.
+#[tokio::test(start_paused = true)]
+async fn a_request_the_harness_takes_back_is_answered_and_continue_declines_the_rest() {
+    let w = world_with(&[], Arc::new(common::Lost));
+    let ask = Arc::new(Notify::new());
+    let mut steps = asking(&ask, &["p1", "p2"]);
+    steps.insert(4, Step::Emit(Normalized::PermissionWithdrawn { id: "p1".into() }));
+    w.driver.script(steps);
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    take_over(&w, &run).await;
+    ask.notify_one();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(permit(&w, &run, 1, "p1", Some("allow")).await, "already_answered");
+    let open = view(&w, &run)["permissions"].clone();
+    assert_eq!((open.as_array().unwrap().len(), &open[0]["id"]), (1, &json!("p2")));
+    let answered = w.until(Some(&run), "run.permission_answered", 0).await;
+    assert_eq!(
+        (&answered["request"], &answered["by"]),
+        (&json!("p1"), &json!("harness"))
+    );
+    let records = w.history.cursor(&run, 1).read().unwrap();
+    let taken_back = records
+        .iter()
+        .find(|r| r["kind"] == "permission_answer" && r["id"] == "p1");
+    assert_eq!(taken_back.unwrap()["by"], "harness");
+    assert_eq!(w.driver.permission_answers(), []);
+
+    let back = Msg::Continue {
+        run: run.clone(),
+        attempt: 1,
+        unsent: None,
+    };
+    assert_eq!(w.core.send(None, back).await.unwrap()["answer"], "accepted");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.driver.permission_answers(), [("p2".to_owned(), None)]);
+    let denied = w.all("run.permission_denied");
+    assert_eq!(denied.len(), 1, "{denied:?}");
+    assert_eq!(view(&w, &run)["permissions"], json!([]));
+}
+
+/// A daemon dies while a request of a manual run waits for the operator: its process is gone, so is the request, and
+/// the run stays manual with the lost attempt's failure deferred.
+#[tokio::test(start_paused = true)]
+async fn a_restart_closes_the_open_requests_of_a_manual_run() {
+    let mut w = world_with(&[], Arc::new(common::Lost));
+    let ask = Arc::new(Notify::new());
+    w.driver.script(asking(&ask, &["p1"]));
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    take_over(&w, &run).await;
+    ask.notify_one();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(view(&w, &run)["permissions"][0]["id"], "p1");
+    w.restart().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let view = view(&w, &run);
+    assert_eq!(
+        (&view["permissions"], &view["control"], &view["manual"]["deferred"]),
+        (&json!([]), &json!("manual"), &json!("failed"))
+    );
+    assert_eq!(permit(&w, &run, 1, "p1", None).await, "unknown_request");
 }

@@ -53,6 +53,7 @@ mod step_repeat;
 mod step_repeat_exits;
 mod step_repeat_more;
 mod steps;
+mod stop;
 mod trigger_scope;
 mod triggers;
 mod watchdog;

@@ -64,6 +64,31 @@ pub(crate) struct Run {
     control: String,
     /// Set while `control` is `manual`.
     manual: Option<Manual>,
+    /// The permission requests of the live attempt that wait for the operator's answer, oldest first; under
+    /// loop-manager the policy answers each at once, so none waits.
+    permissions: Vec<PermissionRequest>,
+}
+
+/// A permission request of a session (docs/design/contracts.md 4.3).
+#[derive(ToSchema)]
+pub(crate) struct PermissionRequest {
+    /// Names the request within the attempt: the `request` of an answer.
+    id: String,
+    /// The harness's title of the request.
+    tool: String,
+    tool_use_id: Option<String>,
+    /// The tool's input as the harness gives it: any JSON.
+    input: Value,
+    options: Vec<PermissionOption>,
+}
+
+/// One answer a permission request offers.
+#[derive(ToSchema)]
+pub(crate) struct PermissionOption {
+    id: String,
+    name: String,
+    /// `allow_once`, `allow_always`, `reject_once` or `reject_always`.
+    kind: String,
 }
 
 /// A run an operator holds (docs/design/contracts.md 6.1).
@@ -78,6 +103,8 @@ pub(crate) struct Manual {
     returning: bool,
     /// The operator's prompts of the live attempt the harness has not taken in, oldest first.
     unsent: Vec<UnsentInput>,
+    /// `pending` from the operator's Stop until the turn or the command ends, else null.
+    stop: Option<String>,
 }
 
 /// An operator's prompt the harness has not taken in (docs/design/contracts.md 6.4).
@@ -206,6 +233,23 @@ pub(crate) struct Instructed {
     key: Option<String>,
     /// With `accepted`: `queued` (loop-manager holds it for the turn's end) or `intent` (it goes to the session now).
     state: Option<String>,
+}
+
+/// The answer to a Stop (docs/design/contracts.md 6.1).
+#[derive(ToSchema)]
+pub(crate) struct Stopped {
+    /// `accepted`; `stale_attempt`, `run_terminal` or `nothing_to_stop` (no turn is in flight and no command of an exec
+    /// step runs: nothing was sent, the run is manual).
+    answer: String,
+}
+
+/// The answer to the operator's answer to a permission request (docs/design/contracts.md 6.1).
+#[derive(ToSchema)]
+pub(crate) struct Permitted {
+    /// `accepted`; `stale_attempt`, `run_terminal`, `already_answered` (answered before, or taken back by the
+    /// harness), `unknown_request` (no such request of the attempt) or `unknown_option` (the request offers no such
+    /// option).
+    answer: String,
 }
 
 #[derive(ToSchema)]

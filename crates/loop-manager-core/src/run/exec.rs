@@ -123,6 +123,12 @@ impl Executor for RunExecutor {
                     return true;
                 }
                 (Some("prompt"), Ok(handle)) => prompt(core, driver.as_ref(), &handle, &session, payload).await,
+                // The operator's Stop: what the harness does with it comes as its events, and a harness that cannot
+                // take it fails no attempt.
+                (Some("cancel"), Ok(handle)) => {
+                    let _ = driver.cancel_turn(&handle, &session).await;
+                    Ok(())
+                }
                 (Some("permit"), Ok(handle)) => {
                     let (request, option) = (
                         payload["request"].as_str().unwrap_or_default(),
