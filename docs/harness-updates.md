@@ -12,6 +12,11 @@ marked `[experimental]`, and codex released every 2–8 days (observed on 2026-1
 
 <!-- MEASURE id=codex-release-cadence date=2026-11-10 ver=codex-0.166.0 env=linux-arm64-orbstack src=reports/15 note="from the release history; recount before choosing an update policy" -->
 
+The ACP adapter of claude, `claude-agent-acp` (npm `@agentclientprotocol/claude-agent-acp`), is the exception: it is
+pinned to an exact version, with the `node` it runs on, and carries its own claude CLI (the platform package of
+`@anthropic-ai/claude-agent-sdk`), not the `claude` of `mise.toml`. Its `claude` profile in the ACP driver has a
+contract suite of its own, below.
+
 ## Updating a harness
 
 1. `mise.toml` selects a release line (`claude = "2.1"`, `codex = "0"`) and mise takes the newest version of it;
@@ -20,6 +25,11 @@ marked `[experimental]`, and codex released every 2–8 days (observed on 2026-1
 2. Run the contract suite and the daemon tests of that harness:
    - claude: `cargo nextest run -p loop-manager-claude` and `cargo nextest run -p loop-manager -E 'test(/^claude::/)'`;
    - codex: `cargo nextest run -p loop-manager-codex` and `cargo nextest run -p loop-manager -E 'test(/^codex::/)'`.
+   - the ACP adapter of claude: change its pin in `mise.toml` (`"npm:@agentclientprotocol/claude-agent-acp"`),
+     `mise install`, check `mise exec -- claude-agent-acp --version` and the CLI it carries with
+     `mise exec -- claude-agent-acp --cli --version`, then run
+     `cargo nextest run -p loop-manager-acp -E 'binary(harness)'`. Its failure classification is `classify` in
+     `crates/loop-manager-acp/src/profile/claude.rs`.
 3. A red scenario is a change of the harness protocol or of its failure fields. Fix the adapter (the failure
    classification lives in `crates/loop-manager-claude/src/stream/classify.rs` and
    `crates/loop-manager-codex/src/stream.rs`), never the scenario's expectation, unless the harness now reports more
@@ -46,7 +56,10 @@ marked `[experimental]`, and codex released every 2–8 days (observed on 2026-1
 - The suite is rerun on every harness update (above), and beyond it one real turn on the cheapest model of the
   harness confirms the path end to end.
 - Known limit: claude logged in with an API key gets no quota reset time from the provider, so its "quota with a
-  reset time" scenario expects `rate_limited` without `retry_at`, not `quota_exhausted`.
+  reset time" scenario expects `rate_limited` without `retry_at`, not `quota_exhausted`. Through `claude-agent-acp`
+  the same holds: its error carries no `rateLimit`.
+- `claude-agent-acp` asks the model for a session title once per session: a request without tools whose message
+  starts with `<session>`. The fake answers it with a title, outside the plan, and leaves it out of `requests()`.
 
 ## What the claude suite covers
 
@@ -73,6 +86,38 @@ marked `[experimental]`, and codex released every 2–8 days (observed on 2026-1
 `crates/loop-manager/tests/e2e/claude.rs` adds the daemon side: the finisher passes a prompt run, `kill -9` in a command
 is typed within a second and resumed with the bead's claim held (criteria 9 and 16), and a finisher called with a
 background command running passes the run only after the command (criterion 4a on the fake).
+
+## What the `claude` profile suite covers
+
+`crates/loop-manager-acp/tests/harness/contract.rs`: the ACP driver with the `claude` profile on the real
+`claude-agent-acp`, one test per scenario above. The driver runs the adapter `mise which claude-agent-acp` names,
+with the directory of `mise which node` first in its `PATH`. A turn's error comes as a JSON-RPC error: its code, then
+`data.errorKind`, then a narrow text rule on claude's words after the adapter's prefix `Internal error:` decide the
+kind.
+
+| # | Scenario | Expected from the driver |
+|---|---|---|
+| 1 | 429 twice, then an answer | claude retries by itself (three model requests), the turn completes, no failure; no `retrying`: ACP carries no retry |
+| 2 | 429 for ever | `rate_limited`, `retried_by_harness` (`errorKind: rate_limit`) |
+| 3 | quota with a reset time | `rate_limited` without `retry_at`: with an API key the error has no `rateLimit` |
+| 4 | quota in unknown words | `rate_limited` (`errorKind: rate_limit`) |
+| 5 | 529 | `overloaded`, `retried_by_harness` (`errorKind: server_error`) |
+| 6 | 401 | `auth_required` (code `-32000`) |
+| 7 | no credit (`insufficient_quota`) | `billing` (`errorKind: billing_error`) |
+| 8 | prompt too long | `context_overflow` (`errorKind: invalid_request` and `Prompt is too long`) |
+| 9 | unknown model | `config_error` (`errorKind: model_not_found`) |
+| 10 | `kill -9` of the adapter while a command runs | `harness_crash` and `exited` with signal 9 within a second |
+| 11 | EOF on stdin in a turn | the adapter exits at once by itself (code 0, or 1 when its last write meets the closed stdout), the turn is not finished: `harness_crash` |
+| 12 | silent provider | no turn end, no failure (the core's watchdog owns the stall); `session/cancel` ends the turn as cancelled |
+| 13 | a command the permission mode does not allow | mode `default`: the adapter asks `session/request_permission`, the driver declines it (`permission_denied` with the adapter's title of the command), the command does not run, the turn completes |
+| 14 | background command after the turn | idle with `background` first, idle without background after the command |
+| 15 | the same prompt again with its idempotency key | taken once: the next prompt, of a key of its own, is the second turn and the second model request |
+
+`crates/loop-manager-acp/tests/harness/claude.rs` adds the session side: a reply is acknowledged and completes; a hook
+runs (its marker file), the model is offered a skill as `loop-manager:<name>` and the tool `mcp__<server>__<tool>` of
+an MCP server; the main thread is told the one subagent type of the list and no built-in one; an isolated session
+reads the rig's `CLAUDE.md`, not the host's; `stop_background` stops a background command, asks the model nothing and
+the session takes the next prompt.
 
 ## What the codex suite covers
 
@@ -104,3 +149,4 @@ The rest match claude: rate limits, overload, 401, context, unknown model, `kill
 | 2026-11-19 | codex | 0.170.0 | contract suite green once the adapter retried a `thread/resume` refused while the thread closes; no real turn yet, tested range not widened |
 | 2026-11-20 | claude | 2.1.329 | contract suite green, minimum supported version, inclusive, no upper bound; older versions are not supported |
 | 2026-11-20 | codex | 0.171.0 | contract suite green, minimum supported version, inclusive, no upper bound; older versions are not supported |
+| 2026-11-22 | claude-agent-acp | 0.109.1 (CLI 2.1.330) | `claude` profile suite green, first pin; no real turn yet |

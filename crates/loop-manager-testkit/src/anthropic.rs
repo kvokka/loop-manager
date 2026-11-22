@@ -64,7 +64,8 @@ pub struct Request {
 }
 
 /// The fake on a free port of 127.0.0.1, serving until dropped. Model requests (`POST /v1/messages`) take the
-/// plan's replies in order, the last one repeating; every other path gets 404, as the lab fake answered.
+/// plan's replies in order, the last one repeating; a session title request gets a title outside the plan; every
+/// other path gets 404, as the lab fake answered.
 pub struct Provider {
     addr: SocketAddr,
     requests: Arc<Mutex<Vec<Request>>>,
@@ -90,6 +91,10 @@ impl Provider {
                     return error(StatusCode::NOT_FOUND, "not_found_error", "fake", &[]);
                 }
                 let body: Value = serde_json::from_slice(&body).unwrap_or_default();
+                if title(&body) {
+                    let text = json!({ "title": "Fake session" }).to_string();
+                    return answer(0, Reply::Text(text), &body).await;
+                }
                 let n = {
                     let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
                     let n = seen.len() + 1;
@@ -121,6 +126,14 @@ impl Drop for Provider {
     fn drop(&mut self) {
         self.server.abort();
     }
+}
+
+/// The request of `claude-agent-acp` for a session title: one request of its own per session, no tools, its message
+/// the session in `<session>` (docs/harness-updates.md). It gets a title and is not a model request of the plan.
+fn title(body: &Value) -> bool {
+    let no_tools = body["tools"].as_array().is_none_or(Vec::is_empty);
+    let text = body["messages"][0]["content"][0]["text"].as_str().unwrap_or_default();
+    no_tools && text.starts_with("<session>")
 }
 
 async fn answer(n: usize, reply: Reply, body: &Value) -> Response {

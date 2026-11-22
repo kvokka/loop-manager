@@ -214,7 +214,8 @@ pinned in `mise.toml` with the `node` it runs on); the adapter carries its own c
   `data.startupFailureReason`, with the reasons of the native driver: `session_held_by_background` is
   `transcript_divergence`, the gateway sign-in ones `auth_required`, the configuration ones `config_error`. Then
   `data.cause`, or a message that starts with `Claude Code stopped`: `harness_crash`. Anything else is `unknown` with
-  the adapter's message. `rate_limited` and `overloaded` are `retried_by_harness`: the CLI retries before it gives
+  the adapter's message. A message rule reads the message after the adapter's `Internal error: ` prefix.
+  `rate_limited` and `overloaded` are `retried_by_harness`: the CLI retries before it gives
   up. A `notice` titled `MCP server "<name>" failed to start` or `… needs authentication` is a `tool_failure`
   (decision 119); the adapter sends one for the servers of the session part only.
 - **The account.** The native driver's hash of where the credential comes from: the name and value of the first

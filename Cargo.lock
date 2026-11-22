@@ -1092,6 +1092,8 @@ dependencies = [
  "futures",
  "loop-manager-claude",
  "loop-manager-contract",
+ "loop-manager-testkit",
+ "rustix",
  "serde_json",
  "tempfile",
  "tokio",

@@ -393,8 +393,10 @@ pub(super) fn classify(code: i32, message: &str, data: Option<&Value>) -> Failur
     failure
 }
 
-/// The kind the data of an error names, and when a quota is back (ms since the epoch).
+/// The kind the data of an error names, and when a quota is back (ms since the epoch). The text rules read claude's
+/// words, which the adapter puts after `Internal error: ` in a `-32603`.
 fn kind(message: &str, data: &Value) -> Option<(FailureKind, Option<i64>)> {
+    let message = message.strip_prefix("Internal error: ").unwrap_or(message);
     let limit = &data["rateLimit"];
     let named = match data["errorKind"].as_str() {
         Some(e) if AUTH.contains(&e) => Some(FailureKind::AuthRequired),
