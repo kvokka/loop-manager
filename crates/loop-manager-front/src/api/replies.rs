@@ -74,6 +74,19 @@ pub(crate) struct Manual {
     /// The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,
     /// `prepare`, `decision`, `check` or `check_refused`.
     deferred: Option<String>,
+    /// A Continue with `unsent: send` waits for the harness to take the operator's input in.
+    returning: bool,
+    /// The operator's prompts of the live attempt the harness has not taken in, oldest first.
+    unsent: Vec<UnsentInput>,
+}
+
+/// An operator's prompt the harness has not taken in (docs/design/contracts.md 6.4).
+#[derive(ToSchema)]
+pub(crate) struct UnsentInput {
+    key: String,
+    text: String,
+    /// `queued` (loop-manager holds it for the turn's end), `intent` or `sent` (the harness holds it).
+    state: String,
 }
 
 /// The tokens the harness reported (docs/design/contracts.md 4.3 `usage`).
@@ -175,8 +188,24 @@ pub(crate) struct Finished {
 #[derive(ToSchema)]
 pub(crate) struct Control {
     /// `accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),
-    /// `run_terminal`, or for a Continue `not_manual`.
+    /// `run_terminal`, or for a Continue `not_manual`, `returning` (`unsent: send`: the run goes back once the
+    /// harness has taken the operator's input in) or `unsent_input` (that input waits and no `unsent` was given:
+    /// nothing changed).
     answer: String,
+    /// With `unsent_input`: the operator's prompts the harness has not taken in.
+    unsent: Option<Vec<UnsentInput>>,
+}
+
+/// The answer to an instruction (docs/design/contracts.md 6.1).
+#[derive(ToSchema)]
+pub(crate) struct Instructed {
+    /// `accepted`; `stale_attempt`, `run_terminal` or `no_live_session` (no AI session of the step lives: nothing
+    /// was sent, the run is manual).
+    answer: String,
+    /// With `accepted`: the prompt's key (docs/design/contracts.md 6.4).
+    key: Option<String>,
+    /// With `accepted`: `queued` (loop-manager holds it for the turn's end) or `intent` (it goes to the session now).
+    state: Option<String>,
 }
 
 #[derive(ToSchema)]

@@ -4,13 +4,18 @@
 //! and applies the deferred event once.
 
 use super::{
-    Decision, Exit, RunHandler,
+    Decision, Exit, RunHandler, Unsent,
     decide::DECIDE_SLACK_MS,
+    events::attempt_live,
     exec_step::command_due,
+    prompts, rejected,
     render::{AI_STEP_TIMEOUT_MS, AWAIT_TIMEOUT_MS, DRAIN_TIMEOUT_MS},
     row::Row,
 };
-use crate::writer::{Error, Tx};
+use crate::{
+    driver::PromptKey,
+    writer::{Error, Tx},
+};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -51,6 +56,9 @@ enum ExitDef {
     SpawnFailed(String),
 }
 
+/// The longest text of an operator's prompt.
+const MAX_INSTRUCTION: usize = 64 * 1024;
+
 fn answer(a: &str) -> Value {
     json!({ "answer": a })
 }
@@ -80,6 +88,9 @@ impl RunHandler {
             return Ok(answer(refused));
         }
         if row.manual {
+            // A Continue that waits for the operator's input to go in is called off.
+            tx.sql()
+                .execute("UPDATE runs SET handing_back = 0 WHERE id = ?1", [&row.id])?;
             return Ok(answer("accepted"));
         }
         (row.manual, row.manual_ms, row.deferred) = (true, Some(tx.now_ms()), None);
@@ -104,25 +115,81 @@ impl RunHandler {
         Ok(answer("accepted"))
     }
 
-    /// The operator hands `run` back: in one transaction the mode goes, every budget of the run starts afresh and so
-    /// does the step timeout of each ancestor no other manual run holds, then the deferred event is applied.
-    pub(super) fn hand_back(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32) -> Result<Value, Error> {
-        let mut row = Row::load(tx, run)?;
+    /// The operator hands `run` back. The operator's input the harness has not taken in needs a choice: `send` hands
+    /// the run back once the harness has taken it all in (`returned`), `withdraw` takes back what loop-manager still
+    /// holds and hands it back now; what the harness holds already stays part of the attempt.
+    pub(super) fn hand_back(
+        &mut self,
+        tx: &mut Tx<'_>,
+        run: &str,
+        attempt: u32,
+        unsent: Option<Unsent>,
+    ) -> Result<Value, Error> {
+        let row = Row::load(tx, run)?;
         if let Some(refused) = refusal(&row, attempt) {
             return Ok(answer(refused));
         }
         if !row.manual {
             return Ok(answer("not_manual"));
         }
+        let input = prompts::unsent(tx.sql(), &row.id, row.attempt)?;
+        if input.is_empty() {
+            return self.give_back(tx, row, &[], &[]);
+        }
+        match unsent {
+            None => Ok(json!({ "answer": "unsent_input", "unsent": input })),
+            Some(Unsent::Send) => {
+                tx.sql()
+                    .execute("UPDATE runs SET handing_back = 1 WHERE id = ?1", [&row.id])?;
+                Ok(answer("returning"))
+            }
+            Some(Unsent::Withdraw) => {
+                let withdrawn = prompts::withdraw_queued(tx, &row.id, row.attempt, "operator")?;
+                let kept: Vec<String> = (input.iter())
+                    .filter_map(|p| p["key"].as_str().filter(|k| !withdrawn.iter().any(|w| w == k)))
+                    .map(str::to_owned)
+                    .collect();
+                self.give_back(tx, row, &withdrawn, &kept)
+            }
+        }
+    }
+
+    /// The prompt `key` of the operator's went in or was dropped: a Continue that waits for the operator's input
+    /// hands the run back once none is left.
+    pub(super) fn returned(&mut self, tx: &mut Tx<'_>, run: &str) -> Result<(), Error> {
+        let row = Row::load(tx, run)?;
+        if !row.returning || !prompts::unsent(tx.sql(), &row.id, row.attempt)?.is_empty() {
+            return Ok(());
+        }
+        self.give_back(tx, row, &[], &[]).map(drop)
+    }
+
+    /// Hands `row` back: in one transaction the mode goes, every budget of the run starts afresh and so does the step
+    /// timeout of each ancestor no other manual run holds, then the deferred event is applied. `withdrawn` and `kept`
+    /// are the keys of the operator's input taken back and of the one the harness holds still.
+    fn give_back(
+        &mut self,
+        tx: &mut Tx<'_>,
+        mut row: Row,
+        withdrawn: &[String],
+        kept: &[String],
+    ) -> Result<Value, Error> {
+        let run = row.id.clone();
+        let run = run.as_str();
         let kind = row.view()["manual"]["deferred"].clone();
         let deferred: Option<Deferred> = (row.deferred.take()).and_then(|d| serde_json::from_str(&d).ok());
-        (row.manual, row.manual_ms) = (false, None);
+        (row.manual, row.manual_ms, row.returning) = (false, None, false);
         tx.sql().execute(
-            "UPDATE runs SET manual = 0, manual_ms = NULL, deferred = NULL WHERE id = ?1",
+            "UPDATE runs SET manual = 0, manual_ms = NULL, deferred = NULL, handing_back = 0 WHERE id = ?1",
             [&row.id],
         )?;
         row.record(tx, "control", json!({ "control": "lm" }));
-        row.emit(tx, "run.handed_back", json!({ "run": row.view(), "deferred": kind }))?;
+        let unsent = json!({ "withdrawn": withdrawn, "kept": kept });
+        row.emit(
+            tx,
+            "run.handed_back",
+            json!({ "run": row.view(), "deferred": kind, "unsent": unsent }),
+        )?;
         // A failure or an outcome ended the step's work, and a prompt that renders arms its own wait.
         if !matches!(deferred, Some(Deferred::Failed | Deferred::Outcome | Deferred::Prepare)) {
             self.arm(tx, &row)?;
@@ -159,6 +226,82 @@ impl RunHandler {
         }
         self.schedule(tx)?;
         Ok(answer("accepted"))
+    }
+
+    /// The operator's prompt `text` to the session of `run`: a run under loop-manager is taken over first, in the same
+    /// transaction. With no live session of an ai step nothing is sent and no agent starts. A session that holds a
+    /// prompt gets this one only at its turn's end, unless its harness takes prompts into a turn in flight.
+    pub(super) fn instruct(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, text: &str) -> Result<Value, Error> {
+        if text.trim().is_empty() || text.len() > MAX_INSTRUCTION {
+            return Err(rejected(format!(
+                "an instruction is a text of up to {MAX_INSTRUCTION} bytes, not only whitespace"
+            )));
+        }
+        let row = Row::load(tx, run)?;
+        if let Some(refused) = refusal(&row, attempt) {
+            return Ok(answer(refused));
+        }
+        self.takeover(tx, run, attempt)?;
+        let session: Option<String> = tx
+            .sql()
+            .query_row(
+                "SELECT harness FROM attempts WHERE run = ?1 AND n = ?2 AND ended_ms IS NULL \
+                 AND handle IS NOT NULL AND session IS NOT NULL",
+                params![row.id, row.attempt],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let driver = session.and_then(|harness| self.drivers.get(&harness).cloned());
+        let Some(driver) = driver.filter(|_| row.step_kind == "ai" && attempt_live(&row.state)) else {
+            return Ok(answer("no_live_session"));
+        };
+        let n = prompts::next_n(tx, &row.id, row.attempt)?;
+        let key = PromptKey::new(&row.id, row.attempt, n);
+        let held = prompts::busy(tx, &row.id, row.attempt)? && !driver.prompts_in_turn();
+        let state = if held { "queued" } else { "intent" };
+        prompts::operator(tx, &row.id, row.attempt, (n, key), text, state)?;
+        let key = key.0.to_string();
+        if !held {
+            prompts::send(tx, &row.id, row.attempt, (n, &key), text)?;
+        }
+        let row = Row::load(tx, run)?;
+        row.emit(
+            tx,
+            "run.instructed",
+            json!({ "run": row.view(), "key": key, "state": state }),
+        )?;
+        Ok(json!({ "answer": "accepted", "key": key, "state": state }))
+    }
+
+    /// An operator's prompt went into the session of `row` while it runs: a turn works on it, so no decision on the
+    /// turn before is awaited any more — as a `continue` of a hook would, it clears the turn's end, the paused step
+    /// timeout, the decision waited for and the deferred event of that turn. A declared outcome stays. A run under
+    /// loop-manager (the operator handed it back before the harness took the prompt in) runs its clocks again.
+    pub(super) fn operator_turn(&mut self, tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
+        let paused: Option<i64> = tx.sql().query_row(
+            "SELECT paused_ms FROM attempts WHERE run = ?1 AND n = ?2",
+            params![row.id, row.attempt],
+            |r| r.get(0),
+        )?;
+        tx.sql().execute(
+            "UPDATE attempts SET turn_ended = 0, paused_ms = NULL WHERE run = ?1 AND n = ?2",
+            params![row.id, row.attempt],
+        )?;
+        tx.sql()
+            .execute("UPDATE runs SET waiting = NULL WHERE id = ?1", [&row.id])?;
+        tx.clear_deadline(&row.deadline("decide"))?;
+        let deferred = (row.deferred.as_deref()).and_then(|d| serde_json::from_str::<Deferred>(d).ok());
+        if matches!(deferred, Some(Deferred::Settled | Deferred::Decision { .. })) {
+            tx.sql()
+                .execute("UPDATE runs SET deferred = NULL WHERE id = ?1", [&row.id])?;
+        }
+        if row.manual {
+            return Ok(());
+        }
+        if let Some(left) = paused {
+            tx.set_deadline(&row.deadline("state"), tx.now_ms() + left)?;
+        }
+        tx.set_deadline(&row.deadline("silence"), tx.now_ms() + self.config.watchdog.silence_ms)
     }
 
     /// Keeps `event` for Continue in the one slot of a manual run.

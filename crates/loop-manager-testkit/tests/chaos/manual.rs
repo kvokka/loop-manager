@@ -54,6 +54,7 @@ pub(crate) async fn operator(
         Msg::Continue {
             run: run.clone(),
             attempt: seen,
+            unsent: None,
         }
     };
     let answer = w.core.send(None, msg).await.map(|r| r["answer"].clone());
@@ -72,6 +73,7 @@ pub(crate) async fn hand_back_all(w: &World, play: &mut Play) {
         let msg = Msg::Continue {
             run: run.clone(),
             attempt,
+            unsent: None,
         };
         let answer = w.core.send(None, msg).await.map(|r| r["answer"].clone());
         play.log.push(format!("continue {run}#{attempt} -> {answer:?}"));

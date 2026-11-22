@@ -71,9 +71,11 @@ Shared objects:
   it skipped after it do not count); `agent` and `step_kind` are of that step, `agent` is null
   for a step other than `ai`, `class` is null until `failed`, `bead` is the bead id or null, `depth` is the chain
   depth of 6.1 (0 for a run started by hand), `parent_run` the run whose event triggered it or whose session started
-  it. `control` is `manual` while an operator holds the run (6.1), and `manual` is then `{since, deferred}`: since when,
-  and the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`, `check_refused`,
-  or null); `manual` is null under `lm`. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
+  it. `control` is `manual` while an operator holds the run (6.1), and `manual` is then `{since, deferred, returning}`:
+  since when, the event deferred meanwhile (`settled`, `failed`, `outcome`, `prepare`, `decision`, `check`,
+  `check_refused`, or null), and whether a Continue waits for the operator's input to go in (6.1); `manual` is null
+  under `lm`. The read API adds `manual.unsent`: the operator's prompts of the live attempt the harness has not taken
+  in, `[{key, text, state}]` with `state` `queued`, `intent` or `sent` (6.4), oldest first. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`{input_tokens, output_tokens}`, summed
   over every attempt) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the
@@ -115,7 +117,8 @@ Observed events (addons and clients read them and cannot change what happens):
 | `run.failed` | `{run, class: "agent"\|"check"\|"hollow_done"\|"infrastructure", reason, outcome, usage}`; `outcome` null unless the agent declared one |
 | `run.cancelled` | `{run, reason, usage}` |
 | `run.taken_over` | `{run}`; an operator took the run over (6.1): its orchestration stands until `run.handed_back` |
-| `run.handed_back` | `{run, deferred}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied |
+| `run.instructed` | `{run, key, state: "queued"\|"intent"}`; the operator's prompt `key` to the run's session (6.1): `queued` while loop-manager holds it for the turn's end, `intent` when it goes now |
+| `run.handed_back` | `{run, deferred, unsent: {withdrawn: [key], kept: [key]}}`; the operator handed the run back (6.1): its budgets start afresh, then `deferred` (as in `manual` of the `RunView`, null when none) is applied; `unsent` names the operator's prompts the Continue took back and those the harness still holds, which stay part of the attempt |
 | `run.retrying` | `{run, retry, next_retry_at, text}`; the harness retries by itself (`retry` is its own number, 4.3) |
 | `run.permission_denied` | `{run, tool, tool_use_id, input, reason}`; the policy declined a permission request of the agent (4.3) at once, so nothing waits on it: `tool` and `tool_use_id` are the harness's (an ACP harness: the request's title and the tool call's id), `input` the tool input (null when the harness does not tell it), `reason` why it was declined |
 | `trigger.fired` | `{trigger, cause_seq, new_run, inputs}`; `cause_seq` null for schedules |
@@ -365,8 +368,8 @@ semantics follow ACP v2: a session is `running` or `idle` (4.3), and a turn fail
 `send_prompt` returns once the request is written: the harness holds a prompt sent while a turn is in flight, and
 inserts it into that turn when `prompts_in_turn` is true, else after the turn ends; the insertion is `prompt.acked`, a
 drop `prompt.dropped` (4.3). A permission request of a session waits for `answer_permission`. The interface has no
-model change inside a live session and no way for a human to join a live session
-([frontends](../api/frontends.md#humans-and-runs)).
+model change inside a live session; a human joins a live session only through the core, whose `send_prompt` carries
+an operator's instruction as any prompt (6.1, [frontends](../api/frontends.md#humans-and-runs)).
 
 ```rust
 trait Driver: Send + Sync {
@@ -810,15 +813,29 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   an attempt of an earlier step is stale.
 
 Manual mode. An operator takes a run over (`POST /v1/runs/{id}/takeover`, `loop-manager run takeover <id> --attempt
-<n>`) and hands it back (`POST /v1/runs/{id}/continue`, `loop-manager run continue`). It is no state of its own: the
-run keeps its state, its work in flight keeps its course, and `control` of the `RunView` is `manual`
-([invariant 21](invariants.md)).
+<n>`), sends its session instructions (`POST /v1/runs/{id}/instruct`, `loop-manager run say`) and hands it back (`POST
+/v1/runs/{id}/continue`, `loop-manager run continue`). It is no state of its own: the run keeps its state, its work in
+flight keeps its course, and `control` of the `RunView` is `manual` ([invariant 21](invariants.md)).
 
 - Each command carries `attempt`, the attempt of the run the client saw, and goes through the single writer with its
-  `Idempotency-Key`. The answer is `{"answer": ...}`: `accepted`; `stale_attempt` when the run is at another attempt
-  (nothing changes); `run_terminal`; for a Continue of a run that is not manual, `not_manual`. Of two Continues at
-  once one is accepted and the other gets `not_manual`. A takeover of a manual run is accepted and changes nothing. An
+  `Idempotency-Key`: a repeat of the key gets the first answer and does nothing more. The answer is `{"answer": ...}`:
+  `accepted`; `stale_attempt` when the run is at another attempt (nothing changes); `run_terminal`; for a Continue of
+  a run that is not manual, `not_manual`. Of two Continues at once one is accepted and the other gets `not_manual`. A
+  takeover of a manual run is accepted and changes nothing but calling off a Continue that waits (`returning`). An
   unknown run is `not_found`.
+- An instruction (`{attempt, text}`, the text up to 64 KiB and not only whitespace, else `rejected`) takes a run under `lm` over first, in
+  the same transaction, as a takeover would, with its record and event before its own. It needs a live AI session: an
+  `ai` step `starting` or `running` whose attempt has its session open. Else the answer is `no_live_session`: nothing
+  is sent, no agent starts, and the run stays manual. With a session, the prompt is recorded with the next number of
+  the attempt (6.4, `source: operator`) and `run.instructed`, and the answer is `{"answer": "accepted", key, state}`.
+  While the session holds a prompt (one `intent`, `sent` or `acked`), a harness that takes prompts into a turn in
+  flight (`prompts_in_turn`, 4.1) gets it at once (`intent`), with the turn neither cancelled nor its tools stopped;
+  any other harness gets it from loop-manager only at the turn's end (`queued`). At each turn boundary (the turn ended,
+  or the harness dropped a prompt) with the session holding no prompt, the oldest `queued` prompt goes, one per
+  boundary, through one request with its key. When an operator's prompt goes into the session of a `running` run, a
+  turn works on it: the end of the turn before and its paused step timeout are cleared, the decision on it is no
+  longer awaited (one that comes later is refused, 3.4) and an event deferred for it (`settled`, `decision`) goes; a
+  declared outcome stays. The operator's prompts do not count toward the remarks ceiling.
 - The takeover commits, with the history record `control` and `run.taken_over`, before anything else happens. The
   run's deadlines go (`state`, silence, `decide`); the scheduler passes a manual run over (a queued one waits with
   `waiting_for = "manual"`), and a started one keeps its slot and its place in its rig. Up the chain of `parent_run`,
@@ -847,6 +864,13 @@ run keeps its state, its work in flight keeps its course, and `control` of the `
   event is applied once, by the handler it would have met, in the same attempt: an outcome accepted while manual
   moves the run to `finishing` once. With nothing deferred, what stood still goes on: a drain step reads its tracker
   again, and the commands a session left after its declared outcome are stopped.
+- The operator's input the harness has not taken in — the operator's prompts of the live attempt in `queued`, `intent`
+  or `sent` — needs a choice on Continue (`unsent`). With none, the answer is `{"answer": "unsent_input", "unsent":
+  [{key, text, state}]}` and nothing changes. `send` answers `returning` and the run stays manual until the harness has
+  taken all of it in or dropped it; then the Continue happens in the transaction of that event. A takeover calls it
+  off, and so does the end of the attempt (the run stays manual with its failure deferred). `withdraw` withdraws every
+  `queued` prompt, which is never delivered, and hands the run back now; a prompt the harness holds already (`intent`,
+  `sent`) stays part of the attempt and starts its turn as above when it goes in. `run.handed_back` names both.
 - A cancel ends a manual run as any run; a parent that waited for it gets its whole step timeout back, as on Continue.
 
 Ceilings of the core (invariant 16): 20 failed attempts per run (the attempts of every step together), not counting the
@@ -905,7 +929,11 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `preparing`, `interrupted` | an attempt would start while a key of the run is closed (by anyone, invariant 18), the daemon is stopping, or the run's agent has as many other started runs as its `max_runs` (a step with no agent, drain or exec, has no such limit) | `parked` (`then`: `new_session` from `preparing`, the decided kind from `interrupted`) | — |
 | any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the bead |
 | any non-terminal | takeover at the current `attempt` (6.1) | the same state, manual | `run.taken_over`; the deadlines of the run and of the parents waiting for it go; nothing else |
-| any non-terminal, manual | Continue at the current `attempt` (6.1) | where the deferred event leads, in the same attempt | `run.handed_back`; whole budgets, then the deferred event |
+| any non-terminal, manual | Continue at the current `attempt` (6.1), no operator's input out or `withdraw` | where the deferred event leads, in the same attempt | `run.handed_back`; whole budgets, then the deferred event; `withdraw` withdraws the `queued` prompts |
+| any non-terminal, manual | Continue with the operator's input out and no `unsent` / `send` | the same state, manual / manual and returning | `unsent_input`, nothing else / once no input is out, on `prompt.acked` or `prompt.dropped`, the Continue above |
+| any non-terminal | instruction at the current `attempt` (6.1) | the same state, manual | takeover if under `lm`; with a live AI session the prompt is `queued` or `intent` with its effect and `run.instructed`, else `no_live_session` |
+| `running`, manual or not | `prompt.acked` of an operator's prompt | `running` | the turn's end, the paused step timeout, the decision awaited and the deferred `settled` or `decision` go; under `lm` the step and silence clocks run again |
+| `starting`, `running` | turn ended, or `prompt.dropped`, the session holding no prompt | the same | the oldest `queued` prompt goes `intent`, with its effect |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its
 bead. A bead the run
@@ -973,11 +1001,13 @@ for it is not.
 
 ### 6.4 Prompt delivery and recovery
 
-- Every prompt has a delivery record `intent → sent → acked → settled` and a `PromptKey`. `intent` is written
-  with the decision to send; `sent` after `send_prompt` returned, the request written while the harness holds the
-  prompt; `acked` on `prompt.acked`, the harness inserted it; `settled` when the turn of an `acked` prompt ended (a
-  prompt the harness still holds stays as it is). `withdrawn` is final: from `intent` or `sent` on `prompt.dropped`,
-  the prompt is never delivered. A state never goes back. No marker in the prompt text: the key goes as the
+- Every prompt has a delivery record `queued → intent → sent → acked → settled`, a `PromptKey`, a number within its
+  attempt (one more than the last) and a `source`: `lm` or `operator` (6.1). `queued` is only an operator's prompt
+  loop-manager holds for the end of the turn, with no request made; `intent` is written with the decision to send;
+  `sent` after `send_prompt` returned, the request written while the harness holds the prompt; `acked` on
+  `prompt.acked`, the harness inserted it; `settled` when the turn of an `acked` prompt ended (a prompt the harness
+  still holds stays as it is). `withdrawn` is final: from `queued` when the operator withdraws it or its attempt ends,
+  from `intent` or `sent` on `prompt.dropped`; the prompt is never delivered. A state never goes back. No marker in the prompt text: the key goes as the
   harness's own idempotency key. An ACP harness, claude
   and codex among them, knows a prompt delivered when the agent answered it (the driver records the key of the last
   answer of the session, 4.6); a prompt whose answer the daemon did not live to read goes again with its key, and only

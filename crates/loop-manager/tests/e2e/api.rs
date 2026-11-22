@@ -150,6 +150,30 @@ async fn a_run_is_taken_over_and_handed_back_over_the_api() {
     );
     assert_eq!(answer(d.post(&hand, body, None).await), "not_manual");
     assert_eq!(d.get(&format!("/v1/runs/{run}")).await["control"], "lm");
+    // An instruction takes the run over even when its step has no session to take it; a repeat of its key is the
+    // same instruction.
+    let say = format!("/v1/runs/{run}/instruct");
+    let hurry = json!({ "attempt": attempt, "text": "hurry" });
+    for _ in 0..2 {
+        assert_eq!(
+            answer(d.post(&say, hurry.clone(), Some("s-1")).await),
+            "no_live_session"
+        );
+    }
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["control"], "manual");
+    match d.post(&say, json!({ "attempt": attempt, "text": "" }), None).await {
+        Err(ClientError::Api { status: 409, error }) => assert_eq!(error["code"], "rejected"),
+        other => panic!("{other:?}"),
+    }
+    match d
+        .post(&hand, json!({ "attempt": attempt, "unsent": "later" }), None)
+        .await
+    {
+        Err(ClientError::Api { status: 400, error }) => assert_eq!(error["code"], "bad_request"),
+        other => panic!("{other:?}"),
+    }
+    let withdraw = json!({ "attempt": attempt, "unsent": "withdraw" });
+    assert_eq!(answer(d.post(&hand, withdraw, None).await), "accepted");
     match d.post("/v1/runs/nope/takeover", json!({ "attempt": 0 }), None).await {
         Err(ClientError::Api { status: 404, error }) => assert_eq!(error["code"], "not_found"),
         other => panic!("{other:?}"),

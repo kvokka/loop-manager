@@ -1650,7 +1650,7 @@
     },
     "/v1/runs/{id}/continue": {
       "post": {
-        "summary": "Hands a manual run back: every budget of the run starts afresh, then the event deferred while it was manual is\napplied once, in the same attempt (docs/design/contracts.md 6.1).",
+        "summary": "Hands a manual run back: every budget of the run starts afresh, then the event deferred while it was manual is\napplied once, in the same attempt (docs/design/contracts.md 6.1). With the operator's input the harness has not\ntaken in and no `unsent`, the answer is `unsent_input` with that input, and nothing changes; `send` answers\n`returning` and hands the run back once the harness has taken it all in.",
         "operationId": "hand_back",
         "parameters": [
           {
@@ -1677,7 +1677,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ControlRun"
+                "$ref": "#/components/schemas/ContinueRun"
               }
             }
           },
@@ -1932,6 +1932,125 @@
           },
           "500": {
             "description": "`storage` or `journal`: the daemon could not read its state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/instruct": {
+      "post": {
+        "summary": "The operator's prompt to the run's session. A run under loop-manager is taken over first, as by `takeover`, and\nstays manual whatever the answer. The prompt goes to the session at once when it is idle or its harness takes\nprompts into a turn in flight (`state: intent`); else loop-manager holds it (`queued`) and sends it once, at the end\nof the turn. A step without a live AI session gets `no_live_session`: nothing is sent and no agent starts\n(docs/design/contracts.md 6.1).",
+        "operationId": "instruct",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Repeats return the first reply and send nothing",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instructed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the text is only whitespace or over 64 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
             "content": {
               "application/json": {
                 "schema": {
@@ -2848,6 +2967,31 @@
           }
         }
       },
+      "ContinueRun": {
+        "type": "object",
+        "required": [
+          "attempt"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt of the run the client saw (`attempt` of the run view).",
+            "minimum": 0
+          },
+          "unsent": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnsentChoice",
+                "description": "Needed while the operator's input waits to go in (`manual.unsent` of the run view)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "Control": {
         "type": "object",
         "description": "The answer to a takeover or a Continue (docs/design/contracts.md 6.1).",
@@ -2857,7 +3001,17 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),\n`run_terminal`, or for a Continue `not_manual`."
+            "description": "`accepted`; `stale_attempt` (the run is at another attempt than the one sent: nothing changed),\n`run_terminal`, or for a Continue `not_manual`, `returning` (`unsent: send`: the run goes back once the\nharness has taken the operator's input in) or `unsent_input` (that input waits and no `unsent` was given:\nnothing changed)."
+          },
+          "unsent": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/UnsentInput"
+            },
+            "description": "With `unsent_input`: the operator's prompts the harness has not taken in."
           }
         }
       },
@@ -3362,6 +3516,52 @@
           }
         }
       },
+      "InstructRun": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "text"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt of the run the client saw (`attempt` of the run view).",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "description": "The prompt: up to 64 KiB, not only whitespace."
+          }
+        }
+      },
+      "Instructed": {
+        "type": "object",
+        "description": "The answer to an instruction (docs/design/contracts.md 6.1).",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`; `stale_attempt`, `run_terminal` or `no_live_session` (no AI session of the step lives: nothing\nwas sent, the run is manual)."
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "With `accepted`: the prompt's key (docs/design/contracts.md 6.4)."
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "With `accepted`: `queued` (loop-manager holds it for the turn's end) or `intent` (it goes to the session now)."
+          }
+        }
+      },
       "JournalHealth": {
         "type": "object",
         "description": "Failed journal writes in a row and the last error.",
@@ -3386,7 +3586,9 @@
         "type": "object",
         "description": "A run an operator holds (docs/design/contracts.md 6.1).",
         "required": [
-          "since"
+          "since",
+          "returning",
+          "unsent"
         ],
         "properties": {
           "deferred": {
@@ -3396,9 +3598,20 @@
             ],
             "description": "The event that would have moved the run meanwhile, applied on Continue: `settled`, `failed`, `outcome`,\n`prepare`, `decision`, `check` or `check_refused`."
           },
+          "returning": {
+            "type": "boolean",
+            "description": "A Continue with `unsent: send` waits for the harness to take the operator's input in."
+          },
           "since": {
             "type": "string",
             "description": "Since when."
+          },
+          "unsent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnsentInput"
+            },
+            "description": "The operator's prompts of the live attempt the harness has not taken in, oldest first."
           }
         }
       },
@@ -3910,6 +4123,35 @@
             "description": "`event`, `cron` or `every`."
           },
           "trigger": {
+            "type": "string"
+          }
+        }
+      },
+      "UnsentChoice": {
+        "type": "string",
+        "description": "What a Continue does with the operator's input the harness has not taken in.",
+        "enum": [
+          "send",
+          "withdraw"
+        ]
+      },
+      "UnsentInput": {
+        "type": "object",
+        "description": "An operator's prompt the harness has not taken in (docs/design/contracts.md 6.4).",
+        "required": [
+          "key",
+          "text",
+          "state"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`queued` (loop-manager holds it for the turn's end), `intent` or `sent` (the harness holds it)."
+          },
+          "text": {
             "type": "string"
           }
         }

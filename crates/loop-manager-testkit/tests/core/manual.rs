@@ -49,7 +49,11 @@ impl World {
         let msg = if take {
             Msg::Takeover { run, attempt }
         } else {
-            Msg::Continue { run, attempt }
+            Msg::Continue {
+                run,
+                attempt,
+                unsent: None,
+            }
         };
         self.core.send(None, msg).await.unwrap()["answer"].clone()
     }

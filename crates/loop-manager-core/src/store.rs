@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 27;
+const VERSION: i32 = 28;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -43,7 +43,8 @@ INSERT INTO consumers (name, seq) VALUES ('journal', 0);
 -- agent the `agent:` label of its bead names for its ai steps; `round`, `remarks` and `back_from` (a JSON array of
 -- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before.
 -- `manual` (since `manual_ms`): an operator holds the run and its orchestration stands; `deferred` is the JSON of the
--- one event that would have moved it meanwhile, applied when it is handed back (contracts 6.1).
+-- one event that would have moved it meanwhile, applied when it is handed back (contracts 6.1); `handing_back`: a Continue
+-- waits for the operator's input the harness has not taken yet, and hands the run back once it has.
 CREATE TABLE runs (
     n INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -84,7 +85,8 @@ CREATE TABLE runs (
     back_from TEXT,
     manual INTEGER NOT NULL DEFAULT 0,
     manual_ms INTEGER,
-    deferred TEXT
+    deferred TEXT,
+    handing_back INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);
@@ -119,14 +121,16 @@ CREATE TABLE attempts (
 );
 CREATE INDEX attempts_instance ON attempts (instance);
 CREATE INDEX attempts_token ON attempts (token_sha256);
--- The delivery record of every prompt of an attempt (contracts 6.4): `n` counts from 1.
+-- The delivery record of every prompt of an attempt (contracts 6.4): `n` counts from 1; `source` is `lm` or
+-- `operator`.
 CREATE TABLE prompts (
     run TEXT NOT NULL,
     attempt INTEGER NOT NULL,
     n INTEGER NOT NULL,
     key TEXT NOT NULL,
     text TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('intent', 'sent', 'acked', 'settled', 'withdrawn')),
+    source TEXT NOT NULL DEFAULT 'lm',
+    state TEXT NOT NULL CHECK (state IN ('queued', 'intent', 'sent', 'acked', 'settled', 'withdrawn')),
     PRIMARY KEY (run, attempt, n)
 );
 -- The permission requests of the live attempts (contracts 4.3): `id` names one within the attempt's instance,

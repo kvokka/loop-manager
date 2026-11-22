@@ -57,6 +57,9 @@ impl Reader {
             _ => None,
         };
         let mut view = row.view();
+        if row.manual {
+            view["manual"]["unsent"] = json!(super::prompts::unsent(&conn, id, row.attempt)?);
+        }
         view["project"] = json!(row.project);
         view["rig"] = json!(row.rig);
         view["correlation"] = json!(row.correlation);

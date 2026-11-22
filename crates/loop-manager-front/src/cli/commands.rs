@@ -93,11 +93,35 @@ pub enum RunCommand {
     /// `accepted`, or `stale_attempt` when the run is at another attempt than `--attempt`, or `run_terminal`.
     Takeover(Control),
     /// Hand a run taken over back: its budgets start afresh and what it stood still for goes on, in the same attempt.
-    /// Prints `accepted`, `stale_attempt`, `run_terminal` or `not_manual`.
-    Continue(Control),
+    /// Prints `accepted`, `stale_attempt`, `run_terminal` or `not_manual`; while an instruction waits to go in,
+    /// `unsent_input` with it unless `--unsent` says what to do, and `returning` with `--unsent send`.
+    Continue {
+        #[command(flatten)]
+        control: Control,
+        /// What becomes of the instructions the harness has not taken in: `send` hands the run back once they are
+        /// in, `withdraw` takes back those loop-manager still holds and hands it back now.
+        #[arg(long, value_enum)]
+        unsent: Option<UnsentChoice>,
+    },
+    /// Send an instruction, a prompt of the operator, to the run's session; a run under loop-manager is taken over
+    /// first. Prints `accepted` with the prompt's key and `queued` (held for the end of the turn) or `intent` (sent
+    /// now), or `stale_attempt`, `run_terminal` or `no_live_session` (no AI session lives: nothing was sent).
+    Say {
+        #[command(flatten)]
+        control: Control,
+        text: String,
+    },
 }
 
-/// A takeover or a Continue of a run.
+/// What a Continue does with the instructions the harness has not taken in.
+#[derive(Clone, Copy, clap::ValueEnum, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnsentChoice {
+    Send,
+    Withdraw,
+}
+
+/// A takeover, a Continue or an instruction of a run.
 #[derive(clap::Args)]
 pub struct Control {
     id: String,
@@ -252,20 +276,32 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             let reply = client.request("POST", &path, Some(&body), idempotency.as_deref());
             print(json, &reply.await?);
         }
-        RunCommand::Takeover(control) => return self::control(client, json, "/takeover", control).await,
-        RunCommand::Continue(control) => return self::control(client, json, "/continue", control).await,
+        RunCommand::Takeover(control) => return self::control(client, json, "/takeover", control, json!({})).await,
+        RunCommand::Continue { control, unsent } => {
+            return self::control(client, json, "/continue", control, json!({ "unsent": unsent })).await;
+        }
+        RunCommand::Say { control, text } => {
+            return self::control(client, json, "/instruct", control, json!({ "text": text })).await;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
 
-/// A takeover or a Continue: exits 0 when it was accepted, 1 when it was refused.
-async fn control(client: &Client, json: bool, action: &str, control: Control) -> Result<ExitCode, ClientError> {
-    let body = json!({ "attempt": control.attempt });
+/// A takeover, a Continue or an instruction, `body` with the attempt added: exits 0 when it was accepted or the run
+/// is returning, 1 when it was refused.
+async fn control(
+    client: &Client,
+    json: bool,
+    action: &str,
+    control: Control,
+    mut body: Value,
+) -> Result<ExitCode, ClientError> {
+    body["attempt"] = json!(control.attempt);
     let path = run_path(&control.id, action);
     let reply = client.request("POST", &path, Some(&body), control.idempotency.as_deref());
     let reply = reply.await?;
     print(json, &reply);
-    Ok(if reply["answer"] == "accepted" {
+    Ok(if matches!(reply["answer"].as_str(), Some("accepted" | "returning")) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

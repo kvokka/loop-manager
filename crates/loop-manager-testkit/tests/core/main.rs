@@ -33,6 +33,7 @@ mod gates;
 mod history;
 mod hooks;
 mod instances;
+mod instruct;
 mod manual;
 mod manual_recovery;
 mod mcp;

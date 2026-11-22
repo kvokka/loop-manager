@@ -1,16 +1,16 @@
-//! Runs: start a formula, list, state, cancel, the finisher, takeover and Continue (docs/api/frontends.md,
-//! contracts 6).
+//! Runs: start a formula, list, state, cancel, the finisher, takeover, the operator's instructions and Continue
+//! (docs/api/frontends.md, contracts 6).
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Control, Failed, Finished, Keyed, Run, Started},
+    replies::{Control, Failed, Finished, Instructed, Keyed, Run, Started},
 };
 use axum::{
     Json,
     extract::{Path, Query},
     http::{HeaderMap, StatusCode},
 };
-use loop_manager_core::run::{Create, Msg, Outcome, RunFilter};
+use loop_manager_core::run::{Create, Msg, Outcome, RunFilter, Unsent};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use utoipa::{IntoParams, ToSchema};
@@ -237,9 +237,29 @@ pub(crate) async fn takeover(
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }
 
+/// What a Continue does with the operator's input the harness has not taken in.
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UnsentChoice {
+    /// Hand the run back once the harness has taken it all in.
+    Send,
+    /// Take back what loop-manager still holds, which is never delivered, and hand the run back now.
+    Withdraw,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ContinueRun {
+    /// The attempt of the run the client saw (`attempt` of the run view).
+    attempt: u32,
+    /// Needed while the operator's input waits to go in (`manual.unsent` of the run view).
+    unsent: Option<UnsentChoice>,
+}
+
 /// Hands a manual run back: every budget of the run starts afresh, then the event deferred while it was manual is
-/// applied once, in the same attempt (docs/design/contracts.md 6.1).
-#[utoipa::path(post, path = "/v1/runs/{id}/continue", request_body = ControlRun,
+/// applied once, in the same attempt (docs/design/contracts.md 6.1). With the operator's input the harness has not
+/// taken in and no `unsent`, the answer is `unsent_input` with that input, and nothing changes; `send` answers
+/// `returning` and hands the run back once the harness has taken it all in.
+#[utoipa::path(post, path = "/v1/runs/{id}/continue", request_body = ContinueRun,
     params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
     responses((status = OK, body = Control),
         (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
@@ -248,8 +268,42 @@ pub(crate) async fn hand_back(
     state: State,
     headers: HeaderMap,
     Param(Path(run)): Param<Path<String>>,
-    Body(ControlRun { attempt }): Body<ControlRun>,
+    Body(ContinueRun { attempt, unsent }): Body<ContinueRun>,
 ) -> Reply {
-    let msg = Msg::Continue { run, attempt };
+    let unsent = unsent.map(|choice| match choice {
+        UnsentChoice::Send => Unsent::Send,
+        UnsentChoice::Withdraw => Unsent::Withdraw,
+    });
+    let msg = Msg::Continue { run, attempt, unsent };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct InstructRun {
+    /// The attempt of the run the client saw (`attempt` of the run view).
+    attempt: u32,
+    /// The prompt: up to 64 KiB, not only whitespace.
+    text: String,
+}
+
+/// The operator's prompt to the run's session. A run under loop-manager is taken over first, as by `takeover`, and
+/// stays manual whatever the answer. The prompt goes to the session at once when it is idle or its harness takes
+/// prompts into a turn in flight (`state: intent`); else loop-manager holds it (`queued`) and sends it once, at the end
+/// of the turn. A step without a live AI session gets `no_live_session`: nothing is sent and no agent starts
+/// (docs/design/contracts.md 6.1).
+#[utoipa::path(post, path = "/v1/runs/{id}/instruct", request_body = InstructRun,
+    params(("id" = String, Path),
+        ("Idempotency-Key" = Option<String>, Header, description = "Repeats return the first reply and send nothing")),
+    responses((status = OK, body = Instructed),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
+        (status = CONFLICT, description = "`rejected`: the text is only whitespace or over 64 KiB", body = ErrorReply),
+        Keyed))]
+pub(crate) async fn instruct(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(InstructRun { attempt, text }): Body<InstructRun>,
+) -> Reply {
+    let msg = Msg::Instruct { run, attempt, text };
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }

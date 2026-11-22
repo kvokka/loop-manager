@@ -131,7 +131,25 @@ impl RunHandler {
         Ok(())
     }
 
+    /// An event of the session of `attempt`; once a prompt went in or was dropped, the oldest prompt loop-manager
+    /// holds may go (`flush`) and a Continue that waits for the operator's input may hand the run back.
     fn attempt_event(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, event: Normalized) -> Result<(), Error> {
+        let (delivery, dropped) = match &event {
+            Normalized::PromptAcked { .. } => (true, false),
+            Normalized::PromptDropped { .. } => (true, true),
+            _ => (false, false),
+        };
+        self.session_event(tx, run, attempt, event)?;
+        if !delivery || Self::current(tx, run, attempt)?.is_none() {
+            return Ok(());
+        }
+        if dropped {
+            super::prompts::flush(tx, run, attempt)?;
+        }
+        self.returned(tx, run)
+    }
+
+    fn session_event(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, event: Normalized) -> Result<(), Error> {
         // In every state of the run: a background tool may ask while it is `finishing` (contracts 4.3).
         if let Normalized::PermissionRequested {
             id,
@@ -148,6 +166,7 @@ impl RunHandler {
         let Some(mut row) = Self::current(tx, run, attempt)? else {
             return Ok(());
         };
+        self.delivered(tx, &row, &event)?;
         let w = self.config.watchdog;
         // A run that waits for a decision on its turn runs no clock: late events of the session do not re-arm it.
         let waits: bool = tx
@@ -163,11 +182,6 @@ impl RunHandler {
             }
             tx.set_deadline(&row.deadline("silence"), tx.now_ms().saturating_add(ms))
         };
-        match &event {
-            Normalized::PromptAcked { key } => super::prompts::advance(tx, &row.id, attempt, *key, "acked")?,
-            Normalized::PromptDropped { key } => super::prompts::withdraw(tx, &row.id, attempt, *key, "harness")?,
-            _ => {}
-        }
         if let Normalized::Usage {
             input_tokens,
             output_tokens,
@@ -220,6 +234,8 @@ impl RunHandler {
                     "UPDATE attempts SET turn_ended = ?3 WHERE run = ?1 AND n = ?2",
                     params![row.id, attempt, ended],
                 )?;
+                // The turn's boundary: the oldest prompt loop-manager holds for it goes now.
+                super::prompts::flush(tx, &row.id, attempt)?;
                 silence(tx, &row, w.silence_ms)
             }
             Normalized::State {
@@ -234,6 +250,22 @@ impl RunHandler {
                 background: false,
             } => self.turn_settled(tx, row, attempt),
             _ => silence(tx, &row, w.silence_ms),
+        }
+    }
+
+    /// The record of the prompt `event` tells of: `acked` (an operator's starts a turn of the operator's), or
+    /// `withdrawn` by the harness.
+    fn delivered(&mut self, tx: &mut Tx<'_>, row: &Row, event: &Normalized) -> Result<(), Error> {
+        match event {
+            Normalized::PromptAcked { key } => {
+                let moved = super::prompts::advance(tx, &row.id, row.attempt, *key, "acked")?;
+                if moved && row.state == "running" && super::prompts::by_operator(tx, &row.id, row.attempt, *key)? {
+                    self.operator_turn(tx, row)?;
+                }
+                Ok(())
+            }
+            Normalized::PromptDropped { key } => super::prompts::withdraw(tx, &row.id, row.attempt, *key, "harness"),
+            _ => Ok(()),
         }
     }
 

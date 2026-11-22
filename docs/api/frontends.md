@@ -51,7 +51,7 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
 formulas, packs, addons (list), config check, explain and reload; runs
-(start, list, state, live view, history, cancel, finish, resolve, takeover, continue); triggers (list, enable, disable, fire by hand);
+(start, list, state, live view, history, cancel, finish, resolve, takeover, instruct, continue); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
 account); events; daemon status, drain and planned restart.
 
@@ -108,12 +108,15 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   waiting on an `await` step. The `step` field names the current step of each run, and the state of a run
   gives the outcomes of the steps it went through as `steps`. A bridge that may send an outcome twice sets `--key`:
   without a key, a late repeat could resolve the step again after a round brought the run back to it.
-- `loop-manager run takeover <run> --attempt <n>` (`POST /v1/runs/{id}/takeover`) and `loop-manager run continue
-  <run> --attempt <n>` (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the
-  operator and hand it back ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's `attempt` as last
-  seen: a run at another attempt answers `stale_attempt` and nothing changes. They print the answer (`accepted`,
-  `stale_attempt`, `run_terminal`, or `not_manual` for a Continue of a run not taken over) and exit 1 unless it is
-  `accepted`.
+- `loop-manager run takeover <run> --attempt <n>` (`POST /v1/runs/{id}/takeover`), `loop-manager run say <run>
+  --attempt <n> <text>` (`POST /v1/runs/{id}/instruct`) and `loop-manager run continue <run> --attempt <n> [--unsent
+  send|withdraw]` (`POST /v1/runs/{id}/continue`), each with an optional `--key`, take a run over for the operator,
+  send its agent an instruction and hand it back ([manual mode](../design/contracts.md#61-states)). `<n>` is the run's
+  `attempt` as last seen: a run at another attempt answers `stale_attempt` and nothing changes. They print the answer
+  (`accepted`, with the instruction's `key` and `state`; `returning` for a Continue that waits for the instructions
+  to go in; `stale_attempt`, `run_terminal`, `no_live_session` for an instruction to a step with no live AI session,
+  `not_manual` for a Continue of a run not taken over, `unsent_input` with the instructions not yet taken in) and
+  exit 1 unless it is `accepted` or `returning`.
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
@@ -150,7 +153,7 @@ client (T3 Code, Zed, any ACP client), started by the client, locally or over `s
 process; it reaches the daemon on its API socket (`--socket`, else `LOOP_MANAGER_SOCKET`, else the XDG default, as
 every command does), and the harnesses stay with the daemon. Logs go to stderr. One ACP session is one run: the
 session id is the run id, across steps, attempts and harnesses. The command lists runs, replays their history and
-follows it, and takes a run over and hands it back ([Humans and runs](#humans-and-runs)).
+follows it, takes a run over, instructs its agent and hands it back ([Humans and runs](#humans-and-runs)).
 
 - `initialize`: protocol version 2 only; a client that asks for version 1 gets `-32022`. The capabilities are the
   baseline `session` (`{}`); `agentInfo` is `loop-manager` and the binary's version.
@@ -167,16 +170,22 @@ follows it, and takes a run over and hands it back ([Humans and runs](#humans-an
   comes. A broken history stream (a restart of the daemon, a dropped connection) is opened again every second from
   the record after the last one read: no hole, no repeat. An unknown run is `-32002`; another replay cursor is
   `-32602`.
-- `session/prompt` is a command when its text, trimmed, is `/lm-takeover` (`POST /v1/runs/{id}/takeover`) or
-  `/lm-continue` (`POST /v1/runs/{id}/continue`). The request's `attempt` is the attempt the session has shown: of the
-  last `attempt` record of the run's history the process has read for it, kept after `session/close`; a daemon whose
-  run is at another attempt answers `stale_attempt` and changes nothing. The client's `idempotencyKey` goes as the
-  `Idempotency-Key` `acp:<run>:<key>` (a client keeps its keys unique within one session). Once the daemon answered,
-  the session gets the command as a `user_message_chunk` (`messageId` `lm-key-<key>`, or `lm-command-<n>` without a
-  key) and the answer as an `agent_message_chunk` notice line (`messageId` `<that id>-reply`): `accepted`, or a
-  refusal (`stale_attempt`, `run_terminal`, `not_manual`) with what to do; an error reply of the daemon is a notice
-  line too, an unreachable daemon `-32603`. The answer to the prompt is that `messageId`. Any other prompt is
-  `-32600` with a message that names the two commands; so is a command to a session this process has not opened.
+- `session/prompt` is a command when its text, trimmed, is `/lm-takeover` (`POST /v1/runs/{id}/takeover`),
+  `/lm-continue` (`POST /v1/runs/{id}/continue`), `/lm-continue send` or `/lm-continue withdraw` (the same with
+  `unsent`); a command with other words after it is `-32602`. Any other text is an instruction to the run's agent
+  (`POST /v1/runs/{id}/instruct`), which takes a run under loop-manager over. The request's `attempt` is the attempt
+  the session has shown: of the last `attempt` record of the run's history the process has read for it, kept after
+  `session/close`; a daemon whose run is at another attempt answers `stale_attempt` and changes nothing. The client's
+  `idempotencyKey` goes as the `Idempotency-Key` `acp:<run>:<key>` (a client keeps its keys unique within one
+  session): a repeat makes no second instruction. Once the daemon answered, the session gets the command as a
+  `user_message_chunk` (`messageId` `lm-key-<key>`, or `lm-command-<n>` without a key) and the answer as an
+  `agent_message_chunk` notice line (`messageId` `<that id>-reply`): `accepted`, `returning`, or a refusal
+  (`stale_attempt`, `run_terminal`, `not_manual`, `unsent_input` naming both choices) with what to do. An instruction
+  taken has no echo of its own: the history's `prompt` record shows it, and its `messageId` is `prompt-<key>`; its
+  notice says whether loop-manager holds it for the end of the turn or sent it, and an instruction refused
+  (`no_live_session` among the refusals) is echoed as a command is. An error reply of the daemon is a notice line too,
+  an unreachable daemon `-32603`. The answer to the prompt is that `messageId`. A prompt to a session this process has
+  not opened is `-32600`.
 - `session/close` stops following; the run goes on, manual or not. `session/cancel` is ignored. `session/new` is
   `-32601` with the message "runs are started with `loop-manager run start`". Other methods are `-32601`.
 - Several clients on one run each get the same stream: each is its own process reading the history.
@@ -219,6 +228,15 @@ requests.
   moved it shows as `manual.deferred`. Continue gives every budget back whole and applies that event once, in the same
   attempt ([contracts 6.1](../design/contracts.md#61-states)). Leaving the client changes nothing: the mode belongs to
   the run, in the state, and outlives a daemon restart.
+- A human instructs the run's agent (`loop-manager run say <id> --attempt <n> <text>`, `POST /v1/runs/{id}/instruct`,
+  any other prompt from an ACP client); the instruction takes a run under loop-manager over first. A step without a
+  live AI session refuses it (`no_live_session`) and starts no agent. A harness that takes prompts into a turn in
+  flight gets it at once, without stopping the turn; for another one loop-manager holds it (`queued`, in
+  `manual.unsent` of the run's state) and sends it once, at the end of the turn, one per turn. An instruction that
+  goes in while a decision on the turn before is awaited makes that decision moot. A Continue with instructions the
+  harness has not taken in needs a choice: `--unsent send` (`unsent: "send"`, `/lm-continue send`) hands the run back
+  once they are in, `--unsent withdraw` takes back those loop-manager still holds, never to be sent, and hands it back
+  now; without one the answer is `unsent_input` with the instructions, and nothing changes.
 
 ## Verified by
 

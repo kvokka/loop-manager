@@ -89,8 +89,8 @@ all of them share.
   | `step` | the run enters a step (its first, the next, a step a check sends it back to, a repeat) | `index` (the step's place in the formula, from 0), `step_kind`, `round`, `step_attempt` |
   | `attempt` | an attempt starts | `attempt_kind` (`new_session`, `resume`), `harness` (`exec`, `drain`, `formula` and `await` for those steps), `session` (the session it resumes, else `null`) |
   | `attempt_end` | an attempt ends | `failure` (contracts 1.3), `null` when it did not fail |
-  | `prompt` | the core decides to send a prompt ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager), `text` |
-  | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`sent`, `acked`, `settled`, `withdrawn`); `by` with `withdrawn` (`harness`: the harness dropped it before it took it) |
+  | `prompt` | the core decides to send a prompt, or takes an operator's instruction ([contracts 6.4](contracts.md#64-prompt-delivery-and-recovery)) | `key`, `source` (`lm`: loop-manager; `operator`: an instruction), `text` |
+  | `prompt_state` | a prompt's delivery moves on | `key`, `state` (`queued`: loop-manager holds an instruction for the turn's end; `intent`: a `queued` one goes; `sent`, `acked`, `settled`, `withdrawn`); `by` with `withdrawn` (`harness`: the harness dropped it before it took it; `operator`: a Continue withdrew it; `attempt_end`: its attempt ended while loop-manager held it) |
   | `permission` | the harness asks for a permission | `id`, `tool`, `tool_use_id`, `input`, `options` |
   | `permission_answer` | a permission request is answered | `id`, `by` (`policy`), `option` (absent: declined) |
   | `exec_output` | the command of an exec step, or a step's check script, writes to its stdout or stderr: written by the runner of the command as the output comes, not by a transaction | `stream` (`stdout`, `stderr`), `text` (the output, invalid UTF-8 replaced), `check: true` for a check script's |

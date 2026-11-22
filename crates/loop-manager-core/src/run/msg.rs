@@ -191,12 +191,34 @@ pub enum Msg {
         run: String,
         attempt: u32,
     },
-    /// The operator hands `run` back at `attempt`: fresh budgets, then the deferred event; the reply is
-    /// `{"answer": "accepted"|"stale_attempt"|"run_terminal"|"not_manual"}` (contracts 6.1).
+    /// The operator hands `run` back at `attempt`: fresh budgets, then the deferred event. With the operator's input
+    /// the harness has not taken in, `unsent` chooses what becomes of it. The reply is `{"answer":
+    /// "accepted"|"returning"|"stale_attempt"|"run_terminal"|"not_manual"}`, or `{"answer": "unsent_input", "unsent":
+    /// [{key, text, state}]}` with no choice made (contracts 6.1).
     Continue {
         run: String,
         attempt: u32,
+        unsent: Option<Unsent>,
     },
+    /// The operator's prompt `text` to the session of `run` at `attempt`; a run under loop-manager is taken over first.
+    /// The reply is `{"answer": "accepted", "key", "state": "queued"|"intent"}` or `{"answer":
+    /// "stale_attempt"|"run_terminal"|"no_live_session"}`; an empty text or one over 64 KiB is rejected (contracts
+    /// 6.1).
+    Instruct {
+        run: String,
+        attempt: u32,
+        text: String,
+    },
+}
+
+/// What a Continue does with the operator's input the harness has not taken in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unsent {
+    /// Hands the run back once the harness has taken every input in.
+    Send,
+    /// Takes back the input loop-manager still holds and hands the run back now.
+    Withdraw,
 }
 
 /// The outcome an agent declares (contracts 1.3 `Outcome`).

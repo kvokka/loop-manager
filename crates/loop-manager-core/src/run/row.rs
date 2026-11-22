@@ -49,11 +49,13 @@ pub(super) struct Row {
     pub(super) manual_ms: Option<i64>,
     /// The event that would have moved the run while it was manual, as JSON (`manual.rs`).
     pub(super) deferred: Option<String>,
+    /// A Continue waits for the harness to take the operator's input in (contracts 6.1).
+    pub(super) returning: bool,
 }
 
 const COLUMNS: &str = "id, project, rig, formula, agent, inputs, correlation, depth, parent_run, workdir, state, \
     class, attempt, prompt, timeout_ms, config, next, created_ms, started_ms, bead, bead_data, step, as_agent, \
-    step_kind, step_attempt, manual, manual_ms, deferred";
+    step_kind, step_attempt, manual, manual_ms, deferred, handing_back";
 
 impl Row {
     pub(super) fn load(tx: &Tx<'_>, run: &str) -> Result<Self, Error> {
@@ -93,6 +95,7 @@ impl Row {
                 manual: r.get(25)?,
                 manual_ms: r.get(26)?,
                 deferred: r.get(27)?,
+                returning: r.get(28)?,
             })
         })
         .optional()
@@ -112,7 +115,8 @@ impl Row {
         let agent = (!self.exec()).then_some(&self.agent);
         let manual = self.manual.then(|| {
             let deferred = (self.deferred.as_deref()).and_then(|d| serde_json::from_str::<Value>(d).ok());
-            json!({ "since": self.manual_ms.map(rfc3339_ms), "deferred": deferred.map(|d| d["event"].clone()) })
+            json!({ "since": self.manual_ms.map(rfc3339_ms), "deferred": deferred.map(|d| d["event"].clone()),
+                "returning": self.returning })
         });
         json!({
             "id": self.id, "formula": self.formula, "step": self.step, "agent": agent, "step_kind": self.step_kind,

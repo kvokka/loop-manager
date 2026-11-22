@@ -337,3 +337,36 @@ fn check_config_lists(d: &Daemon) {
     assert!(shop, "every project's addons without --project: {addons}");
     assert!(!d.cli(&["agent", "list", "--project", "nope"], &[]).status.success());
 }
+
+#[tokio::test]
+async fn an_instruction_and_a_continue_with_its_choice_from_the_cli() {
+    let d = Daemon::start(|_| {}).await;
+    let run = d.create("slow", None).await;
+    let attempt = d.until_state(&run, "running").await["attempt"].to_string();
+    // The exec step has no session: the run is taken over, nothing is sent, and the command says so by its exit.
+    let out = d.cli(&["run", "say", &run, "--attempt", &attempt, "hurry", "--json"], &[]);
+    let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        (out.status.code(), &reply["answer"]),
+        (Some(1), &json!("no_live_session"))
+    );
+    let out = d.cli(
+        &[
+            "run",
+            "continue",
+            &run,
+            "--attempt",
+            &attempt,
+            "--unsent",
+            "send",
+            "--json",
+        ],
+        &[],
+    );
+    let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((out.status.code(), &reply["answer"]), (Some(0), &json!("accepted")));
+    assert_eq!(d.get(&format!("/v1/runs/{run}")).await["control"], "lm");
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}

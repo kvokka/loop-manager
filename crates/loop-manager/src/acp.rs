@@ -1,7 +1,7 @@
 //! `loop-manager acp` (docs/api/frontends.md, "ACP"): an ACP v2 agent over stdio for an outside client, and a client of
 //! the daemon's API. Its sessions are the daemon's runs: listed, replayed from their history and followed as the
-//! history grows. A prompt is one of the commands `/lm-takeover` and `/lm-continue`, sent to the daemon with the attempt
-//! the session shows; any other prompt is refused, and closing a session leaves the run as it is.
+//! history grows. A prompt is one of the commands `/lm-takeover` and `/lm-continue` or else an instruction to the run's
+//! agent, sent to the daemon with the attempt the session shows; closing a session leaves the run as it is.
 
 mod translate;
 
@@ -46,12 +46,14 @@ struct Daemon {
 const COMMANDS: [(&str, &str, &str); 2] = [
     (
         "lm-takeover",
-        "Take the run over: nothing of loop-manager moves it until /lm-continue",
+        "Take the run over: nothing of loop-manager moves it until /lm-continue; any other prompt is an instruction \
+         to its agent and takes it over too",
         "takeover",
     ),
     (
         "lm-continue",
-        "Hand the run back to loop-manager, in the same attempt",
+        "Hand the run back to loop-manager, in the same attempt; with instructions the agent has not taken yet, \
+         `send` hands it back once they are in, `withdraw` takes them back",
         "continue",
     ),
 ];
@@ -229,8 +231,10 @@ impl Daemon {
     }
 }
 
-/// Sends the command `request` is to the daemon with the attempt its session shows, then the command and the daemon's
-/// answer to the client: the answer to `session/prompt` comes once the daemon has taken or refused it.
+/// Sends the command or the instruction `request` is to the daemon with the attempt its session shows, then the
+/// daemon's answer to the client: the answer to `session/prompt` comes once the daemon has taken or refused it. A
+/// command, or an instruction refused, is echoed as the user's message; an instruction taken comes back as the run's
+/// history records it, under the same message id.
 async fn command(
     daemon: &Daemon,
     sessions: &Shared,
@@ -244,38 +248,50 @@ async fn command(
         .filter_map(|block| block["text"].as_str())
         .collect();
     let text = text.trim();
-    let Some(&(name, _, operation)) = COMMANDS.iter().find(|(name, ..)| text.strip_prefix('/') == Some(*name)) else {
-        let error = format!(
-            "run `{run}` takes commands only: `/lm-takeover` takes it over, `/lm-continue` hands it back to loop-manager"
-        );
-        return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_REQUEST, error));
+    let (operation, mut body) = match parse(text) {
+        Ok(Some((operation, None))) => (operation, json!({})),
+        Ok(Some((operation, Some(unsent)))) => (operation, json!({ "unsent": unsent })),
+        Ok(None) => ("instruct", json!({ "text": text })),
+        Err(error) => return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, error)),
     };
     let Some(attempt) = lock(sessions).shown.get(&run).copied() else {
-        let error =
-            format!("session `{run}` is not open: `session/resume` opens it, and a command carries its attempt");
+        let error = format!("session `{run}` is not open: `session/resume` opens it, and a prompt carries its attempt");
         return Err(agent_client_protocol::Error::new(ErrorCode::INVALID_REQUEST, error));
     };
     // The client's key is unique within its session only, and a key of the daemon is one of the whole daemon.
     let key = (request.idempotency_key.as_ref()).map(|key| format!("acp:{run}:{}", key.as_ref()));
     let path = run_path(&run, &format!("/{operation}"));
-    let body = json!({ "attempt": attempt });
-    let line = match daemon.client.request("POST", &path, Some(&body), key.as_deref()).await {
-        Ok(reply) => answered(name, reply["answer"].as_str().unwrap_or_default(), attempt),
+    body["attempt"] = json!(attempt);
+    let shown = if operation == "instruct" {
+        "the instruction"
+    } else {
+        text
+    };
+    let (line, taken) = match daemon.client.request("POST", &path, Some(&body), key.as_deref()).await {
+        Ok(reply) => (
+            answered(shown, &reply, attempt),
+            reply["key"].as_str().map(str::to_owned),
+        ),
         Err(ClientError::Api { error, .. }) => {
-            format!("/{name} failed: {}", error["message"].as_str().unwrap_or_default())
+            let message = error["message"].as_str().unwrap_or_default();
+            (format!("{shown} failed: {message}"), None)
         }
         Err(e) => return Err(internal(&e)),
     };
-    let id = match &request.idempotency_key {
-        Some(key) => format!("lm-key-{}", key.as_ref()),
-        None => format!("lm-command-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+    let id = match (&taken, &request.idempotency_key) {
+        // The history's `prompt` record of the instruction shows it under this id (`translate`).
+        (Some(key), _) => format!("prompt-{key}"),
+        (None, Some(key)) => format!("lm-key-{}", key.as_ref()),
+        (None, None) => format!("lm-command-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
     };
-    send(
-        connection,
-        &run,
-        json!({ "sessionUpdate": "user_message_chunk", "messageId": id,
-        "content": { "type": "text", "text": text } }),
-    )?;
+    if taken.is_none() {
+        send(
+            connection,
+            &run,
+            json!({ "sessionUpdate": "user_message_chunk", "messageId": id,
+            "content": { "type": "text", "text": text } }),
+        )?;
+    }
     send(
         connection,
         &run,
@@ -285,20 +301,64 @@ async fn command(
     Ok(schema::PromptResponse::new(id))
 }
 
-/// The notice line of the daemon's `answer` to the command `name` sent with `attempt`: what came of it, and what to do.
-fn answered(name: &str, answer: &str, attempt: u32) -> String {
-    match (name, answer) {
-        ("lm-takeover", "accepted") => {
+/// The command `text` is: the operation of the run and the choice of `/lm-continue send|withdraw`; `None` for an
+/// instruction; an error for a command with words it does not take.
+fn parse(text: &str) -> std::result::Result<Option<(&'static str, Option<&str>)>, String> {
+    let mut words = text.split_whitespace();
+    let first = words.next().and_then(|w| w.strip_prefix('/'));
+    let Some(&(name, _, operation)) = COMMANDS.iter().find(|(name, ..)| first == Some(*name)) else {
+        return Ok(None);
+    };
+    let rest: Vec<&str> = words.collect();
+    match (name, rest.as_slice()) {
+        (_, []) => Ok(Some((operation, None))),
+        ("lm-continue", [choice @ ("send" | "withdraw")]) => Ok(Some((operation, Some(choice)))),
+        _ => Err(format!(
+            "`/{name}` takes no `{}`: `/lm-takeover`, `/lm-continue`, `/lm-continue send` and `/lm-continue withdraw` \
+             are the commands",
+            rest.join(" ")
+        )),
+    }
+}
+
+/// The notice line of the daemon's `reply` to `what` (the command as sent, or the instruction) sent with `attempt`:
+/// what came of it, and what to do.
+fn answered(what: &str, reply: &Value, attempt: u32) -> String {
+    let answer = reply["answer"].as_str().unwrap_or_default();
+    match (what, answer) {
+        ("/lm-takeover", "accepted") => {
             "/lm-takeover accepted: nothing of loop-manager moves the run until /lm-continue".into()
         }
-        (_, "accepted") => "/lm-continue accepted: loop-manager goes on with the run in the same attempt".into(),
+        ("the instruction", "accepted") if reply["state"] == "queued" => {
+            "the instruction is taken: loop-manager holds it and sends it at the end of the agent's turn; the run is \
+             taken over until /lm-continue"
+                .into()
+        }
+        ("the instruction", "accepted") => {
+            "the instruction is sent to the agent; the run is taken over until /lm-continue".into()
+        }
+        (_, "accepted") => format!("{what} accepted: loop-manager goes on with the run in the same attempt"),
+        (_, "returning") => {
+            format!("{what} accepted: the run goes back to loop-manager once the agent has taken the instructions in")
+        }
+        (_, "unsent_input") => {
+            let n = reply["unsent"].as_array().map_or(0, Vec::len);
+            format!(
+                "{what} refused: {n} instruction(s) the agent has not taken in yet; /lm-continue send hands the run \
+                 back once they are in, /lm-continue withdraw takes back those loop-manager still holds, never to be \
+                 sent, and hands it back now"
+            )
+        }
+        (_, "no_live_session") => "the instruction is not sent: the run's step has no live AI session, and no agent \
+             starts for it; the run is taken over until /lm-continue"
+            .into(),
         (_, "stale_attempt") => format!(
-            "/{name} refused: the run is past attempt {attempt} that this session shows; once its current attempt shows \
-             (`session/resume` brings a closed session up to date), send /{name} again"
+            "{what} refused: the run is past attempt {attempt} that this session shows; once its current attempt shows \
+             (`session/resume` brings a closed session up to date), send it again"
         ),
-        (_, "run_terminal") => format!("/{name} refused: the run has ended"),
-        (_, "not_manual") => format!("/{name} refused: the run is not taken over; /lm-takeover takes it"),
-        (_, answer) => format!("/{name} refused: {answer}"),
+        (_, "run_terminal") => format!("{what} refused: the run has ended"),
+        (_, "not_manual") => format!("{what} refused: the run is not taken over; /lm-takeover takes it"),
+        (_, answer) => format!("{what} refused: {answer}"),
     }
 }
 

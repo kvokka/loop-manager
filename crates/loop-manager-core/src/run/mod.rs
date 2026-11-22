@@ -53,7 +53,7 @@ pub use crate::process::Exit;
 pub use finish::MAX_REMARKS;
 pub use gates::{GateSpec, valid_key};
 pub use hooks::{BundledHook, ExecHooks, HookRunner};
-pub use msg::{Create, Decision, Msg, Outcome, Verdict};
+pub use msg::{Create, Decision, Msg, Outcome, Unsent, Verdict};
 pub use read::{Reader, RunFilter};
 
 type Drivers = Arc<BTreeMap<String, Arc<dyn Driver>>>;
@@ -148,7 +148,8 @@ impl Handler for RunHandler {
             Msg::Create(create) => return self.create(tx, create),
             Msg::Finish { run, token, outcome } => return self.finish(tx, &run, &token, &outcome),
             Msg::Takeover { run, attempt } => return self.takeover(tx, &run, attempt),
-            Msg::Continue { run, attempt } => return self.hand_back(tx, &run, attempt),
+            Msg::Continue { run, attempt, unsent } => return self.hand_back(tx, &run, attempt, unsent),
+            Msg::Instruct { run, attempt, text } => return self.instruct(tx, &run, attempt, &text),
             Msg::Fire { project, rig, trigger } => return self.fire_by_hand(tx, &project, &rig, &trigger),
             Msg::SwitchTrigger {
                 project,
@@ -177,7 +178,7 @@ impl Handler for RunHandler {
                 key,
                 text,
             } => prompts::intent(tx, &run, attempt, 1, key, &text),
-            Msg::PromptSent { run, attempt, key } => prompts::advance(tx, &run, attempt, key, "sent"),
+            Msg::PromptSent { run, attempt, key } => prompts::advance(tx, &run, attempt, key, "sent").map(drop),
             Msg::AttemptFailed { run, attempt, failure } => self.launch_failed(tx, &run, attempt, failure),
             Msg::Driver(event) => self.driver_event(tx, event),
             Msg::ExecDone {

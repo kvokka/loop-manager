@@ -275,25 +275,26 @@ impl RunHandler {
     /// valid, the step timeout resumes with what it had left. Past the remarks ceiling the run fails with `class`;
     /// with no session to take the prompt, the attempt fails with `daemon_crash`.
     pub(super) fn next_prompt(&mut self, tx: &mut Tx<'_>, mut row: Row, text: &str, class: &str) -> Result<(), Error> {
-        let (prompts, paused, harness, handle, session): (i64, Option<i64>, String, Option<String>, Option<String>) =
-            tx.sql().query_row(
-                "SELECT prompts, paused_ms, harness, handle, session FROM attempts WHERE run = ?1 AND n = ?2",
-                params![row.id, row.attempt],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )?;
+        let (prompts, paused, live): (i64, Option<i64>, bool) = tx.sql().query_row(
+            "SELECT prompts, paused_ms, handle IS NOT NULL AND session IS NOT NULL FROM attempts \
+             WHERE run = ?1 AND n = ?2",
+            params![row.id, row.attempt],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
         if prompts > MAX_REMARKS {
             return self.terminal(tx, row, "failed", Some(class), "remarks_ceiling");
         }
-        let n = u32::try_from(prompts + 1).unwrap_or(u32::MAX);
+        // The operator's prompts take numbers too: `prompts` counts those of loop-manager, for the ceiling.
+        let n = super::prompts::next_n(tx, &row.id, row.attempt)?;
         let key = PromptKey::new(&row.id, row.attempt, n);
         super::prompts::intent(tx, &row.id, row.attempt, n, key, text)?;
         // The session of the turn died with the daemon that ran it (recovery let go of its handle), or dies with the
         // one that is stopping now: no next turn starts, the attempt fails for the policy to decide
         // (docs/design/invariants.md), and the prompt left as an intent goes to the session a resumed attempt brings
         // back (contracts 6.4).
-        let (Some(handle), Some(session), None) = (handle, session, &self.stopping) else {
+        if !live || self.stopping.is_some() {
             return self.attempt_failed(tx, row, Failure::new(FailureKind::DaemonCrash, Source::Core));
-        };
+        }
         tx.sql().execute(
             "UPDATE attempts SET outcome = NULL, paused_ms = NULL, prompts = ?3 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, prompts + 1],
@@ -305,13 +306,7 @@ impl RunHandler {
         if row.state != "running" {
             row.set_state(tx, "running", None)?;
         }
-        let payload = json!({
-            "op": "prompt", "run": row.id, "attempt": row.attempt, "harness": harness, "text": text,
-            "handle": serde_json::from_str::<Value>(&handle).unwrap_or_default(),
-            "session": serde_json::from_str::<Value>(&session).unwrap_or_default(),
-            "key": key.0.to_string(),
-        });
-        tx.effect(&row.id, &format!("prompt:{}:{}", row.attempt, prompts + 1), &payload)
+        super::prompts::send(tx, &row.id, row.attempt, (n, &key.0.to_string()), text)
     }
 }
 

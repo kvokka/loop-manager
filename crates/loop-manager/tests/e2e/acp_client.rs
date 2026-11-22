@@ -308,15 +308,18 @@ async fn a_new_session_a_prompt_an_unknown_run_and_a_v1_client_get_their_errors(
         (i32::from(error.code), error.message.as_str()),
         (-32601, "runs are started with `loop-manager run start`")
     );
+    // An instruction and a command need the attempt of a session open here.
     let prompt: schema::PromptRequest =
         serde_json::from_value(json!({ "sessionId": "r1", "prompt": [{ "type": "text", "text": "hi" }] })).unwrap();
     let error = acp.cx.send_request(prompt).block_task().await.unwrap_err();
     assert_eq!(i32::from(error.code), -32600, "{error:?}");
-    assert!(error.message.contains("`/lm-takeover`"), "{error:?}");
-    assert!(error.message.contains("`/lm-continue`"), "{error:?}");
-    // A command needs the attempt of a session open here.
+    assert!(error.message.contains("`session/resume` opens it"), "{error:?}");
     let error = acp.prompt("r1", "/lm-takeover", None).await.unwrap_err();
     assert_eq!(i32::from(error.code), -32600, "{error:?}");
+    // A command with words it does not take is no instruction.
+    let error = acp.prompt("r1", "/lm-continue later", None).await.unwrap_err();
+    assert_eq!(i32::from(error.code), -32602, "{error:?}");
+    assert!(error.message.contains("`/lm-continue withdraw`"), "{error:?}");
     let error = acp.resume("no-such-run", true).await.unwrap_err();
     assert_eq!(i32::from(error.code), -32002, "{error:?}");
     // A client of protocol version 1 only.
@@ -453,6 +456,101 @@ async fn a_command_from_the_screen_of_an_earlier_attempt_is_refused_and_changes_
         "{seen:#?}"
     );
     assert_eq!(control(&d, &run).await, ("manual".to_owned(), 2));
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}
+
+/// Opens the session of `run` with a replay once its agent's session is open: the session shows attempt 1, the attempt
+/// its prompts carry.
+async fn shown(d: &Daemon, acp: &mut Acp, run: &str) {
+    let deadline = Instant::now() + common::WAIT;
+    loop {
+        let view = d.get(&format!("/v1/runs/{run}")).await;
+        if view["attempts"][0]["session"].is_object() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no session: {view:#}");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let seen = acp.resume(run, true).await.unwrap();
+    assert!(seen.iter().any(|u| text(u).starts_with("— attempt 1")), "{seen:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_prompt_takes_the_run_over_and_reaches_the_agent_once_whatever_the_repeats() {
+    // The first turn's tool waits for the file `go`; the turn of the instruction finds it there.
+    let gate = tempfile::tempdir().unwrap();
+    let go = gate.path().join("go");
+    let d = daemon(&format!("while [ ! -e {} ]; do sleep 0.05; done", go.display())).await;
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    shown(&d, &mut acp, &run).await;
+    let (answer, seen) = acp.command(&run, "check the tests too", Some("i1")).await;
+    let id = answer["messageId"].as_str().unwrap().to_owned();
+    assert!(id.starts_with("prompt-"), "{answer}");
+    assert!(
+        text(seen.last().unwrap()).starts_with("— the instruction is taken: loop-manager holds it"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("manual".to_owned(), 1));
+    // The same key again is the same submission, and no second instruction.
+    let (again, repeated) = acp.command(&run, "check the tests too", Some("i1")).await;
+    assert_eq!(again["messageId"], answer["messageId"]);
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    let unsent = view["manual"]["unsent"].as_array().unwrap();
+    assert_eq!(unsent.len(), 1, "{view:#}");
+    assert_eq!(
+        (&unsent[0]["text"], &unsent[0]["state"]),
+        (&json!("check the tests too"), &json!("queued"))
+    );
+
+    fs::write(&go, "").unwrap();
+    let mut after = acp.until(|u| text(u) == "Echo: check the tests too").await;
+    after.extend(acp.until(|u| state(u) == "idle").await);
+    let all: Vec<&Value> = seen.iter().chain(&repeated).chain(&after).collect();
+    let echoes = all.iter().filter(|u| text(u) == "Echo: check the tests too").count();
+    assert_eq!(echoes, 1, "{all:#?}");
+    // The user's message is the history's record of the instruction, under the id the answer gave.
+    let messages: Vec<&&Value> = (all.iter())
+        .filter(|u| u["update"]["sessionUpdate"] == "user_message_chunk" && text(u) == "check the tests too")
+        .collect();
+    assert_eq!(messages.len(), 1, "{all:#?}");
+    assert_eq!(messages[0]["update"]["messageId"], id.as_str());
+    let view = d.get(&format!("/v1/runs/{run}")).await;
+    assert_eq!(view["manual"]["unsent"], json!([]), "{view:#}");
+    d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lm_continue_with_an_instruction_unsent_needs_a_choice_and_withdraw_hands_back_now() {
+    let d = daemon(HANG).await;
+    let run = d.create("build", None).await;
+    let mut acp = Acp::start(&d, &[]).await;
+    shown(&d, &mut acp, &run).await;
+    acp.command(&run, "never mind the docs", None).await;
+    let (_, seen) = acp.command(&run, "/lm-continue", None).await;
+    let refused = text(seen.last().unwrap());
+    assert!(
+        refused.starts_with("— /lm-continue refused: 1 instruction(s) the agent has not taken in yet")
+            && refused.contains("/lm-continue send")
+            && refused.contains("/lm-continue withdraw"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("manual".to_owned(), 1));
+    let (_, seen) = acp.command(&run, "/lm-continue withdraw", Some("w1")).await;
+    assert!(
+        text(seen.last().unwrap()).starts_with("— /lm-continue withdraw accepted"),
+        "{seen:#?}"
+    );
+    assert_eq!(control(&d, &run).await, ("lm".to_owned(), 1));
+    // The history's record of the hand-back may come before or after the answer's notice.
+    let back = |u: &Value| text(u) == "— handed back to loop-manager —\n";
+    if !seen.iter().any(back) {
+        acp.until(back).await;
+    }
     d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
         .await
         .unwrap();
