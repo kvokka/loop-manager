@@ -582,6 +582,51 @@ async fn a_restart_keeps_the_run_manual_and_defers_its_crash() {
     assert_eq!(w.count_of(&run, "run.attempt_failed").await, 1);
 }
 
+/// A restart arms no decision deadline of a manual run whose hooks still wait for a failure taken before the takeover,
+/// and a deadline of the run that still fires is stale: nothing moves until Continue, which arms the decision whole.
+#[tokio::test(start_paused = true)]
+async fn a_restart_arms_no_clock_of_a_manual_run_and_a_stale_one_moves_nothing() {
+    let mut w = common::world_with(POLICY, std::sync::Arc::new(common::Hanging::default()));
+    w.driver.script(vec![
+        Step::Emit(Normalized::TurnStarted),
+        Step::Exit {
+            code: None,
+            signal: Some(9),
+        },
+    ]);
+    let run = w.create().await;
+    w.seq_of(&run, "run.attempt_failed", 0).await;
+    assert_eq!(w.control(&run, 1, true).await, "accepted");
+    let decide = format!("{run}:decide");
+    assert_eq!(w.deadline_at(&decide), None);
+    // A stale deadline left in the store, which the restart loads: of the interrupted state, it would start an attempt.
+    let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
+    let stale = (format!("{run}:state"), w.clock.now_ms() + 2_000);
+    db.execute(
+        "INSERT INTO deadlines (id, at_ms) VALUES (?1, ?2)",
+        rusqlite::params![stale.0, stale.1],
+    )
+    .unwrap();
+    w.restart().await;
+    w.until(None, "daemon.started", 1).await;
+    assert_eq!(
+        w.deadline_at(&decide),
+        None,
+        "the restart arms no decision of a manual run"
+    );
+    tokio::time::sleep(Duration::from_secs(HOUR)).await;
+    let view = w.run_view(&run);
+    assert_eq!(
+        (&view["control"], &view["manual"]["deferred"]),
+        (&json!("manual"), &Value::Null)
+    );
+    assert_eq!(view["attempts"].as_array().unwrap().len(), 1, "no attempt started");
+
+    assert_eq!(w.control(&run, 1, false).await, "accepted");
+    let left = w.deadline_at(&decide).unwrap() - w.clock.now_ms();
+    assert!(left >= 15_000, "{left}");
+}
+
 /// A turn that ended with its outcome while manual stays settled across a restart: Continue moves the run to
 /// `finishing` once, in the same attempt.
 #[tokio::test(start_paused = true)]
