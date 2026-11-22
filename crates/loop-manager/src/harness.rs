@@ -2,7 +2,7 @@
 
 use crate::daemon::Paths;
 use loop_manager_core::{
-    config,
+    config::{self, Config, EffectiveConfig, Name},
     driver::{Adapter, Driver, Setup},
 };
 use std::{
@@ -53,7 +53,7 @@ pub(crate) fn driver(
     paths: &Paths,
 ) -> Option<(Arc<dyn Driver>, PathBuf, &'static str)> {
     let Some(adapter) = adapter(name) else {
-        let acp = loop_manager_acp::Acp::new(name, &harness.options, Some(&paths.socket)).ok()?;
+        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket)).ok()?;
         let command = harness.options["command"].as_str().unwrap_or_default().into();
         return Some((Arc::new(acp), command, "config"));
     };
@@ -82,7 +82,7 @@ fn harness_error(name: &str, harness: &config::Harness, paths: &Paths) -> Option
         if harness.binary.is_some() {
             return Some("`binary`: an ACP harness names its agent executable by `command`".into());
         }
-        return loop_manager_acp::Acp::new(name, &harness.options, None).err();
+        return loop_manager_acp::Acp::new(name, &harness.options, &paths.state, None).err();
     };
     // The binary is not resolved for a check: no adapter reads it before a spawn.
     let binary = harness.binary.clone().unwrap_or_else(|| name.into());
@@ -121,6 +121,20 @@ pub(crate) fn load(paths: &Paths) -> Result<config::Config, Vec<String>> {
     let harnesses = (config.harnesses.iter()).filter_map(|(name, h)| {
         harness_error(name, h, paths).map(|e| format!("{}: `harness.{name}`: {e}", file.display()))
     });
+    // What an agent on an ACP harness sets that the driver has no mechanism for, said now and not at its attempt.
+    let acp =
+        (config.harnesses.iter()).filter(|(name, h)| adapter(name).is_none() && h.options.contains_key("command"));
+    let unsupported = acp.flat_map(|(name, _)| {
+        let agents = agents(&config, name).into_iter();
+        let refused = agents.filter_map(|(label, c)| {
+            loop_manager_acp::unsupported(name, c.as_ref()?)
+                .err()
+                .map(|e| (label, e))
+        });
+        refused
+            .map(|(label, e)| format!("agent `{label}`: {e}"))
+            .collect::<Vec<_>>()
+    });
     let all = config
         .bundled
         .iter()
@@ -130,6 +144,7 @@ pub(crate) fn load(paths: &Paths) -> Result<config::Config, Vec<String>> {
         .filter_map(|b| loop_manager_addons::check(b.name, &b.params).err())
         .map(|e| e.to_string())
         .chain(harnesses)
+        .chain(unsupported)
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
@@ -137,4 +152,41 @@ pub(crate) fn load(paths: &Paths) -> Result<config::Config, Vec<String>> {
         true => Ok(config),
         false => Err(errors),
     }
+}
+
+/// The agents on `harness` in every project, root and rig, labelled `<project>/<place>@<agent>`, with their effective
+/// configs: each pack agent alone, `None` where it does not assemble, then as the runs of every prompt formula have
+/// it, a variant by its name.
+pub(crate) fn agents(config: &Config, harness: &str) -> Vec<(String, Option<EffectiveConfig>)> {
+    let mut found = std::collections::BTreeMap::new();
+    for p in &config.projects {
+        let rigs: Vec<&str> = p.places().map(|(r, _)| r).collect();
+        for pack in &p.packs {
+            for (name, agent) in &pack.agents {
+                let name = Name {
+                    pack: pack.name.clone(),
+                    name: name.clone(),
+                };
+                for rig in &rigs {
+                    let label = format!("{}/{rig}@{name}", p.name);
+                    match config.effective(&p.name, Some(rig), &name) {
+                        Ok(c) if c.harness == harness => drop(found.insert(label, Some(c))),
+                        Err(_) if agent.harness.as_deref() == Some(harness) => drop(found.insert(label, None)),
+                        _ => {}
+                    }
+                }
+            }
+            for (formula, f) in pack.formulas.iter().map(|(n, f)| (format!("{}.{n}", pack.name), f)) {
+                for (rig, step) in rigs.iter().flat_map(|r| f.steps.iter().map(move |s| (r, &s.name))) {
+                    // An exec step has no agent.
+                    if let Ok((agent, c)) = config.for_run(&p.name, rig, &formula, step)
+                        && c.harness == harness
+                    {
+                        found.insert(format!("{}/{rig}@{agent}", p.name), Some(c));
+                    }
+                }
+            }
+        }
+    }
+    found.into_iter().collect()
 }

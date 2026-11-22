@@ -107,7 +107,11 @@ loop-manager doctor                                      # with the daemon runni
 ```
 
 `loop-manager doctor` checks the config, each harness binary (where it was found, its version, the login), br and its
-license, the modes of the state and socket directories, and the state with its outbox. Without `--config` it asks
+license, the modes of the state and socket directories, and the state with its outbox. An ACP harness of the config
+gets one line, `<name> acp`: the agent is started, asked `initialize` and stopped, with no session and no tokens
+spent; the line names the agent and its version, the negotiated protocol and the capabilities it advertised
+(`acp-agent 0.0.1, ACP protocol 2; capabilities: session.mcp (stdio, http)`), or is an `error` saying why the agent
+cannot serve a run ([adapters](../design/adapters.md#acp-v2-harnesses)). Without `--config` it asks
 the running daemon (`GET /v1/doctor`), which makes the checks from inside its process, with its environment, `PATH`
 and config file; with no daemon it fails and says so. With `--config <file>` it needs no daemon and checks that file
 from the shell it runs in. Both modes print the findings in TOON by default and exit non-zero when a check has

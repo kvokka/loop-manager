@@ -59,9 +59,10 @@ config ([config](config.md#where-the-bundled-addons-end-and-the-core-begins)).
 
 A `[harness.<name>]` of the orchestrator config whose name has no adapter in the build and which has a `command` is an
 ACP v2 agent ([config](config.md#harness-and-model)): `command` is the executable, `args` its literal arguments, `env`
-its environment under the agent's own `env`. Any other key, or a `binary`, is a config error that names it. The driver
-is `loop_manager_acp::Acp`, the root's fallback in `crates/loop-manager/src/harness.rs` for a name outside `ADAPTERS`;
-the crate depends on `agent-client-protocol` 5.5.1 with the feature `unstable_protocol_v2`.
+its environment under the agent's own `env`, `trace` a bool that turns on the protocol trace. Any other key, or a
+`binary`, is a config error that names it. The driver is `loop_manager_acp::Acp`, the root's fallback in
+`crates/loop-manager/src/harness.rs` for a name outside `ADAPTERS`; the crate depends on `agent-client-protocol` 5.5.1
+with the feature `unstable_protocol_v2`.
 
 - **A process per session.** The attempt environment and the agent's home are its process's, so an instance holds one
   session and stops when the session is done (`sessions_per_instance` 1, `instance_idle` 0). The process is spawned by
@@ -74,8 +75,12 @@ the crate depends on `agent-client-protocol` 5.5.1 with the feature `unstable_pr
   (stdio and HTTP, service placeholders verbatim) and the system prompt as `systemPrompt` in `append` mode. A `model`
   and an `effort` go through `session/set_config_option` to the option of category `model` and `thought_level` the
   agent offers in its answer; an agent with no such option fails the attempt with `config_error` naming the key. The
-  driver has no mechanism for `hooks`, `skills`, `subagents`, a `native` block or `inherit_host = false`: an agent
-  with one fails its attempt with `config_error` naming the key.
+  instance keeps the `capabilities` of the agent's `initialize` answer: before `session/new` or `session/resume` is
+  sent, an MCP server of a transport absent from `capabilities.session.mcp` (`stdio`, `http`) fails the attempt with
+  `config_error` naming the server and the transport. The driver has no mechanism for `hooks`, `skills`,
+  `subagents`, a `native` block or `inherit_host = false`: `loop_manager_acp::unsupported` refuses them by key, as
+  a load error that names the agent, the key and the harness ([config](config.md#harness-and-model)), and again at
+  an attempt's start.
 - **The turn.** `send_prompt` is `session/prompt` with the `PromptKey` as `idempotencyKey`; the agent answers once it
   took the prompt. `prompt.acked` comes from that answer or from the first `state_update: running` of the session,
   whichever is first, so it always precedes `turn.started`. `state_update: idle` ends the turn: `end_turn`, no reason
@@ -94,11 +99,28 @@ the crate depends on `agent-client-protocol` 5.5.1 with the feature `unstable_pr
   `transcript_divergence`. `transcript` answers `Present { delivered: false }`: a resumed attempt sends its prompt
   again with the same idempotency key, which an agent that keeps its keys takes once. There is no transcript file
   for `chat_log` and no live tap.
+- **The `doctor` probe.** `Acp::probe` spawns the agent as for a session (the clean base of `base_env`, the harness's
+  `env` resolved, its own process group) with no attempt, sends `initialize` with `protocolVersion: 2`, waits for the
+  answer up to 10 s, closes the agent's stdin and stops its process group. `loop-manager doctor` prints it as one
+  check, `<name> acp`: `ok` with the agent's name and version, the negotiated version and the capabilities it
+  advertised (`acp-agent 0.0.1, ACP protocol 2; capabilities: session.mcp (stdio, http), session.systemPrompt; auth
+  methods: …`), or `error` with the same incompatibility text an attempt would fail with, or the spawn error. No
+  session is opened and no tokens are spent.
+- **The protocol trace.** With `trace = true` every JSON-RPC line the driver sends to and receives from an instance
+  is appended to `<state>/trace/<instance id>.jsonl` as `{"ts_ms", "dir": "send" | "recv", "msg"}`, `msg` the line
+  as JSON, or as a string when it does not parse. The directory is made with mode 0700, the file 0600; a file stops
+  growing at 256 MiB. Before a line is written, these values are replaced by `[redacted]` wherever they occur in a
+  string of it: the attempt token, the values the harness's and the agent's `env` resolved to, and the values of the
+  `env` and `headers` of the session's MCP servers (service tokens arrive there). Prompt text, the agent's messages
+  and tool output are not redacted beyond those values: a secret a tool prints in another form is written as it is.
+  `trace` is no part of the process part, so turning it on changes no fingerprint; loop-manager does not remove trace
+  files.
 
 The test fixture `acp-agent` (`crates/loop-manager-testkit/src/bin/acp-agent.rs`) is such an agent: it echoes the
 prompt, runs `ACP_AGENT_COMMAND` with `sh -c` as an `execute` tool call, keeps the idempotency keys of its process, and
 with `--v1` speaks only protocol version 1. `crates/loop-manager/tests/e2e/acp.rs` runs a formula on it through the
-finisher and checks the v1 refusal; `crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates.
+finisher and checks the v1 refusal, the MCP transport check and the redacted trace;
+`crates/loop-manager-acp/src/session/tests.rs` holds the mapping of the updates.
 
 ## What the core expects of a driver
 

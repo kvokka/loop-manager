@@ -15,7 +15,7 @@ pub(crate) fn process(
     config: &EffectiveConfig,
     plan: &SessionPlan,
 ) -> Result<Value, Failure> {
-    unsupported(harness, config)?;
+    unsupported(harness, config).map_err(config_error)?;
     let (command, args, env) = setup;
     let mut env = env.clone();
     env.extend(config.env.iter().map(|(k, v)| (k.clone(), json!(v.value))));
@@ -44,7 +44,7 @@ pub(crate) fn process(
 
 /// What a harness known only by its config has no mechanism for: refused by key, so the agent's config says what to
 /// drop (docs/design/config.md).
-fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), Failure> {
+pub(crate) fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), String> {
     let refused = [
         ("hooks", !config.hooks.is_empty()),
         ("skills", config.skills.values().any(|s| s.value.enabled)),
@@ -53,9 +53,7 @@ fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), Failure> {
         ("inherit_host", !config.inherits_host()),
     ];
     match refused.into_iter().find(|(_, set)| *set) {
-        Some((key, _)) => Err(config_error(format!(
-            "`{key}`: the ACP harness `{harness}` has no mechanism for it"
-        ))),
+        Some((key, _)) => Err(format!("`{key}`: the ACP harness `{harness}` has no mechanism for it")),
         None => Ok(()),
     }
 }
@@ -94,12 +92,34 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan) -> Result<Va
     }))
 }
 
-/// The attempt environment (contracts 4.6) on the base of `child::base_env`.
-pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(String, String)>, Failure> {
+/// The MCP servers of the session part `part` of a transport the agent did not advertise in
+/// `capabilities.session.mcp` of its `initialize` answer (`capabilities`), refused before `session/new`.
+pub(crate) fn transports(harness: &str, part: &Value, capabilities: &Value) -> Result<(), Failure> {
+    let servers = part["mcpServers"].as_array().into_iter().flatten();
+    for server in servers {
+        let transport = server["type"].as_str().unwrap_or_default();
+        if capabilities["session"]["mcp"][transport].is_null() {
+            return Err(config_error(format!(
+                "MCP server `{}`: the agent of harness `{harness}` advertises no `{transport}` MCP transport",
+                server["name"].as_str().unwrap_or_default()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The process environment on the base of `child::base_env`: the daemon's `PATH`, `HOME`, `LANG` and
+/// `HOST_NETWORK_ENV`, then `env`, the instance id and the socket.
+pub(crate) fn base(env: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(String, String)>, Failure> {
     let vars = ["PATH", "HOME", "LANG"]
         .into_iter()
         .chain(loop_manager_contract::driver::HOST_NETWORK_ENV);
-    let mut env = loop_manager_contract::driver::child::base_env(vars, &p["env"], id, socket)?;
+    loop_manager_contract::driver::child::base_env(vars, env, id, socket)
+}
+
+/// The attempt environment (contracts 4.6) on the [`base`].
+pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>) -> Result<Vec<(String, String)>, Failure> {
+    let mut env = base(&p["env"], id, socket)?;
     let text = |v: &Value| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string());
     env.extend([
         ("LOOP_MANAGER_RUN".to_owned(), text(&p["run"])),

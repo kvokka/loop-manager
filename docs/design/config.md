@@ -277,6 +277,14 @@ defaults. Any other name is an ACP v2 agent the orchestrator config names by `co
 every ai step of every formula of a project must assemble on every rig and on the root, and an error names the
 project file, the formula and rig (`formula `kit.implement` on rig `backend`: no layer sets `harness``).
 
+An ACP harness has no mechanism for `hooks`, an enabled skill, `subagents`, a `native` block or
+`inherit_host = false`. An agent on one that sets any of them, alone or as a formula step runs it, is a load error
+too, reported by `config check`, `doctor` and the daemon's start, naming the agent, the key and the harness:
+`agent `shop/web@shop.dev`: `hooks`: the ACP harness `my-agent` has no mechanism for it`. What depends on the agent's
+own answers is checked when an attempt starts, as a `config_error` of the attempt naming the key: a `model` or
+`effort` with no such session option, an MCP server of a transport the agent does not advertise
+([adapters](adapters.md#acp-v2-harnesses)).
+
 `model` is a full name, passed to the harness as it is, or a short name of the adapter's table, expanded to the
 latest model of that family when the config is assembled: codex takes `astra`, `luna`, `terra`, `sol`; claude
 resolves `fable`, `opus`, `sonnet`, `haiku` itself, so they go to it as they are. The model gate of a run is
@@ -365,6 +373,7 @@ command = "/opt/my-agent/bin/acp"   # the agent executable, run without a shell
 args = ["--stdio"]                  # literal arguments (default none)
 env = { MY_AGENT_KEY = "${KEY}" }   # the agent's environment, under the agent's own `env`; `${NAME}` as in `env`
 model = "large"                     # set through the session's `model` config option the agent offers
+trace = true                        # write the protocol trace of each instance (default false; see adapters.md)
 
 [[addon]]                          # an installed addon; its orchestrator side is enabled
 path = "~/loop-manager-addons/loop-manager-addon-mail"

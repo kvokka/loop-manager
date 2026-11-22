@@ -102,3 +102,22 @@ fn the_session_part_is_the_session_new_request_with_servers_verbatim() {
     assert_eq!(part["mcpServers"][1]["env"], json!([{ "name": "A", "value": "1" }]));
     assert_eq!(part["systemPrompt"]["content"][0]["text"], "be brief");
 }
+
+#[test]
+fn an_mcp_server_of_a_transport_the_agent_did_not_advertise_is_refused_by_name() {
+    let part = json!({ "mcpServers": [
+        { "type": "stdio", "name": "probe", "command": "/bin/probe", "args": [], "env": [] },
+        { "type": "http", "name": "mail", "url": "http://127.0.0.1:1/mcp", "headers": [] },
+    ] });
+    let both = json!({ "session": { "mcp": { "stdio": {}, "http": {} } } });
+    assert!(transports("fake", &part, &both).is_ok());
+    let error = transports("fake", &part, &json!({ "session": { "mcp": { "stdio": {} } } })).unwrap_err();
+    assert_eq!(error.kind, loop_manager_contract::driver::FailureKind::ConfigError);
+    assert_eq!(
+        error.raw,
+        "MCP server `mail`: the agent of harness `fake` advertises no `http` MCP transport"
+    );
+    let error = transports("fake", &part, &json!({ "session": {} })).unwrap_err();
+    assert!(error.raw.starts_with("MCP server `probe`"), "{}", error.raw);
+    assert!(transports("fake", &json!({ "mcpServers": [] }), &json!({ "session": {} })).is_ok());
+}

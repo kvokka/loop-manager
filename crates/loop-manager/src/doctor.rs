@@ -1,12 +1,12 @@
 //! The checks of `loop-manager doctor` (docs/guide/install.md), made by the daemon (`GET /v1/doctor`) or, for a file named with
-//! `--config`, by the CLI without one: the harness and br binaries with their versions and logins, the private
-//! directories, the state and its outbox; and `loop-manager daemon --service`, the service file that runs the daemon.
+//! `--config`, by the CLI without one: the harness and br binaries with their versions and logins, the `initialize` of
+//! each ACP agent, the private directories, the state and its outbox; and `loop-manager daemon --service`, the service
+//! file that runs the daemon.
 
 use crate::{
     daemon::Paths,
-    harness::{adapter, binary, load},
+    harness::{adapter, agents, binary, load},
 };
-use loop_manager_core::config::{Config, EffectiveConfig, Name};
 use loop_manager_front::cli::Service;
 use serde_json::{Value, json};
 use std::{
@@ -38,8 +38,11 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
             };
             found.push(check("config", "ok", detail));
             for (name, harness) in &config.harnesses {
-                // `load` refused a harness with no adapter.
-                let Some(adapter) = adapter(name) else { continue };
+                // A harness with no adapter `load` let through is an ACP agent.
+                let Some(adapter) = adapter(name) else {
+                    found.push(acp(name, harness, paths));
+                    continue;
+                };
                 let (path, source) = binary(name, harness.binary.as_deref());
                 found.push(binary_check(name, &path, source, |p| {
                     loop_manager_core::supported_version(p, adapter.minimum)
@@ -88,41 +91,24 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
     found
 }
 
-/// The agents on `harness` in every project, root and rig, labelled `<project>/<place>@<agent>`, with their effective
-/// configs: each pack agent alone, `None` where it does not assemble, then as the runs of every prompt formula have
-/// it, a variant by its name.
-fn agents(config: &Config, harness: &str) -> Vec<(String, Option<EffectiveConfig>)> {
-    let mut found = std::collections::BTreeMap::new();
-    for p in &config.projects {
-        let rigs: Vec<&str> = p.places().map(|(r, _)| r).collect();
-        for pack in &p.packs {
-            for (name, agent) in &pack.agents {
-                let name = Name {
-                    pack: pack.name.clone(),
-                    name: name.clone(),
-                };
-                for rig in &rigs {
-                    let label = format!("{}/{rig}@{name}", p.name);
-                    match config.effective(&p.name, Some(rig), &name) {
-                        Ok(c) if c.harness == harness => drop(found.insert(label, Some(c))),
-                        Err(_) if agent.harness.as_deref() == Some(harness) => drop(found.insert(label, None)),
-                        _ => {}
-                    }
-                }
-            }
-            for (formula, f) in pack.formulas.iter().map(|(n, f)| (format!("{}.{n}", pack.name), f)) {
-                for (rig, step) in rigs.iter().flat_map(|r| f.steps.iter().map(move |s| (r, &s.name))) {
-                    // An exec step has no agent.
-                    if let Ok((agent, c)) = config.for_run(&p.name, rig, &formula, step)
-                        && c.harness == harness
-                    {
-                        found.insert(format!("{}/{rig}@{agent}", p.name), Some(c));
-                    }
-                }
-            }
-        }
+/// The `doctor` probe of the ACP agent of harness `name`: `initialize`, no session.
+fn acp(name: &str, harness: &loop_manager_core::config::Harness, paths: &Paths) -> Value {
+    let probe = async {
+        let acp = loop_manager_acp::Acp::new(name, &harness.options, &paths.state, Some(&paths.socket))?;
+        acp.probe().await
+    };
+    let probed = match tokio::runtime::Handle::try_current() {
+        // The daemon answers `GET /v1/doctor` in `block_in_place` on a worker of its own runtime.
+        Ok(runtime) => runtime.block_on(probe),
+        Err(_) => match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime.block_on(probe),
+            Err(e) => Err(format!("runtime: {e}")),
+        },
+    };
+    match probed {
+        Ok(detail) => check(format!("{name} acp"), "ok", detail),
+        Err(why) => check(format!("{name} acp"), "error", why),
     }
-    found.into_iter().collect()
 }
 
 /// The binary exists and its version passes `version`, the check of its adapter.

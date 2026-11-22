@@ -5,6 +5,7 @@
 
 mod part;
 mod session;
+mod trace;
 
 use agent_client_protocol::{
     Agent, Client, Lines,
@@ -31,12 +32,16 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
+    process::{Child, Command},
     sync::{broadcast, oneshot},
 };
+use trace::Trace;
 
 /// How long a request that only opens or closes something may take.
 const REQUEST_LIMIT: Duration = Duration::from_secs(60);
+
+/// How long the `doctor` probe waits for the answer to `initialize`.
+const PROBE_LIMIT: Duration = Duration::from_secs(10);
 
 /// A harness known by its `[harness.<name>]` alone: the agent executable, its literal arguments and environment.
 pub struct Acp {
@@ -45,6 +50,8 @@ pub struct Acp {
     args: Vec<String>,
     env: Map<String, Value>,
     socket: Option<PathBuf>,
+    /// The directory of the protocol traces, when `trace = true`.
+    trace: Option<PathBuf>,
     instances: Arc<Mutex<HashMap<String, Arc<Instance>>>>,
 }
 
@@ -54,6 +61,9 @@ struct Instance {
     shared: Arc<Mutex<Shared>>,
     /// Ends the connection, which closes the agent's stdin.
     close: Mutex<Option<oneshot::Sender<()>>>,
+    /// The `capabilities` of the agent's `initialize` answer.
+    capabilities: Value,
+    trace: Option<Arc<Trace>>,
 }
 
 /// What the connection's handlers and the driver's calls share: one sender at a time, in `seq` order.
@@ -88,14 +98,16 @@ fn failed(error: &agent_client_protocol::Error) -> Failure {
 }
 
 impl Acp {
-    /// The driver of harness `name` on its `[harness.<name>]` keys; the error names the key that is wrong.
-    pub fn new(name: &str, options: &toml::Table, socket: Option<&Path>) -> Result<Self, String> {
+    /// The driver of harness `name` on its `[harness.<name>]` keys, its traces under the daemon's `state` directory;
+    /// the error names the key that is wrong.
+    pub fn new(name: &str, options: &toml::Table, state: &Path, socket: Option<&Path>) -> Result<Self, String> {
         let mut driver = Self {
             name: name.to_owned(),
             command: PathBuf::new(),
             args: Vec::new(),
             env: Map::new(),
             socket: socket.map(Path::to_owned),
+            trace: None,
             instances: Arc::default(),
         };
         for (key, value) in options {
@@ -111,7 +123,8 @@ impl Acp {
                         driver.env.insert(k.clone(), json!(v));
                     }
                 }
-                ("command" | "args" | "env", _) => return Err(format!("`{key}` has the wrong type")),
+                ("trace", toml::Value::Boolean(on)) => driver.trace = on.then(|| state.join("trace")),
+                ("command" | "args" | "env" | "trace", _) => return Err(format!("`{key}` has the wrong type")),
                 _ => return Err(format!("unknown key `{key}`")),
             }
         }
@@ -125,13 +138,29 @@ impl Acp {
         lock(&self.instances).get(id).cloned().ok_or_else(crashed)
     }
 
-    async fn start(&self, id: &str, p: &Value, sink: EventSink) -> Result<InstanceHandle, Failure> {
+    /// The command of the agent with its arguments and the clean environment `env`.
+    fn command(&self, env: Vec<(String, String)>) -> Command {
         let mut command = Command::new(&self.command);
+        command.args(&self.args).env_clear().envs(env);
         command
-            .args(&self.args)
-            .env_clear()
-            .envs(part::env(p, id, self.socket.as_deref())?)
-            .current_dir(p["workdir"].as_str().unwrap_or("."));
+    }
+
+    async fn start(&self, id: &str, p: &Value, sink: EventSink) -> Result<InstanceHandle, Failure> {
+        let env = part::env(p, id, self.socket.as_deref())?;
+        let trace = match &self.trace {
+            Some(dir) => {
+                // The attempt token and the values the harness's and the agent's `env` resolved to.
+                let named = |k: &str| k == "LOOP_MANAGER_ATTEMPT_TOKEN" || p["env"].get(k).is_some();
+                let secrets = env.iter().filter(|(k, _)| named(k)).map(|(_, v)| v.clone());
+                let opened = Trace::open(dir, id, secrets.collect());
+                Some(Arc::new(opened.map_err(|e| {
+                    child::config_error(format!("`trace`: {}: {e}", dir.display()))
+                })?))
+            }
+            None => None,
+        };
+        let mut command = self.command(env);
+        command.current_dir(p["workdir"].as_str().unwrap_or("."));
         let (mut process, pid, start_time) = child::spawn(&mut command, &self.command)?;
         let handle = InstanceHandle {
             id: id.to_owned(),
@@ -145,25 +174,13 @@ impl Acp {
             session: None,
             started: false,
         }));
-        let stdout = BufReader::new(process.stdout.take().expect("stdout is piped"));
-        let incoming = tokio_stream::wrappers::LinesStream::new(stdout.lines());
-        let stdin = process.stdin.take().expect("stdin is piped");
-        let outgoing = futures::sink::unfold(stdin, async |mut stdin, line: String| {
-            stdin.write_all(format!("{line}\n").as_bytes()).await?;
-            stdin.flush().await?;
-            Ok::<_, std::io::Error>(stdin)
-        });
+        let transport = lines(&mut process, trace.clone());
         let stderr = tokio::spawn(loop_manager_contract::driver::stderr_tail(
             process.stderr.take().expect("stderr is piped"),
         ));
         let (conn_tx, conn_rx) = oneshot::channel();
         let (close_tx, close_rx) = oneshot::channel::<()>();
-        let connection = connect(
-            shared.clone(),
-            Lines::new(Box::pin(outgoing), incoming),
-            conn_tx,
-            close_rx,
-        );
+        let connection = connect(shared.clone(), transport, conn_tx, close_rx);
         let (instances, known, own) = (self.instances.clone(), shared.clone(), id.to_owned());
         let reader = tokio::spawn(async move {
             let _ = connection.await;
@@ -185,21 +202,34 @@ impl Acp {
         let Ok(conn) = conn_rx.await else {
             return Err(stopped(&handle, crashed()).await);
         };
-        if let Err(failure) = initialize(&conn, &self.name, &self.command).await {
-            return Err(stopped(&handle, failure).await);
-        }
+        let answer = match initialize(&conn, &self.name, &self.command).await {
+            Ok(answer) => answer,
+            Err(failure) => return Err(stopped(&handle, failure).await),
+        };
         lock(&shared).started = true;
         let instance = Arc::new(Instance {
             conn,
             shared,
             close: Mutex::new(Some(close_tx)),
+            capabilities: serde_json::to_value(&answer.capabilities).unwrap_or_default(),
+            trace,
         });
         lock(&self.instances).insert(id.to_owned(), instance);
         Ok(handle)
     }
 
+    /// The instance `id`, checked to take the MCP servers of the session part `part`, its trace told their secrets.
+    fn for_session(&self, id: &str, part: &Value) -> Result<Arc<Instance>, Failure> {
+        let known = self.instance(id)?;
+        part::transports(&self.name, part, &known.capabilities)?;
+        if let Some(trace) = &known.trace {
+            trace.secrets(trace::mcp_secrets(part));
+        }
+        Ok(known)
+    }
+
     async fn open(&self, instance: &InstanceHandle, part: &Value) -> Result<SessionRef, Failure> {
-        let known = self.instance(&instance.id)?;
+        let known = self.for_session(&instance.id, part)?;
         let request: schema::NewSessionRequest =
             serde_json::from_value(part.clone()).map_err(|e| child::config_error(format!("session/new: {e}")))?;
         let opened = request_within(known.conn.send_request(request).block_task()).await?;
@@ -229,7 +259,7 @@ impl Acp {
     }
 
     async fn resume(&self, instance: &InstanceHandle, session: &SessionRef, part: &Value) -> Result<(), Failure> {
-        let known = self.instance(&instance.id)?;
+        let known = self.for_session(&instance.id, part)?;
         let mut params = part.clone();
         params["sessionId"] = session.0["session_id"].clone();
         let request: schema::ResumeSessionRequest =
@@ -274,6 +304,28 @@ impl Acp {
             Err(error) => Err(failed(&error)),
         }
     }
+}
+
+/// The JSON-RPC lines over the stdin and stdout of `process`, each line sent and received also written to `trace`.
+fn lines(process: &mut Child, trace: Option<Arc<Trace>>) -> impl agent_client_protocol::ConnectTo<Client> + 'static {
+    use futures::StreamExt;
+    let stdout = BufReader::new(process.stdout.take().expect("stdout is piped"));
+    let received = trace.clone();
+    let incoming = tokio_stream::wrappers::LinesStream::new(stdout.lines()).inspect(move |line| {
+        if let (Some(trace), Ok(line)) = (&received, line) {
+            trace.record("recv", line);
+        }
+    });
+    let stdin = process.stdin.take().expect("stdin is piped");
+    let outgoing = futures::sink::unfold((stdin, trace), async |(mut stdin, trace), line: String| {
+        if let Some(trace) = &trace {
+            trace.record("send", &line);
+        }
+        stdin.write_all(format!("{line}\n").as_bytes()).await?;
+        stdin.flush().await?;
+        Ok::<_, std::io::Error>((stdin, trace))
+    });
+    Lines::new(Box::pin(outgoing), incoming)
 }
 
 /// Runs the client side of the connection over `transport` until the agent's stdout ends or `close` fires; the
@@ -331,7 +383,11 @@ fn decline(request: &schema::RequestPermissionRequest) -> schema::RequestPermiss
 
 /// `initialize` with protocol version 2; an agent that settles on another version, or offers no sessions, cannot
 /// serve a run (docs/design/adapters.md).
-async fn initialize(conn: &ConnectionTo<Agent>, harness: &str, command: &Path) -> Result<(), Failure> {
+async fn initialize(
+    conn: &ConnectionTo<Agent>,
+    harness: &str,
+    command: &Path,
+) -> Result<Box<schema::InitializeResponse>, Failure> {
     let me = schema::Implementation::new("loop-manager", env!("CARGO_PKG_VERSION"));
     let request = schema::InitializeRequest::new(ProtocolVersion::V2, me);
     let answer = request_within(conn.send_initialize(request).block_task()).await;
@@ -342,7 +398,7 @@ async fn initialize(conn: &ConnectionTo<Agent>, harness: &str, command: &Path) -
         ))
     };
     match answer {
-        Ok(InitializeOutcome::Initialized(answer)) if answer.capabilities.session.is_some() => Ok(()),
+        Ok(InitializeOutcome::Initialized(answer)) if answer.capabilities.session.is_some() => Ok(answer),
         Ok(InitializeOutcome::Initialized(_)) => Err(child::config_error(format!(
             "harness `{harness}`: `{}` offers no ACP sessions",
             command.display()
@@ -376,6 +432,100 @@ async fn request_within<T>(
 async fn stopped(handle: &InstanceHandle, failure: Failure) -> Failure {
     child::stop(handle, Duration::from_secs(2), false).await;
     failure
+}
+
+/// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, by key:
+/// the same refusal as at an attempt's start, said when the config loads (docs/design/config.md).
+pub fn unsupported(harness: &str, config: &EffectiveConfig) -> Result<(), String> {
+    part::unsupported(harness, config)
+}
+
+impl Acp {
+    /// The `doctor` probe: the agent spawned as for a session, with no attempt, asked `initialize` within
+    /// [`PROBE_LIMIT`], then its stdin closed and its process group stopped. The agent's name and version, the
+    /// negotiated protocol version and its capabilities, or why it cannot serve a run.
+    pub async fn probe(&self) -> Result<String, String> {
+        const ID: &str = "doctor";
+        let env = part::base(&Value::Object(self.env.clone()), ID, self.socket.as_deref()).map_err(|f| f.raw)?;
+        let (mut process, pid, start_time) = child::spawn(&mut self.command(env), &self.command).map_err(|f| f.raw)?;
+        let handle = InstanceHandle {
+            id: ID.to_owned(),
+            pid,
+            start_time,
+            pgid: pid,
+        };
+        let stderr = tokio::spawn(loop_manager_contract::driver::stderr_tail(
+            process.stderr.take().expect("stderr is piped"),
+        ));
+        let transport = lines(&mut process, None);
+        let (name, command) = (&self.name, &self.command);
+        let asked = Client
+            .v2()
+            .name("loop-manager")
+            .connect_with(transport, async |cx: ConnectionTo<Agent>| {
+                Ok(tokio::time::timeout(PROBE_LIMIT, initialize(&cx, name, command)).await)
+            });
+        // The connection ends with the closure, which closes the agent's stdin.
+        let asked = asked.await;
+        tokio::join!(child::stop(&handle, Duration::from_secs(2), true), async {
+            let _ = process.wait().await;
+        });
+        orphans::waited(u32::try_from(pid).ok());
+        let answer = match asked {
+            Ok(Ok(Ok(answer))) => answer,
+            Ok(Ok(Err(failure))) => return Err(failure.raw),
+            Ok(Err(_)) => {
+                return Err(format!(
+                    "the agent did not answer `initialize` within {} s",
+                    PROBE_LIMIT.as_secs()
+                ));
+            }
+            Err(error) => {
+                let stderr = stderr.await.unwrap_or_default();
+                return Err(format!("{}: {}: {stderr}", command.display(), failed(&error).raw));
+            }
+        };
+        Ok(format!(
+            "{} {}, ACP protocol {}; capabilities: {}",
+            answer.info.name,
+            answer.info.version,
+            answer.protocol_version.as_u16(),
+            capabilities(&answer)
+        ))
+    }
+}
+
+/// The capabilities of an `initialize` answer in short: each one the agent advertised, the kinds of one in
+/// parentheses (`session.mcp (stdio, http), session.systemPrompt`), then the ids of its auth methods.
+fn capabilities(answer: &schema::InitializeResponse) -> String {
+    let all = serde_json::to_value(&answer.capabilities).unwrap_or_default();
+    let keys = |v: &Value| -> Vec<String> {
+        let keys = v.as_object().into_iter().flatten().map(|(k, _)| k.clone());
+        keys.filter(|k| k != "_meta").collect()
+    };
+    let mut out = Vec::new();
+    for group in keys(&all) {
+        let inner = keys(&all[&group]);
+        if inner.is_empty() {
+            out.push(group.clone());
+        }
+        for key in inner {
+            let kinds = keys(&all[&group][&key]);
+            out.push(match kinds.is_empty() {
+                true => format!("{group}.{key}"),
+                false => format!("{group}.{key} ({})", kinds.join(", ")),
+            });
+        }
+    }
+    let mut text = match out.is_empty() {
+        true => "none".to_owned(),
+        false => out.join(", "),
+    };
+    if !answer.auth_methods.is_empty() {
+        let ids = answer.auth_methods.iter().map(|m| m.method_id().to_string());
+        text = format!("{text}; auth methods: {}", ids.collect::<Vec<_>>().join(", "));
+    }
+    text
 }
 
 impl Driver for Acp {

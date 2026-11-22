@@ -388,3 +388,55 @@ fn a_rig_with_the_prefix_of_the_br_database_is_warned_about() {
     let (_, found) = doctor_env(dir.path(), &[("PATH", &path)]);
     assert!(found.iter().all(|f| f.0 != "br prefix"), "{found:?}");
 }
+
+/// The `acp-agent` fixture that `cargo nextest run` builds next to `loop-manager`.
+fn acp_agent() -> String {
+    Path::new(common::EXE).with_file_name("acp-agent").display().to_string()
+}
+
+#[test]
+fn an_acp_harness_is_probed_for_its_version_and_capabilities_without_a_session() {
+    let dir = tree(&format!("[harness.fake]\ncommand = \"{}\"\n", acp_agent()));
+    let (passed, found) = doctor(dir.path());
+    let (level, detail) = level(&found, "fake acp");
+    assert!(passed && level == "ok", "{found:?}");
+    assert!(
+        detail.starts_with("acp-agent ") && detail.contains(", ACP protocol 2; capabilities: session"),
+        "{detail}"
+    );
+
+    let dir = tree(&format!(
+        "[harness.fake]\ncommand = \"{}\"\nargs = [\"--v1\"]\n",
+        acp_agent()
+    ));
+    let (passed, found) = doctor(dir.path());
+    let (level, detail) = super::doctor::level(&found, "fake acp");
+    assert!(!passed && level == "error", "{found:?}");
+    assert!(
+        detail.contains("negotiated ACP protocol version 1; loop-manager requires version 2"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn an_agent_on_an_acp_harness_with_a_hook_is_a_config_error_naming_the_agent_the_key_and_the_harness() {
+    let dir = tree(&format!("[harness.fake]\ncommand = \"{}\"\n", acp_agent()));
+    let agent = dir.path().join("config/loop-manager/shop/agents/dev/agent.toml");
+    fs::create_dir_all(agent.parent().unwrap()).unwrap();
+    fs::write(
+        &agent,
+        "harness = \"fake\"\n[hooks.lint]\nevent = \"Stop\"\ncommand = \"true\"\n",
+    )
+    .unwrap();
+    let config = dir.path().join("config/loop-manager/config.toml");
+    let out = lm(dir.path(), &["config", "check", "--config", config.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "{text}");
+    assert!(
+        text.contains("agent `shop/root@shop.dev`: `hooks`: the ACP harness `fake` has no mechanism for it"),
+        "{text}"
+    );
+    let (passed, found) = doctor(dir.path());
+    let (config, why) = level(&found, "config");
+    assert!(!passed && config == "error" && why.contains("`hooks`"), "{found:?}");
+}
