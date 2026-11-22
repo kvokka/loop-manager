@@ -10,7 +10,7 @@ mod wait;
 
 use crate::client::{Client, ClientError, Events};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-pub use commands::{GateCommand, InstanceCommand, RunCommand, TriggerCommand};
+pub use commands::{GateCommand, InstanceCommand, RunCommand, TaskCommand, TriggerCommand};
 pub use config::{ConfigCommand, FormulaCommand, ListCommand, local as config_local};
 use finish::finish;
 use serde_json::{Value, json};
@@ -48,6 +48,9 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("doctor", "GET", "/v1/doctor"),
     ("instance list", "GET", "/v1/instances"),
     ("instance stop", "POST", "/v1/instances/{id}/stop"),
+    ("task list", "GET", "/v1/tasks"),
+    ("task show", "GET", "/v1/tasks/{project}/{bead}"),
+    ("task watch", "GET", "/v1/tasks/{project}/{bead}/live"),
 ];
 
 #[derive(Parser)]
@@ -104,6 +107,9 @@ pub enum Command {
     /// Harness instances: list them, stop an idle one.
     #[command(subcommand)]
     Instance(InstanceCommand),
+    /// Tasks: the root beads with work under them, and the tree of rounds and sessions of one.
+    #[command(subcommand)]
+    Task(TaskCommand),
     /// Triggers: list them, fire one by hand, switch one off and on.
     #[command(subcommand)]
     Trigger(TriggerCommand),
@@ -261,6 +267,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Run(command) => return commands::run(client, json, command).await,
         Command::Gate(command) => commands::gate(client, json, command).await?,
         Command::Instance(command) => commands::instance(client, json, command).await?,
+        Command::Task(command) => commands::task(client, json, command).await?,
         Command::Trigger(command) => commands::trigger(client, json, command).await?,
         Command::Project(command) => config::list(client, json, "projects", command).await?,
         Command::Agent(command) => config::list(client, json, "agents", command).await?,

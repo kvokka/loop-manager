@@ -41,6 +41,19 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   The daemon follows the harness transcript as it is written and picks up new sessions until run end. A transcript
   read failure ends the stream with `chat_error` and its `message`. Journal cursors apply only to the event view.
 
+- **Tasks** (`GET /v1/tasks[?project=]`, `GET /v1/tasks/{project}/{bead}`, `GET /v1/tasks/{project}/{bead}/live`):
+  the view of work by root bead that `loop-manager acp` serves to editors ([ACP](acp.md)). A task is a root bead with
+  a run on it or on a bead under it, whatever the steps of the run; a run with no bead, own or inherited from its
+  parent run, is in no task. The list gives `project`, `bead`, `title`, `dir` (the project root), `updated_at` and
+  `live`, most recently active first. The second gives the root bead as the tracker has it now: `title`,
+  `description` and `comments` (`author`, `created_at`, `text`), oldest first. The third is SSE until the client
+  leaves: `node` events announce the beads, rounds and threads under the root, parents first, and the same `id`
+  sent again updates one; `chat` events (`thread`, `n`, `entry`) replay, then follow, each thread's transcript, an
+  `entry` as in a run's chat; `unavailable` says a thread's ended session has no readable transcript; `replayed`
+  comes once, after everything there was at the start; `failed` ends the stream when the state or the tracker
+  cannot be read. The tree is read from the state: the journal only wakes the stream. An unknown project or a bead
+  that is not a task is 404 `not_found`, an unreadable tracker 503 `tracker_unavailable`.
+
 The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir` — the directory of
 `loop-manager.toml`, `root` and `rigs`, each `{name, path, vars}`; the root is not among the rigs); agents
 (`GET /v1/agents` gives each agent's harness in the project outside any rig and formula, `null` when its layers do not
@@ -106,6 +119,8 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
+- `loop-manager task list [<project>]`, `loop-manager task show <project> <bead>` and
+  `loop-manager task watch <project> <bead>` are the three task operations.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - Without a daemon only `loop-manager format`, `loop-manager daemon`, `loop-manager cache clear`, `loop-manager --version`, and

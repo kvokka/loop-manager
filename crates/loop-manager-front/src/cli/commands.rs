@@ -315,6 +315,32 @@ pub(super) async fn instance(client: &Client, json: bool, command: InstanceComma
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub enum TaskCommand {
+    /// List the root beads with work under them, most recently active first.
+    List { project: Option<String> },
+    /// Show a task's root bead as its tracker has it now, with its comments.
+    Show { project: String, bead: String },
+    /// Follow a task's tree of rounds, child beads and sessions with their transcripts.
+    Watch { project: String, bead: String },
+}
+
+pub(super) async fn task(client: &Client, json: bool, command: TaskCommand) -> Result<(), ClientError> {
+    let path = |project: &str, bead: &str, rest: &str| format!("/v1/tasks/{}/{}{rest}", encode(project), encode(bead));
+    let reply = match command {
+        TaskCommand::List { project } => {
+            let query = project.map(|p| format!("?project={}", encode(&p))).unwrap_or_default();
+            client.request("GET", &format!("/v1/tasks{query}"), None, None).await?
+        }
+        TaskCommand::Show { project, bead } => client.request("GET", &path(&project, &bead, ""), None, None).await?,
+        TaskCommand::Watch { project, bead } => {
+            return follow(client.stream(&path(&project, &bead, "/live")).await?, json).await;
+        }
+    };
+    print(json, &reply);
+    Ok(())
+}
+
 /// An `--input` with its `=`: a bare name is a mistake, not an empty value.
 fn name_value(text: &str) -> Result<String, String> {
     match text.split_once('=') {

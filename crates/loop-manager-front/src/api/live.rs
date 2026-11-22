@@ -2,7 +2,7 @@
 //! a `seq`, and the raw messages of its current session relayed from the adapter as they come. The core never stores
 //! those messages, so a reconnect gets only the new ones; the history is in the harness's transcript.
 
-mod chat;
+pub(super) mod chat;
 
 use super::{
     Api, ApiError, ErrorReply, Param, State,
@@ -26,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 /// Events read from the journal at a time.
-const BATCH: usize = 256;
+pub(super) const BATCH: usize = 256;
 
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]

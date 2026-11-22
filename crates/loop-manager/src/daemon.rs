@@ -125,7 +125,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         Clock::system(),
         config.clone(),
         drivers.clone(),
-        trackers,
+        trackers.clone(),
         Arc::new(ExecHooks {
             socket: Some(paths.socket.clone()),
             bundled: Some(loop_manager_addons::run),
@@ -157,6 +157,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
             let paths = paths.clone();
             move || crate::doctor::findings(&paths)
         }),
+        trackers,
     };
     let stop = stop_signal().map_err(|e| format!("signals: {e}"))?;
     eprintln!("loop-manager daemon listening on {}", paths.socket.display());
