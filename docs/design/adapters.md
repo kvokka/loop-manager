@@ -253,9 +253,85 @@ its process. Its minimum version is 0.109.1, the version its contract suite runs
   or a credential variable of its own (`login_check`); `claude host mcp`: the stdio MCP servers of the host's
   `.claude.json`, which start in every session that inherits the host (`host_mcp_check`).
 
+**`codex`** drives `codex-acp`, the ACP adapter of codex (`@agentclientprotocol/codex-acp` on npm, pinned in
+`mise.toml`); the adapter carries its own codex and starts `codex app-server` with the `node` it runs on, so a
+session is three processes in the adapter's group. `loop_manager_acp::CODEX` is its adapter: the executable is
+`command` of `[harness.codex]`, else `mise which codex-acp`, else `codex-acp` on `PATH`; the short model names of the
+native driver (`astra`, `luna`, `terra`, `sol`); minimum version 2.9.0, the version its contract suite runs on.
+`[harness.codex]` takes the keys of an ACP harness; `max_sessions` and `instance_idle_s` are a config error, "the key
+is gone: an ACP harness runs one process per session". The build's `ADAPTERS` still lists the native codex driver
+(`loop-manager-codex`), and `loop_manager_acp::profiled` answers false for `codex`, so `[harness.codex]` keeps the
+native driver's keys and no codex agent is checked against this profile when the config loads.
+
+- **What it sends.** Nothing beyond ACP in `session/new` and `session/resume`, and no MCP servers there: the codex
+  config goes as JSON in `CODEX_CONFIG` of the adapter's process, which hands it to every thread it opens. In order,
+  a later key over an earlier one: `analytics.enabled`, `feedback.enabled`, `check_for_update_on_startup` false and
+  `notify = []`; for an isolated session without a key of its own, the model provider the host's `config.toml`
+  selects (`model_provider` and `model_providers.<name>`, without `http_headers` and `experimental_bearer_token`: the
+  adapter puts the provider in the argv of the app-server); the `native.codex` block without `approval_policy` and
+  `sandbox_mode`; `model` and `model_reasoning_effort` of the config; the attempt's variables in
+  `shell_environment_policy.set` of the block; the MCP servers as codex's own `mcp_servers`, each `required = true`,
+  over the block's of the same name; the enabled hooks added to the block's `hooks` (in the shape of claude's
+  settings, the timeout in seconds) with `bypass_hook_trust = true`; the targets as `agents.<name> = {description,
+  config_file}` over the block's `agents`. An empty key is not written. The MCP servers go there and not in
+  `mcpServers` because the adapter drops `required`, takes a stdio command only as an absolute path and skips a
+  server the host config names; the model and the effort go there because the adapter offers as options only the
+  models codex lists. So the session part has no `model`, `effort` or MCP servers, and the driver sets one config
+  option: `mode`.
+- **The mode.** The adapter sets the approval policy and the sandbox of every turn by the session's mode alone. The
+  mode follows `native.codex.approval_policy` (else `never`, decision 117) and `native.codex.sandbox_mode`, else
+  `sandbox_mode` of the host's `config.toml` for a session that inherits the host, else `danger-full-access`
+  (decision 38): `danger-full-access` with `never` is `agent-full-access`; `workspace-write` or `read-only` with
+  `never` or `on-request` is the mode of that name, where a command outside the sandbox becomes a permission request
+  the driver declines. Any other policy (`untrusted`, `on-failure`, a granular table), `on-request` with
+  `danger-full-access` or no `sandbox_mode` in the block, an unknown `sandbox_mode`, a native block that is no table,
+  and `default_permissions` or `approvals_reviewer` (the mode overrides them on every turn) are a load error naming
+  the key: "`native.codex.approval_policy`: the ACP harness `codex` offers `never` with `danger-full-access`, and
+  `never` or `on-request` with `workspace-write` or `read-only`". An unknown `sandbox_mode` of the host's config fails
+  the attempt with `config_error`.
+- **The directories.** `<state>/acp/codex/<run>-<attempt>/` holds the homes a session needs of its own, made with
+  mode 0700 before the spawn: `codex-home`, the `CODEX_HOME` of an isolated session and of one that inherits the host
+  with skills (codex reads skills from `CODEX_HOME/skills` only); `home`, the `HOME` of an isolated session. A session
+  that inherits the host without skills runs in the host's codex home. The `SessionRef` keeps `codex-home` as
+  `home`; a resumed session takes it from there, and `HOME` beside it. Before every spawn `skills` gets a link per
+  skill to its directory (the targets' among them, the session's first; for a session that inherits the host, the
+  host's skills after them), the links of the last start removed first and hidden entries, codex's own, kept; a home
+  that inherits the host links the host's `auth.json`, `config.toml` and `AGENTS.md`, an isolated one without a key
+  of its own the host's `auth.json`. The role of a target is a file `<state>/acp/codex/roles/<hash>.toml` named by
+  its content (its role prompt as `developer_instructions`, model, effort, and the skills its target has not turned
+  off), written whole before the spawn.
+- **What stays on disk.** The homes, with the rollout of the thread, and the role files, shared by content.
+- **The environment.** The daemon's `PATH`, `LANG` and `SHELL` (codex runs commands in a login shell); for a session
+  without its own `HOME` also the daemon's `HOME` and `HOST_NETWORK_ENV`. Then the harness's and the agent's `env` and
+  the attempt's variables; `CODEX_HOME`; `HOME` of an isolated session; the variable `env_key` of the host's model
+  provider names, with the daemon's value, when the session reads that provider; `CODEX_CONFIG`; and
+  `DEFAULT_AUTH_REQUEST={"methodId":"api-key"}` for an isolated session with `OPENAI_API_KEY` or `CODEX_API_KEY` of
+  its own: the adapter logs codex in by that key, and codex writes it to the session's own home. The protocol trace
+  redacts those two variables and the values of the `env` and `headers` of the MCP servers.
+- **Failures.** The final error of a turn carries only codex's words, so after the code (`-32000` `auth_required`,
+  `-32602` `config_error`, `-32002` on a resume `transcript_divergence`, `1001`, the adapter's app-server lost,
+  `harness_crash`) the message decides: `required MCP servers failed to initialize` is `tool_failure`; a message that
+  starts with `Quota exceeded.`, `To use Codex with your ChatGPT plan`, `Your workspace is out of credits.` or `You hit
+  your spend cap` is `billing`; `hit your usage limit` is `quota_exhausted`, with no `retry_at_ms`; `ran out of room
+  in the model's context window` is `context_overflow`; a message that starts with `Selected model is at capacity` is
+  `overloaded`. Then the HTTP status after `exceeded retry limit, last status:` (`retried_by_harness`) or after
+  `unexpected status`: 429 `rate_limited`; 408, 500 to 504 and 529 `overloaded` (`retried_by_harness`); 401, 403
+  `auth_required`; 400, 404 `config_error`. Anything else is `unknown` with the message. No `notice` stands for a
+  failure.
+- **The account.** The native codex driver's hash (`Fingerprint::of("codex", …)`): the name and value of the first
+  credential variable of `env`, else the host's codex home (`CODEX_HOME` of the daemon, else `~/.codex`). The hashes
+  are fixed by test.
+- **`doctor`.** `codex login`: with a model provider in the host's `config.toml`, whether the daemon has its
+  `env_key`, else `login_check` of the host's `auth.json`; `codex host mcp`: the stdio MCP servers of the host's
+  `config.toml`; `codex sandbox`: a warning naming the agents whose config, or the host config they inherit, sets no
+  `sandbox_mode` and so run in the mode `agent-full-access`.
+
 `crates/loop-manager-acp/src/profile/tests.rs` holds the claude profile: the parts and the environment of a typical
 agent, the account hashes, the failures row by row, the plugin around a spawned process, and
 the config options after `session/new` and `session/resume` against an agent in the test's process.
+`src/profile/codex/tests.rs` holds the codex profile: the codex config and the environment of a typical agent for an
+isolated session, one that inherits the host and one that inherits it with skills, the mode table and each refusal,
+the homes, links and role files a start makes, the account hashes and the failures row by row.
 
 ## What the core expects of a driver
 

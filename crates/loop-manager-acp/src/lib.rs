@@ -148,6 +148,12 @@ impl Acp {
                 }
                 ("trace", toml::Value::Boolean(on)) => driver.trace = on.then(|| state.join("trace")),
                 ("command" | "args" | "env" | "trace", _) => return Err(format!("`{key}` has the wrong type")),
+                // The keys of the native codex driver, which ran many sessions in one process.
+                ("max_sessions" | "instance_idle_s", _) if name == "codex" => {
+                    return Err(format!(
+                        "`{key}`: the key is gone: an ACP harness runs one process per session"
+                    ));
+                }
                 _ => return Err(format!("unknown key `{key}`")),
             }
         }
@@ -570,10 +576,32 @@ pub const CLAUDE: Adapter = Adapter {
     doctor: profile::claude::doctor,
 };
 
+/// codex through its ACP adapter `codex-acp`, as the root of the build lists it (docs/design/adapters.md,
+/// "Profiles").
+pub const CODEX: Adapter = Adapter {
+    name: "codex",
+    command: "codex-acp",
+    models: MODELS,
+    minimum: profile::codex::MINIMUM,
+    agent_types: &["default", "explorer", "worker"],
+    subagents_inherit: true,
+    new: |setup| Ok(Arc::new(Acp::of_adapter("codex", setup)?)),
+    doctor: profile::codex::doctor,
+};
+
+/// The short model names of codex (docs/design/adapters.md): the latest model of each family.
+const MODELS: &[(&str, &str)] = &[
+    ("astra", "gpt-6-astra"),
+    ("luna", "gpt-6-luna"),
+    ("terra", "gpt-6.1-terra"),
+    ("sol", "gpt-6.1-sol"),
+];
+
 /// Whether the driver has a profile for harness `name`: then the harness is an adapter of the build, and its
 /// `[harness.<name>]` takes the keys of an ACP harness.
 pub fn profiled(name: &str) -> bool {
-    Profile::own(name).is_some()
+    // The build still lists the native codex driver (`loop-manager-codex`), whose `[harness.codex]` takes `binary`.
+    Profile::own(name).is_some() && name != "codex"
 }
 
 /// What an agent's effective `config` on the ACP harness `harness` sets that the driver has no mechanism for, or that

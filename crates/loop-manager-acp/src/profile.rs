@@ -3,6 +3,7 @@
 //! generic one: what the config names, and a refusal of what the driver has no mechanism for.
 
 pub(crate) mod claude;
+pub(crate) mod codex;
 
 use crate::part;
 use agent_client_protocol::v2::schema::Notice;
@@ -51,21 +52,39 @@ pub(crate) struct Profile {
 }
 
 /// The ACP agents the driver knows by name.
-pub(crate) const PROFILES: &[Profile] = &[Profile {
-    name: "claude",
-    minimum: claude::MINIMUM,
-    process: claude::process,
-    session: claude::session,
-    env: claude::env,
-    credentials: &claude::CREDENTIALS,
-    start: claude::start,
-    exited: claude::exited,
-    secrets: claude::secrets,
-    classify: claude::classify,
-    notice: claude::notice,
-    account: claude::account,
-    unsupported: claude::unsupported,
-}];
+pub(crate) const PROFILES: &[Profile] = &[
+    Profile {
+        name: "claude",
+        minimum: claude::MINIMUM,
+        process: claude::process,
+        session: claude::session,
+        env: claude::env,
+        credentials: &claude::CREDENTIALS,
+        start: claude::start,
+        exited: claude::exited,
+        secrets: claude::secrets,
+        classify: claude::classify,
+        notice: claude::notice,
+        account: claude::account,
+        unsupported: claude::unsupported,
+    },
+    Profile {
+        name: "codex",
+        minimum: codex::MINIMUM,
+        process: codex::process,
+        session: codex::session,
+        env: codex::env,
+        credentials: &codex::CREDENTIALS,
+        start: codex::start,
+        // The homes keep the session's rollout; the role files are shared by content.
+        exited: |_| {},
+        secrets: codex::secrets,
+        classify: codex::classify,
+        notice: |_| None,
+        account: codex::account,
+        unsupported: codex::unsupported,
+    },
+];
 
 /// The profile of a harness known by its config alone.
 pub(crate) const GENERIC: Profile = Profile {
