@@ -27,6 +27,7 @@ mod repeat;
 mod row;
 mod service_proc;
 mod services;
+pub mod tasks;
 mod triggers;
 mod writers;
 
