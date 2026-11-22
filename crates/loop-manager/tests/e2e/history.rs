@@ -187,3 +187,45 @@ async fn a_prompt_over_the_record_limit_is_cut_and_marked_truncated() {
     );
     assert_eq!(records.last().unwrap()["state"], "passed");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_history_of_a_run_over_whose_file_is_gone_ends() {
+    let d = Daemon::start(|_| {}).await;
+    let run = d.create("check", None).await;
+    d.until_state(&run, "passed").await;
+    // The `run` record is the last one written: once it is there, the file is whole and can go as a prune would.
+    let path = d.dir.path().join(format!("state/loop-manager/history/{run}.jsonl"));
+    let deadline = Instant::now() + WAIT;
+    while !fs::read_to_string(&path)
+        .unwrap_or_default()
+        .contains("\"kind\":\"run\"")
+    {
+        assert!(Instant::now() < deadline, "no `run` record in {}", path.display());
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    fs::remove_file(&path).unwrap();
+    assert!(to_end(&d, &run, 1).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_from_the_history_goes_on_after_the_last_event_id() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let d = Daemon::start(|_| {}).await;
+    let run = d.create("check", None).await;
+    let all = to_end(&d, &run, 1).await.len();
+    assert!(all > 2, "{all}");
+    let mut socket = tokio::net::UnixStream::connect(d.socket()).await.unwrap();
+    let request = format!(
+        "GET /v1/runs/{run}/history HTTP/1.1\r\nhost: loop-manager\r\naccept: text/event-stream\r\n\
+         last-event-id: {}\r\nconnection: close\r\n\r\n",
+        all - 2
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut reply = String::new();
+    tokio::time::timeout(WAIT, socket.read_to_string(&mut reply))
+        .await
+        .expect("the stream of a run over did not end")
+        .unwrap();
+    let ids: Vec<&str> = reply.lines().filter_map(|l| l.strip_prefix("id: ")).collect();
+    assert_eq!(ids, [(all - 1).to_string(), all.to_string()], "{reply}");
+}

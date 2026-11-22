@@ -277,7 +277,8 @@ async fn a_trace_holds_both_directions_with_the_token_and_the_env_secrets_redact
     let env = out.path().join("env");
     // The tool output brings the token and the secret onto the wire.
     let command = format!(
-        "echo token=$$LOOP_MANAGER_ATTEMPT_TOKEN secret=$$SHOP_SECRET; env > {}; {} finish pass --summary built",
+        "echo token=$$LOOP_MANAGER_ATTEMPT_TOKEN secret=$$SHOP_SECRET network=$$NO_PROXY; env > {}; {} finish pass \
+         --summary built",
         env.display(),
         common::EXE
     );
@@ -285,10 +286,20 @@ async fn a_trace_holds_both_directions_with_the_token_and_the_env_secrets_redact
         "command = \"{}\"\ntrace = true\n[harness.fake.env]\nSHOP_SECRET = \"s3cr3t-shop-key\"\nACP_AGENT_COMMAND = \"{command}\"\n",
         agent().display()
     );
-    let d = daemon("fake", &section, "").await;
+    // The daemon comes again with a network setting of the host, which its harness processes inherit.
+    let mut d = daemon("fake", &section, "").await;
+    assert!(d.terminate().success());
+    let network = "no-proxy-secret.invalid";
+    d.child = common::command(d.dir.path()).env("NO_PROXY", network).spawn().unwrap();
+    let deadline = std::time::Instant::now() + common::WAIT;
+    while d.client.request("GET", "/v1/daemon", None, None).await.is_err() {
+        assert!(std::time::Instant::now() < deadline, "the daemon did not come back");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     let run = d.create("build", None).await;
     d.until_state(&run, "passed").await;
     let env = fs::read_to_string(&env).unwrap();
+    assert!(env.lines().any(|l| l == format!("NO_PROXY={network}")), "{env}");
     let token = env
         .lines()
         .find_map(|l| l.strip_prefix("LOOP_MANAGER_ATTEMPT_TOKEN="))
@@ -312,10 +323,16 @@ async fn a_trace_holds_both_directions_with_the_token_and_the_env_secrets_redact
         "{text}"
     );
     assert!(lines.iter().all(|l| l["ts_ms"].as_u64().is_some()), "{text}");
-    assert!(text.contains("token=[redacted] secret=[redacted]"), "{text}");
+    assert!(
+        text.contains("token=[redacted] secret=[redacted] network=[redacted]"),
+        "{text}"
+    );
     // A short value of the env (the issue prefix `w`) is no secret: it would garble every line.
     assert!(text.contains(r#""method":"session/new""#), "{text}");
-    assert!(!text.contains(token) && !text.contains("s3cr3t-shop-key"), "{text}");
+    assert!(
+        !text.contains(token) && !text.contains("s3cr3t-shop-key") && !text.contains(network),
+        "{text}"
+    );
 
     // The daemon probes the same agent for `GET /v1/doctor`.
     let found = d.get("/v1/doctor").await;

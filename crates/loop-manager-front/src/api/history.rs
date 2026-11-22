@@ -82,6 +82,17 @@ async fn relay(state: Arc<Api>, run: String, from: u64, tx: mpsc::Sender<Result<
             return;
         }
         if records.is_empty() {
+            // A run over whose `run` record is not in its file (the file is pruned, older than histories or lost in a
+            // crash) ends here: the state commits before its records, so a flush first lets them land.
+            if over(&state, &run) {
+                state.history.flush().await;
+                for record in cursor.read().unwrap_or_default() {
+                    if tx.send(Ok(event(&record))).await.is_err() {
+                        return;
+                    }
+                }
+                return;
+            }
             if !caught_up {
                 caught_up = true;
                 let data = json!({ "n": last }).to_string();
@@ -98,6 +109,15 @@ async fn relay(state: Arc<Api>, run: String, from: u64, tx: mpsc::Sender<Result<
                 changed = appended.changed() => if changed.is_err() { return },
             }
         }
+    }
+}
+
+/// The run is in a terminal state (or gone).
+fn over(state: &Api, run: &str) -> bool {
+    match state.reader.run(run) {
+        Ok(Some(view)) => matches!(view["state"].as_str(), Some("passed" | "failed" | "cancelled")),
+        Ok(None) => true,
+        Err(_) => false,
     }
 }
 

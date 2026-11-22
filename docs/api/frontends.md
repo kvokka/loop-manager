@@ -39,7 +39,9 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   It sends every record from `from` (default 1; without `from`, the one after `Last-Event-ID`), then one `caught_up`
   event with `{"n"}`, the last `n` sent (`from - 1` when none was), then each record as it is written. The stream
   ends after the run's terminal `run` record, so a run already over gives its records and ends with no `caught_up`;
-  a reader whose `from` is past that record gets nothing and the stream ends. The cursor survives the client leaving,
+  a reader whose `from` is past that record gets nothing and the stream ends. A run already over whose file lacks
+  that record (removed after `[history] keep_days`, or the record lost in a crash) gives what its file has and ends
+  the same way, with no `caught_up`. The cursor survives the client leaving,
   a harness exit, new attempts and a daemon restart: reconnecting with `from` = the last `n` seen + 1 gives the rest
   with no hole and no repeat. A failed read of the file ends the stream with `history_error` and its `message`. An
   unknown run is 404 `not_found`.

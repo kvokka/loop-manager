@@ -102,7 +102,9 @@ all of them share.
   `attempt_end`, `run`) are written. A writer that reads the file again after a restart finds the `truncated` record
   and goes on the same way.
 - `GET /v1/runs/{id}/history` streams the records ([frontends](../api/frontends.md)). The run's `run` record is its
-  last: a reader stops there.
+  last: a reader stops there. A reader that has read the whole file of a run in a terminal state stops too, after
+  waiting for the queued records to be written: so a removed file or a `run` record lost in a crash does not keep it
+  waiting.
 - Retention: the periodic resync (below) removes the history files of ended runs (whose last record is `run`) not
   written for `[history] keep_days` (default 30; 0 keeps them forever), and the files under `<state>/trace/` (the
   [protocol traces](adapters.md) of ACP harnesses) older than that by their modification time. The task that writes
