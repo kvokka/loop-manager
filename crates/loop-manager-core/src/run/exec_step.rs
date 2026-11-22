@@ -249,9 +249,14 @@ pub(super) fn sink(history: &History, clock: Clock, payload: &Value) -> process:
     let run = payload["run"].as_str().unwrap_or_default().to_owned();
     let step = payload["step"].as_str().unwrap_or_default().to_owned();
     let attempt = super::exec::attempt(payload);
+    let check = payload["check"] == true;
     Arc::new(move |stream, bytes| {
         let text = String::from_utf8_lossy(bytes);
-        let data = serde_json::Map::from_iter([("stream".to_owned(), json!(stream)), ("text".to_owned(), json!(text))]);
+        let mut data =
+            serde_json::Map::from_iter([("stream".to_owned(), json!(stream)), ("text".to_owned(), json!(text))]);
+        if check {
+            data.insert("check".to_owned(), json!(true));
+        }
         history.append(Record {
             run: run.clone(),
             ts_ms: clock.now_ms(),

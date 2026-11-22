@@ -121,8 +121,17 @@ fn the_output_of_a_command_is_an_execute_call_of_its_attempt_ended_by_the_attemp
         ]
     );
     // Output later in the same attempt (a check script) opens a call of its own.
-    let out = t.record(&output(7, "three\n"));
-    assert_eq!(out[0]["toolCallId"], "exec-3-7");
+    let check = record(
+        7,
+        3,
+        "exec_output",
+        json!({ "stream": "stdout", "text": "three\n", "check": true }),
+    );
+    let out = t.record(&check);
+    assert_eq!(
+        (&out[0]["toolCallId"], &out[0]["title"]),
+        (&json!("exec-3-7"), &json!("build (check)"))
+    );
     let out = t.record(&record(
         8,
         3,

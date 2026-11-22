@@ -211,6 +211,29 @@ async fn the_output_of_an_exec_step_is_in_the_history_while_its_command_still_ru
     assert_eq!(end["state"], "cancelled", "{end}");
 }
 
+/// The output of a step's check script is in the history apart from the output of the step's own command.
+#[tokio::test]
+async fn the_output_of_a_check_script_is_marked_as_the_checks() {
+    let say = "name = \"say\"\n[[step]]\nname = \"say\"\nkind = \"exec\"\ncommand = [\"echo\", \"hello\"]\n\
+        step_check_script_path = \"check.sh\"\n";
+    let w = world(&[
+        ("shop/formulas/say.toml", say),
+        ("shop/formulas/check.sh", "#!/bin/sh\necho checked\n"),
+    ]);
+    let run = start(&w, "say").await;
+    let records = history(&w, &run).await;
+    let output: Vec<(&Value, &Value)> = records
+        .iter()
+        .filter(|r| r["kind"] == "exec_output")
+        .map(|r| (&r["text"], &r["check"]))
+        .collect();
+    assert_eq!(
+        output,
+        [(&"hello\n".into(), &Value::Null), (&"checked\n".into(), &true.into())],
+        "{records:#?}"
+    );
+}
+
 /// `[history] keep_days` at the periodic resync: the file of an ended run older than that goes; 0 keeps it.
 #[tokio::test(start_paused = true)]
 async fn the_resync_removes_ended_histories_past_keep_days_and_zero_keeps_them() {

@@ -75,9 +75,10 @@ impl Translator {
                     true => format!("exec-{attempt}"),
                     false => format!("exec-{attempt}-{}", record["n"].as_u64().unwrap_or(0)),
                 };
+                let what = if record["check"] == true { "check" } else { "exec" };
                 updates.push(
                     json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "kind": "execute",
-                    "title": format!("{} (exec)", text(record, "step")), "status": "in_progress" }),
+                    "title": format!("{} ({what})", text(record, "step")), "status": "in_progress" }),
                 );
                 self.exec = Some((attempt, id.clone()));
                 id
