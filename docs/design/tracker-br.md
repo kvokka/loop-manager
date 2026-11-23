@@ -46,7 +46,9 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
 - The daemon claims, releases and closes; an agent never claims. The run is recorded as the bead's owner in the
   transaction that creates it, and the tracker claim (owner `loop-manager:<run>`) is made when it leaves `queued`. The
   claim is held for the whole run, through all its attempts, and let go only when the run is terminal: `passed` closes
-  the bead, `failed` and `cancelled` release it conditionally (owner compared). Transitions:
+  the bead, `failed` and `cancelled` release it conditionally (owner compared). A bead closed outside its run (by a
+  human, an outside tool or another run) ends that run `cancelled` with reason `bead_closed`, whatever step it is at;
+  its release then clears the assignee and leaves the bead closed, so it raises no `bead.ready`. Transitions:
   [contracts.md 6.2](contracts.md#62-transitions).
 - A `formula` step lends the bead of its run to the child run: the child makes no claim and at its end neither closes
   nor releases the bead, the parent run does that at its own end.

@@ -2,7 +2,7 @@
 //! from the writes after the project's cursor, `bead.labeled` from the labels a known bead gained, `bead.ready` from
 //! the beads new to the ready set.
 
-use super::RunHandler;
+use super::{RunHandler, row::Row};
 use crate::{
     config::Project,
     tracker::{Bead, Change},
@@ -17,7 +17,7 @@ impl RunHandler {
     /// gained `bead.labeled`, and the beads new to its ready set `bead.ready` (docs/design/config.md); the ready set
     /// is kept for the next diff and for picking, the labels of every bead read for the next `bead.labeled`.
     pub(super) fn ready(
-        &self,
+        &mut self,
         tx: &mut Tx<'_>,
         project: &str,
         beads: &[Bead],
@@ -49,6 +49,8 @@ impl RunHandler {
         // shortcut: a bead that became ready takes the chain of the last loop-manager write read with it (the write that
         // freed it is usually that one); a per-bead cause needs the blocker graph from the tracker.
         let mut cause = (None, None);
+        // The writes past the cursor with the run each was made by, for the runs whose bead was closed outside them.
+        let mut closed = Vec::new();
         for change in changes {
             // Not news: the history of a first read, or the writes a read queued before the last one was made repeats.
             if change.seq <= cursor {
@@ -59,6 +61,7 @@ impl RunHandler {
             }
             let before = remember_labels(tx, project, &change.bead)?;
             let by = bead_event(tx, place, change)?;
+            closed.push((change, by.0.clone()));
             // A bead never read gains nothing: its labels are those it was filed with.
             if let Some(before) = before {
                 let ready = stays.contains(change.bead.id.as_str());
@@ -97,7 +100,42 @@ impl RunHandler {
                 params![project, pos, bead.id, json!(bead).to_string()],
             )?;
         }
+        for (change, by) in closed {
+            self.closed_outside(tx, project, change, by.as_deref())?;
+        }
         Ok(())
+    }
+}
+
+impl RunHandler {
+    /// A write that closed a bead a live run owns, by an actor other than that run (`by`: the run of the write), ends
+    /// the run as `cancelled` with reason `bead_closed`, at whatever step (docs/design/contracts.md 6.2).
+    fn closed_outside(
+        &mut self,
+        tx: &mut Tx<'_>,
+        project: &str,
+        change: &Change,
+        by: Option<&str>,
+    ) -> Result<(), Error> {
+        let closes = change.kind == "closed" || change.changed.iter().any(|f| f == "status");
+        if !closes || change.bead.status != "closed" {
+            return Ok(());
+        }
+        let owner: Option<String> = tx
+            .sql()
+            .query_row(
+                "SELECT owner FROM beads WHERE project = ?1 AND id = ?2",
+                [project, &change.bead.id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        match owner {
+            Some(run) if by != Some(run.as_str()) && Row::load(tx, &run)?.live() => {
+                self.cancel(tx, &run, "bead_closed")
+            }
+            _ => Ok(()),
+        }
     }
 }
 

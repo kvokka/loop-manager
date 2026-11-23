@@ -875,6 +875,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `parked` | every key of the run open, a concurrency slot free (in creation order with the queue) | `starting` (`then` of the park decision); `run.resumed` | new attempt |
 | `preparing`, `interrupted` | an attempt would start while a key of the run is closed (by anyone, invariant 18), the daemon is stopping, or the run's agent has as many other started runs as its `max_runs` (a step with no agent, drain or exec, has no such limit) | `parked` (`then`: `new_session` from `preparing`, the decided kind from `interrupted`) | — |
 | any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the bead |
+| any non-terminal | a write of the tracker past the cursor (5.1) that closed the bead the run owns (a close, or its status set to `closed`), by an actor other than the run and its attempts: a human, an outside tool, another run | `cancelled`, reason `bead_closed`; at any step, an `await` step included | as for an operator cancel: stop the session, the cancel of its children, conditional release of the bead, which leaves it closed (5.2) |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its
 bead. A bead the run
