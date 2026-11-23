@@ -9,7 +9,7 @@ import tempfile
 with tempfile.TemporaryDirectory(prefix="devloop-test-") as work:
     env = dict(os.environ)
     for key in os.environ:
-        if key.startswith(("LOOP_MANAGER_", "BEADS_", "BD_")) and key != "LOOP_MANAGER_INSTANCE":
+        if (key.startswith(("LOOP_MANAGER_", "BEADS_", "BD_")) or key in {"BR_AGENT_NAME", "BR_HARNESS", "BR_MODEL"}) and key != "LOOP_MANAGER_INSTANCE":
             del env[key]
     # The conventional-commits addon injects a git hook through command-scope config.
     # A git commit in a fixture must not inherit the agent's hook or its parameters.
