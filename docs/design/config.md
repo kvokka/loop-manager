@@ -469,16 +469,17 @@ lowers the limit to 1, hold back each other's beads until one is cancelled or th
 The project root is itself a pack named after the project: `agents/` and `formulas/` next to `loop-manager.toml` belong
 to it, and its triggers are the `[[trigger]]` of `loop-manager.toml`.
 
-The root is where a project works besides its rigs: a run started without a rig works there (unless the
-id of a bead an input names has the prefix of a rig), and so does every session of an agent of scope `root`. It is a place like
-a rig, under its own name: the run's `rig` in events, its gate `rig:<project>/<root name>`, its workdir, `worktree`
-and limits all take it the same way; `{{ rig.name }}` and `{{ rig.path }}` of a run in the root are the root's. The
-root has these two settings and no variables: text a project gives an agent is a file of the agent (see "Agent"). Without `[root]` it is `root`, the directory of `loop-manager.toml`; a project of one repository needs no
-rigs. When `path` points elsewhere, the config files (`.loop-manager/agents/`, packs) and the tracker stay next to
-`loop-manager.toml`. The root need not be a git repository: a run in a plain directory works, one of a formula with
-`worktree = true` too, in the directory itself, with no worktree and no isolation (so does a rig without git). A rig at the root's path or under the root's name is a config
-error. `[root]` takes no `settings`, `agents`, `triggers` or `max_writers`: the project's own are the root's, and a project
-`[[trigger]]` that names no `rig` fires in the root.
+The root is where a project works besides its rigs: a run started without a rig works there (unless the id of a bead an
+input names has the prefix of a rig), and so does every session of an agent of scope `root`. It is a place like a rig,
+under its own name: the run's `rig` in events, its gate `rig:<project>/<root name>`, its workdir, `worktree` and limits
+all take it the same way; `{{ rig.name }}` and `{{ rig.path }}` of a run in the root are the root's. The root has these
+two settings and no variables: text a project gives an agent is a file of the agent (see "Agent"). Without `[root]` it
+is `root`, the directory of `loop-manager.toml`; a project of one repository needs no rigs. When `path` points
+elsewhere, the config files (`.loop-manager/agents/`, packs) and the tracker stay next to `loop-manager.toml`. The root
+need not be a git repository: a run in a plain directory works, one of a formula with `worktree = true` too, in the
+directory itself, with no worktree and no isolation (so does a rig without git). A rig at the root's path or under the
+root's name is a config error. `[root]` takes no `settings`, `agents`, `triggers` or `max_writers`: the project's own
+are the root's, and a project `[[trigger]]` that names no `rig` fires in the root.
 
 ### Packs and addons from git
 
@@ -746,32 +747,33 @@ step's, else the project's `[exec]`, else the orchestrator's; default false); th
 tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and `LOOP_MANAGER_STEP_*` below),
 so an `env` key cannot replace them. A rig has no `[exec]`.
 
-A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read
-of the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root
-owns the beads of every rig under its root. Any other bead is foreign — of another place, or outside the subtree: it
-is not given and is no error, it is the work of others with their own acceptance. Each own bead gets the same start as `loop-manager run start` with the bead as the formula's input of type
-`task`, no rig named (the prefix of the bead's id gives it, the project root when it matches no rig, and its
-`agent:`/`harness:` labels apply as to any run), the run's correlation, one level deeper, the run as `parent_run`. A
-bead goes out once per entry of the step: a child that failed is not run again in it, and an attempt cut by a restart
-(`daemon_crash`) starts no new entry; a round back to the step does. A bead whose start is refused (a `rig:` label, a
-`harness:` label the config does not give) gets no run and stays open. The step has no process (contracts 6.2): it ends
-once nothing was given, no child is alive and no later read of the tracker is queued, with
-`data = {closed, failed, refused}` — the beads whose runs passed, those whose runs failed or were cancelled, and the
-refused ones with the reason. The step does not end while an open bead of its own it has not given in this entry waits
-on an open foreign blocker, directly or through its parents (a blocked epic holds all its descendants; a `deferred` or
-`in_progress` blocker holds too), or has a `blocked` status set by hand on itself or a parent: a lock. Its own failed
-beads do not hold it. The tracker's watcher wakes it (`bead.closed` of the blocker); the wait ends at the step's
-`timeout`, which fails the attempt as for any step (`runaway_turn`). `pool` (default 1) is the most beads of the step in work at once: a child holds its place
-from its creation, queued or running, and the end of one gives out the next ready bead. `on_item_failure` says what a
-failed run of a bead does: `continue` (default) — the other beads go on and the step passes; `soft_stop` — no new bead
-goes out, the started ones end; `hard_stop` — the started ones are cancelled too (reason `drain_hard_stop`), on the read
-of the tracker that the failed run's end queues. A stopped step ends `fail` once no child is alive, its `data` adds
-`stopped_on` (the failed beads) and `not_started` (the ready beads under the root it did not give), and its summary is
-`stopped on <beads>: <n> closed, <n> failed, <n> not started`. The stop follows from the children of the entry, so a
-restart keeps it: no new bead goes out after one; a repeat of the step or a round back to it is a new entry and gives
-the beads again. A cancelled child stops nothing. `formula` must take exactly one input of type `task` and need no
-other; a formula with a `drain` step needs a required `task` input. An epic under the root is not ready while it has
-open beads; once they are closed it is given out as any bead (with an id of no rig prefix: in the root).
+A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read of
+the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root owns
+the beads of every rig under its root. Any other bead is foreign — of another place, or outside the subtree: it is not
+given and is no error, it is the work of others with their own acceptance. Each own bead gets the same start as
+`loop-manager run start` with the bead as the formula's input of type `task`, no rig named (the prefix of the bead's id
+gives it, the project root when it matches no rig, and its `agent:`/`harness:` labels apply as to any run), the run's
+correlation, one level deeper, the run as `parent_run`. A bead goes out once per entry of the step: a child that failed
+is not run again in it, and an attempt cut by a restart (`daemon_crash`) starts no new entry; a round back to the step
+does. A bead whose start is refused (a `rig:` label, a `harness:` label the config does not give) gets no run and stays
+open. The step has no process (contracts 6.2): it ends once nothing was given, no child is alive and no later read of
+the tracker is queued, with `data = {closed, failed, refused}` — the beads whose runs passed, those whose runs failed or
+were cancelled, and the refused ones with the reason. The step does not end while an open bead of its own it has not
+given in this entry waits on an open foreign blocker, directly or through its parents (a blocked epic holds all its
+descendants; a `deferred` or `in_progress` blocker holds too), or has a `blocked` status set by hand on itself or a
+parent: a lock. Its own failed beads do not hold it. The tracker's watcher wakes it (`bead.closed` of the blocker); the
+wait ends at the step's `timeout`, which fails the attempt as for any step (`runaway_turn`). `pool` (default 1) is the
+most beads of the step in work at once: a child holds its place from its creation, queued or running, and the end of one
+gives out the next ready bead. `on_item_failure` says what a failed run of a bead does: `continue` (default) — the other
+beads go on and the step passes; `soft_stop` — no new bead goes out, the started ones end; `hard_stop` — the started
+ones are cancelled too (reason `drain_hard_stop`), on the read of the tracker that the failed run's end queues. A
+stopped step ends `fail` once no child is alive, its `data` adds `stopped_on` (the failed beads) and `not_started` (the
+ready beads under the root it did not give), and its summary is `stopped on <beads>: <n> closed, <n> failed, <n> not
+started`. The stop follows from the children of the entry, so a restart keeps it: no new bead goes out after one; a
+repeat of the step or a round back to it is a new entry and gives the beads again. A cancelled child stops nothing.
+`formula` must take exactly one input of type `task` and need no other; a formula with a `drain` step needs a required
+`task` input. An epic under the root is not ready while it has open beads; once they are closed it is given out as any
+bead (with an id of no rig prefix: in the root).
 
 A `formula` step runs `formula`, a formula of the run's project (a formula of another project is not in its reach,
 whatever its name), as one child run: the same rig, the run's correlation, one level deeper, the run as
@@ -895,10 +897,10 @@ parent's workdir, the parent's worktree when it has one. On another rig it is th
 parent's formula has `worktree = true`: a worktree on the branch `loop-manager/<parent>`, which the first such child
 there makes from the HEAD of the first that exists of: the lazy base there of the next ancestor with the key up the
 chain of such steps, the workdir of the nearest ancestor on that rig, the rig's directory; an ancestor without the key
-ends that chain. A parent without the key has the rig's directory as its base there: the checkout on its branch. A child whose own formula has
-`worktree = true` gets its worktree from the HEAD of that base. Only a `drain` step with `worktree = true` merges its
-children back (below), and a child never removes the base it works in. A run a session starts is no such child: it starts
-in its place's directory.
+ends that chain. A parent without the key has the rig's directory as its base there: the checkout on its branch. A child
+whose own formula has `worktree = true` gets its worktree from the HEAD of that base. Only a `drain` step with `worktree
+= true` merges its children back (below), and a child never removes the base it works in. A run a session starts is no
+such child: it starts in its place's directory.
 
 `worktree = true` on a `drain` step gives each child a worktree of its own on the branch `loop-manager/<child>` from the
 HEAD of the base of its rig, whatever the child's formula says (the step's key wins: no second worktree), and merges it
@@ -1109,28 +1111,28 @@ or for a project.
   `crash_pause_s` (300), `resume_failures` (3), `unknown_after_s` (30), `unknown_retries` (3). The waits and caps that a
   zero would turn into a hot loop (`quota_wait_s`, `model_pause_s`, both bases and both caps, `crash_pause_s`) and
   `crash_loop` must be at least 1; `quota_margin_s`, `rapid_s` and `unknown_after_s` must not be negative.
-- `worktree` has no table: it is on in a project with a formula or a `drain` step with `worktree = true` (a setting
-  of the formula; there is no central list and no agent-level switch), and a `[builtin.worktree]` table is a config error saying so. The core
-  gives its hook the place of the run as its parameters, not in the event: the directory of its base, the ancestors
-  whose lazy worktree is that base, whether it gets a worktree of its own (its formula or the `drain` step that made it
-  has the key), whether it continues a session, the other places it had children in, and, for a child of a `drain`
-  step with the key, the title of its bead. On `run.preparing` the addon moves a child of a step to its base (see "Formula"), making
-  a lazy base that is not there yet, and gives each run that gets one a git worktree on the branch
-  `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, from the HEAD of that base, as its workdir.
-  The hooks of declared addons come first and see the directory the run was created in. A base in a directory
-  without git is that directory: no worktree, no isolation. When the run ends its own worktree, and its lazy bases in
-  the other places, are removed unless one has uncommitted changes or a HEAD no ref reaches (then `addon.hook_failed`
-  says why); a branch is deleted only when it is merged into the HEAD of the base it came from. A worktree a run
-  inherited is never removed by it. A run with `continue_from` starts in the workdir of the run
-  it continues (a session resumes where it ran); when that is a worktree of this addon, it is brought back on its branch
-  if it was removed, whatever the run's formula says. On `run.finishing` it merges a child of a `drain` step with the
-  key into its base (see "Formula"). A reload that leaves a project no formula or `drain` step with `worktree = true`
-  turns the addon off there: the worktrees of its runs still going are left in place, as are their branches. Runs of one
-  repository that start or end at once make and remove their worktrees one at a time, under an OS lock on the git
-  common dir: two `git worktree add` at once can race on the repository config. Its hook has the 30 s timeout of a
-  hook, the wait for that lock included, and 300 s, the ceiling of a hook, on `run.finishing`: a merge waits for the
-  merges of its siblings before it and runs the project's own git hooks. A `git` still running at that timeout is
-  killed with its process group and the hook fails.
+- `worktree` has no table: it is on in a project with a formula or a `drain` step with `worktree = true` (a setting of
+  the formula; there is no central list and no agent-level switch), and a `[builtin.worktree]` table is a config error
+  saying so. The core gives its hook the place of the run as its parameters, not in the event: the directory of its
+  base, the ancestors whose lazy worktree is that base, whether it gets a worktree of its own (its formula or the
+  `drain` step that made it has the key), whether it continues a session, the other places it had children in, and, for
+  a child of a `drain` step with the key, the title of its bead. On `run.preparing` the addon moves a child of a step to
+  its base (see "Formula"), making a lazy base that is not there yet, and gives each run that gets one a git worktree on
+  the branch `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, from the HEAD of that base, as
+  its workdir. The hooks of declared addons come first and see the directory the run was created in. A base in a
+  directory without git is that directory: no worktree, no isolation. When the run ends its own worktree, and its lazy
+  bases in the other places, are removed unless one has uncommitted changes or a HEAD no ref reaches (then
+  `addon.hook_failed` says why); a branch is deleted only when it is merged into the HEAD of the base it came from. A
+  worktree a run inherited is never removed by it. A run with `continue_from` starts in the workdir of the run it
+  continues (a session resumes where it ran); when that is a worktree of this addon, it is brought back on its branch if
+  it was removed, whatever the run's formula says. On `run.finishing` it merges a child of a `drain` step with the key
+  into its base (see "Formula"). A reload that leaves a project no formula or `drain` step with `worktree = true` turns
+  the addon off there: the worktrees of its runs still going are left in place, as are their branches. Runs of one
+  repository that start or end at once make and remove their worktrees one at a time, under an OS lock on the git common
+  dir: two `git worktree add` at once can race on the repository config. Its hook has the 30 s timeout of a hook, the
+  wait for that lock included, and 300 s, the ceiling of a hook, on `run.finishing`: a merge waits for the merges of its
+  siblings before it and runs the project's own git hooks. A `git` still running at that timeout is killed with its
+  process group and the hook fails.
 
 ### Where the bundled addons end and the core begins
 

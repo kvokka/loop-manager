@@ -692,23 +692,22 @@ run that prepares no more, is dropped.
 `changes` is pull-only; the adapter also owns a watcher that sends a "changed" message to the core, and the core then
 calls `changes` from its stored cursor (and on start and after recovery without waiting for a signal). One effect on the
 queue `tracker:<project>` reads `changes(cursor)`, then `ready()`, then `under` and `waiting` for the root of each run
-in a `drain` step; the core turns the writes past the cursor into events, moves the cursor (table `tracker_cursors`, never back) and
-diffs the ready set. The first read of a project's tracker takes its whole history as the starting cursor and raises no
-`bead.created|updated|closed` for it; every bead ready at that read is new to the set and raises `bead.ready`.
-A write whose actor is `loop-manager:<run id>[:<attempt n>]` carries that run and its correlation; `bead.ready` carries
-those of the last such write in the same read (the write that freed the bead is usually that one); the rig of a bead
-event is the one whose prefix is the bead's id up to its last `-`, absent for a bead of the root.
-The core keeps the labels of every bead as last read (table `bead_labels`): from each write it reads, the history of
-the first read included, and from a ready bead it has none of, whose write the read did not list yet. Each label that a
-write past the cursor shows and the bead's last read labels lack raises `bead.labeled` after the write's own event,
-with the write's actor, run and correlation. A bead the core never read gains nothing: a bead filed with a label, or
-labelled before the core first read it, is told by its `bead.created` and `bead.ready`. The core compares labels as
-read, not writes: a label removed and added again with no read seeing it removed is no gain, one added again after
-such a read is gained again. A read queued before the last one was made repeats writes already read: the cursor drops
-them, so a repeated observation raises nothing. The daemon gives a project a
-tracker when `<project>/.beads` exists, and every session and exec step of the project gets `BEADS_DIR` (layer: project)
-and `BD_ACTOR=loop-manager:<run id>:<attempt n>`; the core sets the actor of an exec step and hands that of a session to
-the adapter in the session plan.
+in a `drain` step; the core turns the writes past the cursor into events, moves the cursor (table `tracker_cursors`,
+never back) and diffs the ready set. The first read of a project's tracker takes its whole history as the starting
+cursor and raises no `bead.created|updated|closed` for it; every bead ready at that read is new to the set and raises
+`bead.ready`. A write whose actor is `loop-manager:<run id>[:<attempt n>]` carries that run and its correlation;
+`bead.ready` carries those of the last such write in the same read (the write that freed the bead is usually that one);
+the rig of a bead event is the one whose prefix is the bead's id up to its last `-`, absent for a bead of the root. The
+core keeps the labels of every bead as last read (table `bead_labels`): from each write it reads, the history of the
+first read included, and from a ready bead it has none of, whose write the read did not list yet. Each label that a
+write past the cursor shows and the bead's last read labels lack raises `bead.labeled` after the write's own event, with
+the write's actor, run and correlation. A bead the core never read gains nothing: a bead filed with a label, or labelled
+before the core first read it, is told by its `bead.created` and `bead.ready`. The core compares labels as read, not
+writes: a label removed and added again with no read seeing it removed is no gain, one added again after such a read is
+gained again. A read queued before the last one was made repeats writes already read: the cursor drops them, so a
+repeated observation raises nothing. The daemon gives a project a tracker when `<project>/.beads` exists, and every
+session and exec step of the project gets `BEADS_DIR` (layer: project) and `BD_ACTOR=loop-manager:<run id>:<attempt n>`;
+the core sets the actor of an exec step and hands that of a session to the adapter in the session plan.
 
 ### 5.2 Types and errors
 
@@ -763,18 +762,19 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   `hollow_done` (the turn ended without an outcome), `infrastructure` (attempts ran out or the policy ended the run).
 - `queued` has not started: it waits for a concurrency slot, a place in its rig (`max_writers`) or an open gate. `parked` has started and
   waits for a gate or a slot of its agent with no harness process.
-- A run belongs to a project and a place: a rig, or the project root under its name (config.md "Project"), named
-  when it is created (API, CLI, MCP) or by the trigger that fires there. A start that names no rig takes it from the
-  id prefix of the bead an input names by id, and runs in the root when the id matches no rig or no bead is named. An
-  unknown rig, or a bead that still carries a `rig:` label, is refused before the run exists. Its workdir is the place's
-  directory, or a worktree of it with `worktree = true` in the formula (config.md). A child of a `drain` or `formula`
-  step works from the base of its rig instead: the workdir of its parent on the parent's rig, the lazy worktree of an
-  ancestor with the key on another (config.md "Formula"); a worktree of its own comes from the HEAD of that base. In a
-  directory without git `worktree = true` makes no worktree: the run works in the directory. The session of an ai step works in the run's workdir, but that of an agent of
-  scope `root` works in the root's directory when the run is on a rig. loop-manager does not lock a directory: by
-  default two runs may work in one directory at once. Keeping parallel writers apart in one rig is the user's choice:
-  `worktree = true` gives each run its own directory, the rig's `max_writers` keeps the runs past it that work in the
-  rig's own directory in `queued`, and `pool` and `max_runs` bound how many run at once.
+- A run belongs to a project and a place: a rig, or the project root under its name (config.md "Project"), named when it
+  is created (API, CLI, MCP) or by the trigger that fires there. A start that names no rig takes it from the id prefix
+  of the bead an input names by id, and runs in the root when the id matches no rig or no bead is named. An unknown rig,
+  or a bead that still carries a `rig:` label, is refused before the run exists. Its workdir is the place's directory,
+  or a worktree of it with `worktree = true` in the formula (config.md). A child of a `drain` or `formula` step works
+  from the base of its rig instead: the workdir of its parent on the parent's rig, the lazy worktree of an ancestor with
+  the key on another (config.md "Formula"); a worktree of its own comes from the HEAD of that base. In a directory
+  without git `worktree = true` makes no worktree: the run works in the directory. The session of an ai step works in
+  the run's workdir, but that of an agent of scope `root` works in the root's directory when the run is on a rig.
+  loop-manager does not lock a directory: by default two runs may work in one directory at once. Keeping parallel
+  writers apart in one rig is the user's choice: `worktree = true` gives each run its own directory, the rig's
+  `max_writers` keeps the runs past it that work in the rig's own directory in `queued`, and `pool` and `max_runs` bound
+  how many run at once.
 - Concurrency is bounded per orchestrator (`max_runs`, default 8) and per agent (`max_runs` in `agent.toml`). A run
   that started keeps its orchestrator slot from step to step; a step of an agent at its limit parks until a run of
   that agent ends.

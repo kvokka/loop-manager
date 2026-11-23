@@ -105,10 +105,10 @@ The behaviour itself is described in the document named under each heading; this
 - Concurrency is bounded per orchestrator and per agent.
 - A rig's `max_writers` counts a run by its whole formula, not by the step it is at, and by its base: an `exec` step or
   an `ai` step of an agent not of scope `root`, and no isolation — no `worktree = true` in its formula (in a place
-  without git too), and no base of an ancestor other than the rig's directory. A parked run keeps its place. A run in a `drain` or `formula` step
-  lends its place to the runs that step started, down the chain; a run a session starts counts its parent, which
-  works in the directory. A queued run past the limit waits for `writers`, a reason of its own. `[root]` has no
-  `max_writers`.
+  without git too), and no base of an ancestor other than the rig's directory. A parked run keeps its place. A run in a
+  `drain` or `formula` step lends its place to the runs that step started, down the chain; a run a session starts counts
+  its parent, which works in the directory. A queued run past the limit waits for `writers`, a reason of its own.
+  `[root]` has no `max_writers`.
 - The states from `preparing` to `finishing` are those of the current step.
 - Cancelling a parent cancels its live child runs.
 - The outcome of a run is that of its last step; the finisher's data is visible to the next steps, triggers and the
