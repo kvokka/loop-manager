@@ -47,9 +47,9 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   transaction that creates it, and the tracker claim (owner `loop-manager:<run>`) is made when it leaves `queued`. The
   claim is held for the whole run, through all its attempts, and let go only when the run is terminal: `passed` closes
   the bead, `failed` and `cancelled` release it conditionally (owner compared). A bead closed outside its run (by a
-  human, an outside tool or another run) ends that run `cancelled` with reason `bead_closed`, whatever step it is at;
-  its release then clears the assignee and leaves the bead closed, so it raises no `bead.ready`. Transitions:
-  [contracts.md 6.2](contracts.md#62-transitions).
+  human, an outside tool or another run: the last write read that closed it or set its status is theirs) ends that run
+  `cancelled` with reason `bead_closed`, whatever step it is at; its release then clears the assignee and leaves the
+  bead closed, so it raises no `bead.ready`. Transitions: [contracts.md 6.2](contracts.md#62-transitions).
 - A `formula` step lends the bead of its run to the child run: the child makes no claim and at its end neither closes
   nor releases the bead, the parent run does that at its own end.
 - A prompt that shows the comments or the parents of the run's bead (`{{ bead.comments }}`, `{{ bead.parents }}`,

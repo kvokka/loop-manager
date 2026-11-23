@@ -112,7 +112,8 @@ The behaviour itself is described in the document named under each heading; this
 - The states from `preparing` to `finishing` are those of the current step.
 - Cancelling a parent cancels its live child runs.
 - A run whose bead is closed by another actor (a human, an outside tool, another run) ends `cancelled` with reason
-  `bead_closed`, at whatever step, an `await` step included; its release leaves the bead closed.
+  `bead_closed`, at whatever step, an `await` step included; its release leaves the bead closed. Of the writes one
+  read takes, the last that closed the bead or set its status tells who closed it.
 - The outcome of a run is that of its last step; the finisher's data is visible to the next steps, triggers and the
   waiting parent.
 - The finisher is a CLI command with the attempt token; the finisher of a stale attempt is refused.

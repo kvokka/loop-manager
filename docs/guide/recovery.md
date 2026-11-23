@@ -114,7 +114,8 @@ by hand.
 
 A run that is not over yet (in `queued`, `parked` or `interrupted`, say) is stopped with
 `loop-manager run cancel <run> --reason <text>`: its session stops, its bead is released without counting a failure, and
-the runs its sessions started are cancelled too. A run that already failed cannot be cancelled and needs nothing more;
+the runs its sessions started are cancelled too. Closing the bead of a live run with `br close` cancels the run as
+well, with reason `bead_closed`, and the bead stays closed. A run that already failed cannot be cancelled and needs nothing more;
 its bead is open again, so a trigger on `bead.ready` or a `next_ready` task may take it. To keep every run off it,
 close its gate:
 

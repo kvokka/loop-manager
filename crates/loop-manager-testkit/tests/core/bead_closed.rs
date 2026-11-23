@@ -80,3 +80,38 @@ async fn a_bead_closed_by_another_actor_cancels_its_waiting_run_and_frees_its_wr
         .collect();
     assert_eq!(fired.len(), 1, "no trigger takes the closed bead again: {fired:?}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_bead_whose_status_another_actor_sets_to_closed_cancels_its_waiting_run() {
+    let w = world(FILES);
+    let bead = w.tracker.add(&["auto"], None);
+    w.changed().await;
+    let held = w.run_of(&bead);
+    w.until(Some(&held), "run.awaiting", 0).await;
+
+    // `br update -s closed`: an update of the status, not a close.
+    w.tracker.set_status(&bead, "closed");
+    w.changed().await;
+    let cancelled = w.until(Some(&held), "run.cancelled", 0).await;
+    assert_eq!(cancelled["reason"], "bead_closed", "{cancelled:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_runs_own_close_read_after_a_status_write_of_another_actor_leaves_it_running() {
+    let w = world(FILES);
+    let bead = w.tracker.add(&["auto"], None);
+    w.changed().await;
+    let held = w.run_of(&bead);
+    w.until(Some(&held), "run.awaiting", 0).await;
+
+    // One read takes both writes, each with the bead as read: closed.
+    w.tracker.set_status(&bead, "in_progress");
+    w.tracker.close_as(&bead, &format!("loop-manager:{held}:1"));
+    w.changed().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        w.journal_of("run.cancelled").is_empty(),
+        "{:?}",
+        w.journal_of("run.cancelled")
+    );
+}

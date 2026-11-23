@@ -49,8 +49,10 @@ impl RunHandler {
         // shortcut: a bead that became ready takes the chain of the last loop-manager write read with it (the write that
         // freed it is usually that one); a per-bead cause needs the blocker graph from the tracker.
         let mut cause = (None, None);
-        // The writes past the cursor with the run each was made by, for the runs whose bead was closed outside them.
-        let mut closed = Vec::new();
+        // Per bead, the last write past the cursor that closed it or set its status, with the run it was made by: for
+        // the runs whose bead was closed outside them. Each carries the bead as read, so only the last one tells who
+        // left it closed.
+        let mut closed: Vec<(&Change, Option<String>)> = Vec::new();
         for change in changes {
             // Not news: the history of a first read, or the writes a read queued before the last one was made repeats.
             if change.seq <= cursor {
@@ -61,7 +63,10 @@ impl RunHandler {
             }
             let before = remember_labels(tx, project, &change.bead)?;
             let by = bead_event(tx, place, change)?;
-            closed.push((change, by.0.clone()));
+            if change.kind == "closed" || change.changed.iter().any(|f| f == "status") {
+                closed.retain(|(c, _)| c.bead.id != change.bead.id);
+                closed.push((change, by.0.clone()));
+            }
             // A bead never read gains nothing: its labels are those it was filed with.
             if let Some(before) = before {
                 let ready = stays.contains(change.bead.id.as_str());
@@ -108,8 +113,9 @@ impl RunHandler {
 }
 
 impl RunHandler {
-    /// A write that closed a bead a live run owns, by an actor other than that run (`by`: the run of the write), ends
-    /// the run as `cancelled` with reason `bead_closed`, at whatever step (docs/design/contracts.md 6.2).
+    /// The last write that closed a bead a live run owns or set its status, when it left the bead closed and was made
+    /// by an actor other than that run (`by`: the run of the write), ends the run as `cancelled` with reason
+    /// `bead_closed`, at whatever step (docs/design/contracts.md 6.2).
     fn closed_outside(
         &mut self,
         tx: &mut Tx<'_>,
@@ -117,8 +123,7 @@ impl RunHandler {
         change: &Change,
         by: Option<&str>,
     ) -> Result<(), Error> {
-        let closes = change.kind == "closed" || change.changed.iter().any(|f| f == "status");
-        if !closes || change.bead.status != "closed" {
+        if change.bead.status != "closed" {
             return Ok(());
         }
         let owner: Option<String> = tx
