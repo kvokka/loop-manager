@@ -121,6 +121,10 @@ For an authorized upgrade, install the new artifact between epics with `mise run
 registered service through its manager. Installation replaces the file atomically. Subsequent CLI invocations use
 it immediately, and the daemon picks it up on restart.
 
+The step scripts `gate.sh`, `close.sh` and `owner-answer.sh` still fall back to `LOOP_MANAGER_BEAD`, which an
+installed daemon older than the issue rename sets. Once the service runs a build that sets `LOOP_MANAGER_ISSUE`,
+reduce their `issue=` line to `issue=${LOOP_MANAGER_ISSUE:?}`.
+
 ## File an epic
 
 A ready issue with the label `auto` starts a run; an issue without it starts nothing. It does not matter when the issue

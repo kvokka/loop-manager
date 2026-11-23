@@ -446,7 +446,7 @@ rig = "backend"
 A rig's name is ASCII letters, digits, `-` and `_`. Its prefix is lowercase ASCII letters, digits and `-` inside; it
 is the acronym of the words of the name (split on `-` and `_`: `backend` is `b`, `my-project` is `mp`) unless `prefix`
 is set. Two rigs of a project with one prefix are a config error. The prefix makes the rig of an issue: its id up to the
-last `-` ([tracker-br.md](tracker-br.md#the-rig-of-a-issue)); changing it makes the rig's existing issues issues of the
+last `-` ([tracker-br.md](tracker-br.md#the-rig-of-an-issue)); changing it makes the rig's existing issues issues of the
 root.
 
 `max_writers` bounds the runs that work in the rig's own directory at once; a run past it waits in `queued` with

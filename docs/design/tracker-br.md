@@ -20,7 +20,7 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
 
 - A project with a `<project>/.beads` directory has a br tracker: one database per project, outside the git of its
   rigs. The rig of an issue is the prefix of its id, so an epic spans rigs, `ready` is shared and an agent of scope
-  `root` sees the issues of every rig ([below](#the-rig-of-a-issue)).
+  `root` sees the issues of every rig ([below](#the-rig-of-an-issue)).
 - The database path is always explicit: every br call and every session or exec step gets `BEADS_DIR`. br's own
   discovery walks up to `$HOME`, and an agent without an explicit path silently writes to someone else's tracker.
 - Every attempt has its own actor: the adapter passes `--actor` to br, sessions get `BD_ACTOR=loop-manager:<run>:<n>`.

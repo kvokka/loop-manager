@@ -171,7 +171,7 @@ subagent's steps out of a turn are no activity.
 ## br as an event source (experiment 3)
 
 Code: `experiments/05-br-events` (one scenario, fresh workspace with an isolated `HOME`, the `notify` crate on the
-`.beads/` directory, `rusqlite` read-only on `issues.db`), removed from the tree after recording; last in commit
+`.beads/` directory, `rusqlite` read-only on `beads.db`), removed from the tree after recording; last in commit
 `1629c3a`. Output: `experiments/05-br-events/logs/run.txt`.
 
 <!-- MEASURE id=br-events-exp3 date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="20 creates, 9 reads, 16 concurrent claims, 4 attribution cases; database of 20 issues; two runs agree" -->
@@ -192,7 +192,7 @@ Code: `experiments/05-br-events` (one scenario, fresh workspace with an isolated
 
 1. Watch the `.beads/` directory (not the file: the rename replaces the inode). Any rename of `issues.jsonl` means
    "something changed"; signals are coalesced, and a missed or duplicate signal costs nothing because of step 2.
-2. On a signal, open `issues.db` read-only, read `events` after the stored cursor, close. Map rows to `issue.*` events;
+2. On a signal, open `beads.db` read-only, read `events` after the stored cursor, close. Map rows to `issue.*` events;
    `issue.ready` is derived by re-reading `br ready` and diffing with the last set. On start and after recovery, read
    from the stored cursor without waiting for a signal.
 3. Attribution: every session gets `BD_ACTOR=<attempt actor>` in its environment, and loop-manager's own calls pass

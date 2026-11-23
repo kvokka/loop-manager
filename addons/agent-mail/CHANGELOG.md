@@ -2,7 +2,7 @@
 
 ## 0.5.0
 
-- Say issue, not bead, in the prompt: task status and dependencies stay in the tracker.
+- Say issue in the prompt: task status and dependencies stay in the tracker.
 
 ## 0.4.0
 
