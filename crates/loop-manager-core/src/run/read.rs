@@ -16,39 +16,17 @@ pub struct AttemptSession {
     pub session: SessionRef,
 }
 
-/// A run of a project as the task view reads it (docs/api/acp.md).
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkRun {
-    pub id: String,
-    pub rig: String,
-    pub formula: String,
-    pub bead: Option<String>,
-    /// The title and the parent of `bead` as the tracker last gave them to the run.
-    pub bead_title: Option<String>,
-    pub bead_parent: Option<String>,
-    pub parent_run: Option<String>,
-    /// The parent's round when the run was created.
-    pub parent_round: Option<u32>,
-    /// The run's current round.
-    pub round: u32,
-    /// Not terminal.
-    pub live: bool,
-    pub created_ms: i64,
-}
-
-/// An attempt that has a session, with the keys of the prompts it was given, oldest first.
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkAttempt {
-    pub run: String,
-    pub n: u32,
-    pub round: u32,
-    pub step: String,
+/// The part of a harness transcript belonging to one run, step and round, across its resumed attempts.
+pub struct TranscriptSlice {
     pub harness: String,
     pub session: SessionRef,
-    pub workdir: Option<String>,
-    pub started_ms: i64,
-    pub ended_ms: Option<i64>,
-    pub prompts: Vec<String>,
+    /// This slice owns entries before the first recorded prompt.
+    pub starts_here: bool,
+    pub prompt_keys: std::collections::HashSet<String>,
+    /// An attempt in this slice is still writing.
+    pub live: bool,
+    /// All attempts sharing the transcript have ended, including continuations in other slices.
+    pub ended: bool,
 }
 
 /// Which runs `Reader::runs` lists.
@@ -204,56 +182,41 @@ impl Reader {
         Ok((rows.collect::<Result<_, _>>()?, terminal))
     }
 
-    /// Every run of `project` and every attempt of theirs with a session, both oldest first.
-    pub fn work(&self, project: &str) -> Result<(Vec<WorkRun>, Vec<WorkAttempt>), Error> {
+    /// Resolve an attempt to its transcript and the prompts delivered in its step and round. The earliest
+    /// attempt owns the preamble, including when a later run continues the session.
+    pub fn transcript_slice(&self, run: &str, attempt: u32) -> Result<Option<TranscriptSlice>, Error> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, rig, formula, bead, json_extract(bead_data, '$.title'), json_extract(bead_data, '$.epic'), \
-             parent_run, parent_round, round, state NOT IN ('passed','failed','cancelled'), created_ms \
-             FROM runs WHERE project = ?1 ORDER BY n",
+            "SELECT a.harness, a.session, a.run = chosen.run AND a.step = chosen.step AND a.round = chosen.round, \
+             a.ended_ms IS NULL, p.key FROM attempts chosen \
+             JOIN runs origin ON origin.id = chosen.run JOIN runs r ON r.project = origin.project \
+             JOIN attempts a ON a.run = r.id AND a.harness = chosen.harness AND a.session = chosen.session \
+             LEFT JOIN prompts p ON p.run = a.run AND p.attempt = a.n \
+             WHERE chosen.run = ?1 AND chosen.n = ?2 ORDER BY a.started_ms, r.n, a.n, p.n",
         )?;
-        let runs = stmt
-            .query_map([project], |r| {
-                Ok(WorkRun {
-                    id: r.get(0)?,
-                    rig: r.get(1)?,
-                    formula: r.get(2)?,
-                    bead: r.get(3)?,
-                    bead_title: r.get(4)?,
-                    bead_parent: r.get(5)?,
-                    parent_run: r.get(6)?,
-                    parent_round: r.get(7)?,
-                    round: r.get(8)?,
-                    live: r.get(9)?,
-                    created_ms: r.get(10)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut stmt = conn.prepare(
-            "SELECT a.run, a.n, a.round, a.step, a.harness, a.session, a.workdir, a.started_ms, a.ended_ms, \
-             (SELECT json_group_array(key) FROM (SELECT key FROM prompts p WHERE p.run = a.run AND p.attempt = a.n \
-             ORDER BY p.n)) \
-             FROM attempts a JOIN runs ON runs.id = a.run \
-             WHERE runs.project = ?1 AND a.session IS NOT NULL ORDER BY runs.n, a.n",
-        )?;
-        let attempts = stmt
-            .query_map([project], |r| {
-                let prompts: Value = r.get(9)?;
-                Ok(WorkAttempt {
-                    run: r.get(0)?,
-                    n: r.get(1)?,
-                    round: r.get(2)?,
-                    step: r.get(3)?,
-                    harness: r.get(4)?,
-                    session: SessionRef(r.get(5)?),
-                    workdir: r.get(6)?,
-                    started_ms: r.get(7)?,
-                    ended_ms: r.get(8)?,
-                    prompts: serde_json::from_value(prompts).unwrap_or_default(),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((runs, attempts))
+        let mut rows = stmt.query(params![run, attempt])?;
+        let Some(mut row) = rows.next()? else { return Ok(None) };
+        let mut slice = TranscriptSlice {
+            harness: row.get(0)?,
+            session: SessionRef(row.get(1)?),
+            starts_here: row.get(2)?,
+            prompt_keys: Default::default(),
+            live: false,
+            ended: true,
+        };
+        loop {
+            let belongs: bool = row.get(2)?;
+            let live: bool = row.get(3)?;
+            slice.ended &= !live;
+            slice.live |= belongs && live;
+            if belongs && let Some(key) = row.get::<_, Option<String>>(4)? {
+                slice.prompt_keys.insert(key);
+            }
+            match rows.next()? {
+                Some(next) => row = next,
+                None => return Ok(Some(slice)),
+            }
+        }
     }
 
     /// The last `seq` the outbox assigned, journaled or not; 0 before the first event.

@@ -249,15 +249,14 @@ async fn a_repeat_stays_in_its_round_and_a_round_starts_the_count_again() {
     assert_eq!(w.repeat_view(&run)["round"], 2);
     // The repeat stays in round 1; the session attempt after the return is of round 2.
     let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
-    let (_, attempts) = reader.work("shop").unwrap();
-    let rounds: Vec<_> = attempts.iter().map(|a| (a.n, a.round)).collect();
-    assert_eq!(rounds, [(1, 1), (2, 1), (4, 2)]);
-    assert!(
-        attempts
-            .iter()
-            .all(|a| a.workdir.as_deref().is_some_and(|d| d.ends_with("web")))
-    );
-    assert!(attempts.iter().all(|a| a.prompts.len() == 1), "{attempts:?}");
+    let view = reader.run_with_attempts(&run, true).unwrap().unwrap();
+    let rounds: Vec<_> = view["attempts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["round"].as_u64().unwrap())
+        .collect();
+    assert_eq!(rounds, [1, 1, 1, 2, 2]);
 }
 
 /// A restart in the middle of the second execution: the count survives, so the step has no third.

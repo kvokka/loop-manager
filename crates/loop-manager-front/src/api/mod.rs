@@ -11,7 +11,6 @@ mod live;
 pub mod mcp;
 mod replies;
 mod runs;
-mod tasks;
 mod triggers;
 
 use axum::{
@@ -63,8 +62,6 @@ pub struct Api {
     pub drivers: Vec<Arc<dyn Driver>>,
     /// The checks of `loop-manager doctor`, made from the daemon's process: one `{check, level, detail}` object each.
     pub doctor: Box<dyn Fn() -> Vec<Value> + Send + Sync>,
-    /// The tracker of each project that has one, for the task view.
-    pub trackers: std::collections::BTreeMap<String, Arc<dyn loop_manager_core::tracker::Tracker>>,
 }
 
 impl Api {
@@ -120,9 +117,6 @@ fn router() -> OpenApiRouter<Arc<Api>> {
         .routes(routes!(daemon::doctor))
         .routes(routes!(instances::list))
         .routes(routes!(instances::stop))
-        .routes(routes!(tasks::list))
-        .routes(routes!(tasks::show))
-        .routes(routes!(tasks::live))
 }
 
 /// The OpenAPI document of the API, generated from the handlers; every operation may answer 401 over TCP.

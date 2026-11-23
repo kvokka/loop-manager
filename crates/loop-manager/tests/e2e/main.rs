@@ -4,7 +4,6 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-mod acp;
 mod addon_hooks;
 mod agent_mail;
 mod api;
@@ -30,7 +29,6 @@ mod role_prompt;
 mod run_card;
 mod step_if;
 mod stop;
-mod tasks;
 mod tracker;
 mod wait;
 mod worktree;

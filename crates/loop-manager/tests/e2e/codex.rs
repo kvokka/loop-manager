@@ -12,7 +12,7 @@ use std::{
 };
 
 /// A daemon whose `build` formula is a prompt run of a codex agent on the fake `provider`.
-async fn daemon(provider: &Provider) -> Daemon {
+pub(super) async fn daemon(provider: &Provider) -> Daemon {
     daemon_with(provider, "", false, "").await
 }
 

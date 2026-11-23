@@ -13,13 +13,12 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/first-project.md](guide/first-project.md) | a project, its root and rigs |
 | [guide/first-formula.md](guide/first-formula.md) | a formula with an agent, from the config to a passed run |
 | [guide/recovery.md](guide/recovery.md) | a run that failed for good: what failed, continue the session, a new session with or without a note, abandon |
-| [guide/acp.md](guide/acp.md) | watching tasks from an editor over ACP: the command, the socket, T3 Code |
+| [T3 Code run card](../plugins/README.md#follow-a-run-in-t3-code) | browse executed rounds and open an agent’s working session |
 | [guide/addons.md](guide/addons.md) | using addons: declare, attach, parameters; an agent's subagents |
 | [guide/addon-development.md](guide/addon-development.md) | writing an addon: the manifest, the agent side and the orchestrator side, tests, changelogs and releases |
 | [design/config.md](design/config.md) | every config file and key; layers and "explain config"; packs, agents, formulas, triggers, addons |
 | [api/frontends.md](api/frontends.md) | the HTTP API and the CLI; what a human sees and does with a run |
 | [api/mcp.md](api/mcp.md), [api/openapi.json](api/openapi.json) | the MCP server; the OpenAPI document |
-| [api/acp.md](api/acp.md) | `loop-manager acp`: the read-only ACP v2 view of tasks for editors, and how a client starts it |
 | [../demos/README.md](../demos/README.md) | two live examples |
 | [../devloop/README.md](../devloop/README.md) | the pack that develops loop-manager with loop-manager |
 

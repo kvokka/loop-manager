@@ -53,7 +53,7 @@ fn call_id(id: Option<String>) -> String {
     id.map(|id| format!(" [{id}]")).unwrap_or_default()
 }
 
-pub(super) fn content(value: &Value) -> String {
+fn content(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         Value::Array(parts) => parts

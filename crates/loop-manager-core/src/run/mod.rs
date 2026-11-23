@@ -27,7 +27,6 @@ mod repeat;
 mod row;
 mod service_proc;
 mod services;
-pub mod tasks;
 mod triggers;
 mod writers;
 
@@ -53,7 +52,7 @@ pub use finish::MAX_REMARKS;
 pub use gates::{GateSpec, valid_key};
 pub use hooks::{BundledHook, ExecHooks, HookRunner};
 pub use msg::{Create, Decision, Msg, Outcome, Verdict};
-pub use read::{AttemptSession, Reader, RunFilter, WorkAttempt, WorkRun};
+pub use read::{AttemptSession, Reader, RunFilter, TranscriptSlice};
 
 type Drivers = Arc<BTreeMap<String, Arc<dyn Driver>>>;
 

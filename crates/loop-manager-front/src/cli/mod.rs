@@ -2,7 +2,6 @@
 //! Local commands include `format`, `daemon`, `cache clear`, `--version`, and `doctor` and `config check|explain`
 //! on a file named with `--config`.
 
-mod acp;
 mod chat;
 mod commands;
 mod config;
@@ -11,7 +10,7 @@ mod wait;
 
 use crate::client::{Client, ClientError, Events};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-pub use commands::{GateCommand, InstanceCommand, RunCommand, TaskCommand, TriggerCommand};
+pub use commands::{GateCommand, InstanceCommand, RunCommand, TriggerCommand};
 pub use config::{ConfigCommand, FormulaCommand, ListCommand, local as config_local};
 use finish::finish;
 use serde_json::{Value, json};
@@ -49,9 +48,6 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("doctor", "GET", "/v1/doctor"),
     ("instance list", "GET", "/v1/instances"),
     ("instance stop", "POST", "/v1/instances/{id}/stop"),
-    ("task list", "GET", "/v1/tasks"),
-    ("task show", "GET", "/v1/tasks/{project}/{bead}"),
-    ("task watch", "GET", "/v1/tasks/{project}/{bead}/live"),
 ];
 
 #[derive(Parser)]
@@ -108,9 +104,6 @@ pub enum Command {
     /// Harness instances: list them, stop an idle one.
     #[command(subcommand)]
     Instance(InstanceCommand),
-    /// Tasks: the root beads with work under them, and the tree of rounds and sessions of one.
-    #[command(subcommand)]
-    Task(TaskCommand),
     /// Triggers: list them, fire one by hand, switch one off and on.
     #[command(subcommand)]
     Trigger(TriggerCommand),
@@ -146,9 +139,6 @@ pub enum Command {
         #[arg(long)]
         data: Option<String>,
     },
-    /// Serve a read-only ACP v2 agent on stdin and stdout: the tasks as sessions, their rounds and harness sessions as
-    /// child sessions (docs/api/acp.md).
-    Acp,
     /// The daemon's state.
     Status,
     /// Stop the daemon once the runs in a turn are done (no run starts meanwhile).
@@ -271,7 +261,6 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Run(command) => return commands::run(client, json, command).await,
         Command::Gate(command) => commands::gate(client, json, command).await?,
         Command::Instance(command) => commands::instance(client, json, command).await?,
-        Command::Task(command) => commands::task(client, json, command).await?,
         Command::Trigger(command) => commands::trigger(client, json, command).await?,
         Command::Project(command) => config::list(client, json, "projects", command).await?,
         Command::Agent(command) => config::list(client, json, "agents", command).await?,
@@ -280,7 +269,6 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Addon(command) => config::list(client, json, "addons", command).await?,
         Command::Events { from } => follow(client.events(from).await?, json).await?,
         Command::Finish { result, summary, data } => return finish(client, json, result, summary, data).await,
-        Command::Acp => return Ok(acp::serve(client).await),
         Command::Status => print(json, &client.request("GET", "/v1/daemon", None, None).await?),
         Command::Drain { timeout, key } => print(
             json,

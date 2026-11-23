@@ -65,7 +65,7 @@ def read(path, route):
         with connection.getresponse() as response:
             payload = json.load(response)
             if response.status != 200:
-                raise ValueError(payload.get("message", response.reason))
+                raise ValueError(payload.get("error", {}).get("message", response.reason))
             return payload
 
 
@@ -156,8 +156,7 @@ def working_sessions(state):
         if key in seen:
             continue
         seen.add(key)
-        # Keep the IDs of bead-backed views already imported by T3. Runs without a
-        # bead have no task root; include the session identity in their native ID.
+        # T3 persists these native IDs for both bead-backed and beadless runs.
         project = state["project"]
         suffix = f'#t:{state["id"]}.{a["n"]}'
         if state.get("bead"):

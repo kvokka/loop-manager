@@ -2,7 +2,7 @@
 //! a `seq`, and the raw messages of its current session relayed from the adapter as they come. The core never stores
 //! those messages, so a reconnect gets only the new ones; the history is in the harness's transcript.
 
-pub(super) mod chat;
+mod chat;
 
 use super::{
     Api, ApiError, ErrorReply, Param, State,
@@ -26,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 /// Events read from the journal at a time.
-pub(super) const BATCH: usize = 256;
+const BATCH: usize = 256;
 
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -81,13 +81,11 @@ pub(crate) async fn live(
             ));
         }
         if let Some(n) = query.attempt {
-            let project = view["project"].as_str().expect("run has a project");
-            let (_, attempts) = state.reader.work(project)?;
-            let selected = attempts
-                .iter()
-                .find(|a| a.run == id && a.n == n)
+            let slice = state
+                .reader
+                .transcript_slice(&id, n)?
                 .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "attempt has no recorded session"))?;
-            let page = chat::page(&state, selected, &attempts, query.offset.unwrap_or(0))
+            let page = chat::page(&state, slice, query.offset.unwrap_or(0))
                 .await
                 .map_err(|e| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "transcript_unavailable", e.to_string()))?;
             return Ok(axum::Json(page).into_response());

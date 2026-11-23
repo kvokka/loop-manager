@@ -60,8 +60,9 @@ installation, update the provider path after upgrading. Add the LM project root 
 (`t3 project add /path/to/project`). The card finds the provider by executable and socket, and finds
 the project by workspace directory. It uses the local T3 runtime in `T3CODE_HOME` (default `~/.t3`).
 
-The provider exposes real working sessions over ACPv2. Terminal and script-only steps have no
-working-session link. T3's read-only history import includes prompts, replies, tool calls and
+The provider exposes recorded harness sessions over ACPv2. Skipped steps and steps without a harness session
+have no working-session link. When another round or run continues the same harness session, the provider
+replays the part belonging to the selected step and round. T3's read-only history import includes prompts, replies, tool calls and
 results. It does not start or steer an LM run.
 
 The card can also open without asking. After the agent starts a run with `loop-manager run start` or the

@@ -128,37 +128,6 @@ pub(crate) enum Keyed {
 )]
 pub(crate) struct Failed(ErrorReply);
 
-/// A root bead with work under it: `dir` is the project root, `updated_at` the last start or end of its work, `live`
-/// whether a run of it is not over.
-#[derive(ToSchema)]
-pub(crate) struct Task {
-    project: String,
-    bead: String,
-    title: String,
-    dir: String,
-    updated_at: String,
-    live: bool,
-}
-
-/// A comment on a bead, as its tracker has it.
-#[derive(ToSchema)]
-pub(crate) struct Comment {
-    author: String,
-    created_at: String,
-    text: String,
-}
-
-/// The root bead of a task as its tracker has it now, its comments oldest first.
-#[derive(ToSchema)]
-pub(crate) struct TaskBody {
-    project: String,
-    bead: String,
-    title: String,
-    description: String,
-    dir: String,
-    comments: Vec<Comment>,
-}
-
 /// A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found
 /// no ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the
 /// config does not give, an `agent:` label that does not resolve).

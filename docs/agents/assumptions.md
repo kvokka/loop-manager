@@ -16,7 +16,7 @@ The behaviour itself is described in the document named under each heading; this
 ## Product shape — [overview](../overview.md), [event model](../design/event-model.md)
 
 - A local daemon of one user: no Windows, no several machines or users. One daemon per user, projects register in it.
-- ACP "up" is a read-only view (`loop-manager acp`): an editor starts, prompts, resumes and cancels nothing.
+- The optional T3 Code run card supplies its own read-only ACPv2 provider. The daemon exposes run and attempt data over HTTP.
 - The orchestrator's state is its own SQLite database.
 - Config files are TOML.
 - Adapters are modules of the one binary, with no protocol between processes; the outside path later is an ACP v2
@@ -127,11 +127,6 @@ The behaviour itself is described in the document named under each heading; this
 - Several addons on one event: one block is enough for a veto; for the reaction to a failure the first decision in
   attachment order wins.
 - MCP has five tools, and the server is attached to an agent only when the agent's config says so.
-- The ACP view ([ACP](../api/acp.md)): ACP v2 has no author or time on a message, so a comment's author and time go
-  into its `_meta` and the first line of its text; a child run on its parent's bead shows as rounds nested in the
-  parent's round; a thread's title is its step and harness, and no structure depends on step names or roles;
-  `loop-manager acp` exits when the daemon ends its stream; the API family is `tasks`, a root bead being the user's
-  task; a bead or round node with no session under it is not shown.
 
 ## Delivery and process — [install](../guide/install.md), [code rules](rules-code.md)
 

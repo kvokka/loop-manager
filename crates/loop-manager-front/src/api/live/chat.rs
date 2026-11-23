@@ -2,7 +2,13 @@
 //! journal writes wake it when the run changes session or ends.
 
 use super::{Api, Event, Infallible, mpsc};
-use loop_manager_core::driver::chat::{ChatEntry, ChatLog};
+use loop_manager_core::{
+    driver::{
+        SessionRef,
+        chat::{ChatEntry, ChatLog},
+    },
+    run::TranscriptSlice,
+};
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde_json::Value;
 use std::{io, path::PathBuf};
@@ -39,54 +45,27 @@ pub(crate) struct ChatPage {
 
 /// A read-only page from one session, including resumed attempts in the same step and round.
 /// Prompt identities delimit the slice when a later round or run continues the same transcript.
-pub(super) async fn page(
-    state: &Api,
-    selected: &loop_manager_core::run::WorkAttempt,
-    attempts: &[loop_manager_core::run::WorkAttempt],
-    offset: u64,
-) -> io::Result<ChatPage> {
-    let same_slice = |a: &loop_manager_core::run::WorkAttempt| {
-        a.run == selected.run && a.round == selected.round && a.step == selected.step
-    };
-    let owners: Vec<_> = attempts
-        .iter()
-        .filter(|a| a.session == selected.session && a.harness == selected.harness)
-        .collect();
-    let live = owners.iter().any(|a| same_slice(a) && a.ended_ms.is_none());
-    let ended = owners.iter().all(|a| a.ended_ms.is_some());
+pub(super) async fn page(state: &Api, slice: TranscriptSlice, offset: u64) -> io::Result<ChatPage> {
+    let live = slice.live;
     let empty = || ChatPage {
         entries: Vec::new(),
         next: offset,
         more: false,
         live,
     };
-    let driver = state
-        .drivers
-        .iter()
-        .find(|d| d.harness() == selected.harness)
-        .cloned()
-        .ok_or_else(|| io::Error::other("unknown session harness"))?;
-    let reference = selected.session.clone();
-    let log = match tokio::task::spawn_blocking(move || driver.chat_log(&reference)).await? {
+    let log = match chat_log(state, &slice.harness, slice.session).await {
         Ok(log) => log,
         Err(e) if live && e.kind() == io::ErrorKind::NotFound => return Ok(empty()),
         Err(e) => return Err(e),
     };
     let mut tail = Tail::new(log);
-    let keys: std::collections::HashMap<_, _> = owners
-        .iter()
-        .flat_map(|a| a.prompts.iter().map(|k| (k.as_str(), same_slice(a))))
-        .collect();
-    let mut belongs = owners
-        .iter()
-        .min_by_key(|a| (a.started_ms, a.n))
-        .is_some_and(|a| same_slice(a));
+    let mut belongs = slice.starts_here;
     let mut index = 0_u64;
     let mut entries = Vec::new();
     let mut bytes = 0;
-    while let Some((prompt, record)) = tail.next(ended).await? {
+    while let Some((prompt, record)) = tail.next(slice.ended).await? {
         if let Some(key) = prompt {
-            belongs = keys.get(key.as_str()).copied().unwrap_or(false);
+            belongs = slice.prompt_keys.contains(&key);
         }
         if !belongs {
             continue;
@@ -115,6 +94,16 @@ pub(super) async fn page(
     })
 }
 
+async fn chat_log(state: &Api, harness: &str, session: SessionRef) -> io::Result<ChatLog> {
+    let driver = state
+        .drivers
+        .iter()
+        .find(|d| d.harness() == harness)
+        .cloned()
+        .ok_or_else(|| io::Error::other("unknown session harness"))?;
+    tokio::task::spawn_blocking(move || driver.chat_log(&session)).await?
+}
+
 async fn follow(state: &Api, run: &str, mut attempt: u32, tx: &Sender) -> io::Result<()> {
     let mut written = state.written.clone();
     let (mut session, mut tail) = (None, None::<Tail>);
@@ -129,14 +118,7 @@ async fn follow(state: &Api, run: &str, mut attempt: u32, tx: &Sender) -> io::Re
             if let Some(previous) = tail.as_mut() {
                 previous.drain(tx, true).await?;
             }
-            let driver = state
-                .drivers
-                .iter()
-                .find(|d| row.harness == d.harness())
-                .cloned()
-                .ok_or_else(|| io::Error::other("unknown session harness"))?;
-            let reference = row.session.clone();
-            let log = tokio::task::spawn_blocking(move || driver.chat_log(&reference)).await??;
+            let log = chat_log(state, &row.harness, row.session.clone()).await?;
             session = Some(row.session);
             tail = Some(Tail::new(log));
         }
@@ -170,8 +152,8 @@ async fn changed(tail: &mut Option<Tail>) -> io::Result<()> {
     }
 }
 
-/// One session's transcript through one byte cursor. The watcher is made on the first read of a live session.
-pub(crate) struct Tail {
+/// One session's transcript through one byte cursor. Only a live SSE stream installs a watcher.
+struct Tail {
     log: ChatLog,
     watch: Option<Watch>,
     reader: Option<BufReader<File>>,
@@ -185,7 +167,7 @@ struct Watch {
 }
 
 impl Tail {
-    pub(crate) fn new(log: ChatLog) -> Self {
+    fn new(log: ChatLog) -> Self {
         Self {
             log,
             watch: None,
@@ -195,7 +177,7 @@ impl Tail {
     }
 
     /// Resolves when the transcript or a directory on its path changes; never before the first live read.
-    pub(crate) async fn changed(&mut self) -> io::Result<()> {
+    async fn changed(&mut self) -> io::Result<()> {
         let Some(watch) = self.watch.as_mut() else {
             return std::future::pending().await;
         };
@@ -238,17 +220,17 @@ impl Tail {
 
     /// The next complete record: its prompt key and its entries. `None` when no complete record is left; in an
     /// ended session the last line is complete without its newline, and a missing file is an error.
-    pub(crate) async fn next(&mut self, ended: bool) -> io::Result<Option<(Option<String>, Vec<ChatEntry>)>> {
+    async fn next(&mut self, ended: bool) -> io::Result<Option<(Option<String>, Vec<ChatEntry>)>> {
         if self.reader.is_none() {
-            let file = if ended {
-                File::open(&self.log.path).await.map_err(|e| match e.kind() {
-                    io::ErrorKind::NotFound => io::Error::other("the session ended without a readable transcript"),
-                    _ => e,
-                })?
-            } else if self.watch_file()? {
-                File::open(&self.log.path).await?
-            } else {
-                return Ok(None);
+            let file = match File::open(&self.log.path).await {
+                Ok(file) => file,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    if ended {
+                        return Err(io::Error::other("the session ended without a readable transcript"));
+                    }
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
             };
             self.reader = Some(BufReader::new(file));
         }
@@ -264,6 +246,9 @@ impl Tail {
     }
 
     async fn drain(&mut self, tx: &Sender, ended: bool) -> io::Result<()> {
+        if !ended && self.reader.is_none() && !self.watch_file()? {
+            return Ok(());
+        }
         while let Some((_, entries)) = self.next(ended).await? {
             for entry in entries {
                 let event = Event::default()
