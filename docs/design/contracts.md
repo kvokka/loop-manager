@@ -289,7 +289,12 @@ in declaration order); the bundled addons come after all of them (docs/design/co
   concatenated with a blank line. The first `deny` stops the chain and fails the run with class `check`.
 - `run.finishing`: every hook runs. Any `veto` → `failed{check}` with the first veto reason; otherwise any
   `remark` → one remark, messages joined with a blank line in addon order; otherwise accept. A `veto` on a declared
-  `fail` changes nothing: the run fails with class `agent`.
+  `fail` changes nothing: the run fails with class `agent`. On an `ai` step the remark goes to the agent in its
+  session (6.3). A step of another kind (`exec`, `await`) has no session: its remark is a failed check — the declared
+  `pass` becomes a `fail` with the remark as its summary; a check step (`back_to`) joins its row of checks, any other
+  step sends the run back to the nearest `ai` step before it for the next round, counted in `rounds`
+  (config.md, "Formula"); with no `ai` step before it the remark is a veto. A remark on a declared `fail` changes
+  nothing, as a veto.
 - `run.attempt_failed`, `run.turn_ended_without_outcome`: the first decision in addon order wins; later hooks are
   not started once a decision exists.
 - Every hook done and no decision: the hook runner sends an explicit "no decision" message, and the "no addon decision"
@@ -838,7 +843,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `running` (exec) | exit 75 / timeout / spawn error / an `env` reference to a variable the daemon does not have (the command is not spawned) | `interrupted` with failure `unknown` (`text` `exit 75 (EX_TEMPFAIL)`, scope `run`) / `runaway_turn` / `workspace_failure` / `config_error` (`text` names the key and the variable) | `run.attempt_failed` hooks; every attempt runs the command again |
 | `starting`, `running` | `failure`, `exited`, deadline, exec exit 75 | `interrupted` | stop the session (cancel, then stop the instance if it is the session's own, then sweep descendants); `run.attempt_failed` hooks |
 | `finishing` | accept of a `pass` of a step that is not the last | `preparing` of the next step | `run.step_finished`; the next step's prompt renders (after the read of the bead's comments and parents when it shows them; the workdir and the bead claim stay) and its `run.preparing` hooks run |
-| `finishing` | accept / veto / remark | `passed` or `failed{agent}` / `failed{check}` / `running` | bead close or conditional release; on remark the message goes as the next prompt of the same attempt, the declared outcome is cleared, the token stays valid. A remark for a step other than `ai` is not allowed (hook failure) |
+| `finishing` | accept / veto / remark | `passed` or `failed{agent}` / `failed{check}` / `running` | bead close or conditional release; on remark the message goes as the next prompt of the same attempt, the declared outcome is cleared, the token stays valid. A remark on a step other than `ai` is a failed check that sends the run back for a round (3.3) |
 | `interrupted` | `resume` / `new_session` | `starting` after `after` | new attempt: `generation + 1`, new token; `resume` first checks the transcript (invariant 17), `Missing` → attempt failure `transcript_divergence` |
 | `interrupted` | `park` | `parked` | gate closed in the same transaction |
 | `interrupted` | `fail`, no decision, attempts ceiling | `failed{infrastructure}` | gate closed if the decision carries one |

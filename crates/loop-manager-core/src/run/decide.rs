@@ -138,6 +138,7 @@ impl RunHandler {
             ("finishing", Some(Decision::Remark { message })) if row.step_kind == "ai" => {
                 self.next_prompt(tx, row, &message, "check")
             }
+            ("finishing", Some(Decision::Remark { message })) => self.remarked(tx, row, &message),
             (state, Some(d)) => Err(rejected(format!("{d:?} does not apply to a run in `{state}`"))),
             (state, None) => Err(rejected(format!("a run in `{state}` waits for no decision"))),
         }
@@ -176,7 +177,7 @@ impl RunHandler {
 }
 
 /// A hook's JSON decision on `kind`; `None` when it is not allowed for the event (contracts 3.2).
-pub(super) fn parse(kind: &str, v: &Value, addon: &str, event: &Value) -> Option<Decision> {
+pub(super) fn parse(kind: &str, v: &Value, addon: &str) -> Option<Decision> {
     let text = |key: &str| v[key].as_str().map(str::to_owned);
     let after = || match &v["after"] {
         Value::Null => Some(Duration::ZERO),
@@ -245,8 +246,6 @@ pub(super) fn parse(kind: &str, v: &Value, addon: &str, event: &Value) -> Option
         ("run.finishing", "veto") => Decision::Veto {
             reason: text("reason")?,
         },
-        // A step other than `ai` has no session to take a remark (contracts 6.2).
-        ("run.finishing", "remark") if event["data"]["run"]["step_kind"] != "ai" => return None,
         ("run.finishing", "remark") => Decision::Remark {
             message: text("message")?,
         },

@@ -158,24 +158,75 @@ impl RunHandler {
                 let names: Vec<_> = sent_back.iter().map(|(_, name, _)| name).collect();
                 let back_from = json!(names).to_string();
                 let remarks = sent_back.into_iter().map(|(.., r)| r).collect::<Vec<_>>().join("\n\n");
-                let round: u32 = tx
-                    .sql()
-                    .query_row("SELECT round FROM runs WHERE id = ?1", [&row.id], |r| r.get(0))?;
-                if round >= f.rounds.value {
-                    let reason = format!("still failing after {round} rounds: {remarks}");
-                    return self.terminal(tx, row, "failed", Some("agent"), &reason);
-                }
-                tx.sql().execute(
-                    "UPDATE runs SET round = round + 1, remarks = ?2, back_from = ?3 WHERE id = ?1",
-                    params![row.id, remarks, back_from],
-                )?;
-                return self.enter(tx, row, to.clone(), None);
+                return self.send_back(tx, row, f.rounds.value, to.clone(), &back_from, &remarks);
             }
         }
         let Some(next) = next else {
             return self.ended(tx, row);
         };
         self.enter(tx, row, next.clone(), None)
+    }
+
+    /// Sends the run back to `to` for the next round with `remarks` of the checks `back_from` (a JSON array of
+    /// names); past the formula's last round, of `rounds`, the run fails with them.
+    fn send_back(
+        &mut self,
+        tx: &mut Tx<'_>,
+        row: Row,
+        rounds: u32,
+        to: Step,
+        back_from: &str,
+        remarks: &str,
+    ) -> Result<(), Error> {
+        let round: u32 = tx
+            .sql()
+            .query_row("SELECT round FROM runs WHERE id = ?1", [&row.id], |r| r.get(0))?;
+        if round >= rounds {
+            let reason = format!("still failing after {round} rounds: {remarks}");
+            return self.terminal(tx, row, "failed", Some("agent"), &reason);
+        }
+        tx.sql().execute(
+            "UPDATE runs SET round = round + 1, remarks = ?2, back_from = ?3 WHERE id = ?1",
+            params![row.id, remarks, back_from],
+        )?;
+        self.enter(tx, row, to, None)
+    }
+
+    /// A remark of a `run.finishing` hook on a step other than `ai`, which has no session to take it (decision 157):
+    /// the declared `pass` becomes a failed check with the remark as its summary. A check (`back_to`) joins the row
+    /// of checks it is in; another step sends the run back to the nearest `ai` step before it for the next round;
+    /// with none before it the remark is a veto. On a declared `fail` it changes nothing, as a veto.
+    pub(super) fn remarked(&mut self, tx: &mut Tx<'_>, row: Row, message: &str) -> Result<(), Error> {
+        let Some(mut outcome) = Self::outcome(tx, &row)?.filter(|o| o.result == Verdict::Pass) else {
+            return self.finished(tx, row, Some(message));
+        };
+        let project = self.config.projects.iter().find(|p| p.name == row.project);
+        let formula = project.and_then(|p| p.formula(&row.formula).ok()).map(|(_, f)| f);
+        let at = formula.and_then(|f| f.steps.iter().position(|s| s.name == row.step));
+        let (Some(f), Some(at)) = (formula, at) else {
+            let reason = format!("step `{}` is gone from `{}`", row.step, row.formula);
+            return self.terminal(tx, row, "failed", Some("infrastructure"), &reason);
+        };
+        let ai = f.steps[..at]
+            .iter()
+            .rev()
+            .find(|s| matches!(s.kind, StepKind::Ai { .. }));
+        if f.steps[at].back_to.is_none() && ai.is_none() {
+            return self.terminal(tx, row, "failed", Some("check"), message);
+        }
+        (outcome.result, outcome.summary) = (Verdict::Fail, message.to_owned());
+        tx.sql().execute(
+            "UPDATE attempts SET outcome = ?3 WHERE run = ?1 AND n = ?2",
+            params![row.id, row.attempt, json!(outcome).to_string()],
+        )?;
+        match ai.filter(|_| f.steps[at].back_to.is_none()) {
+            Some(to) => {
+                let back_from = json!([row.step]).to_string();
+                let remarks = remark(&row.step, &outcome);
+                self.send_back(tx, row, f.rounds.value, to.clone(), &back_from, &remarks)
+            }
+            None => self.advance(tx, row, None),
+        }
     }
 
     /// The run is past its last step. It ends at the step that ran last, whatever it skipped after it, and passes

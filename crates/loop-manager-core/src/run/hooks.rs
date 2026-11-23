@@ -193,7 +193,7 @@ async fn run(core: &CoreHandle<Msg>, payload: &Value, hooks: &ExecHooks) {
                 stderr,
             }),
             Said::Decided(_) if !deciding => Ok(None),
-            said => decision(&kind, said, addon, &event),
+            said => decision(&kind, said, addon),
         });
         let decision = match said {
             Ok(decision) => decision,
@@ -367,7 +367,7 @@ async fn invoke(hook: &Value, event: &Value, socket: Option<&Path>, marker: Opti
 }
 
 /// The decision of one hook on a deciding event; a decision not allowed for the event is a failure (3.2).
-fn decision(kind: &str, said: Said, addon: &str, event: &Value) -> Result<Option<Decision>, Failed> {
+fn decision(kind: &str, said: Said, addon: &str) -> Result<Option<Decision>, Failed> {
     let value = match said {
         Said::Nothing => return Ok(None),
         Said::Blocked(reason) => {
@@ -379,7 +379,7 @@ fn decision(kind: &str, said: Said, addon: &str, event: &Value) -> Result<Option
         }
         Said::Decided(value) => value,
     };
-    parse(kind, &value, addon, event).map(Some).ok_or(Failed {
+    parse(kind, &value, addon).map(Some).ok_or(Failed {
         error: "output",
         exit_code: Some(0),
         stderr: format!("decision not allowed on `{kind}`: {value}"),

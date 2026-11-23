@@ -806,6 +806,11 @@ resumed. A check that fails in the
 last of the formula's `rounds` fails the run (class `agent`) with the reason `still failing after <n> rounds:
 <remarks>`. `back_to` must name a step before the check; a `drain` step is no check.
 
+A `remark` of a `run.finishing` hook on a step that is not `ai` (`exec`, `await`) makes its `pass` a failed check
+with the remark as its summary (contracts 3.3): a check joins its row as above; any other step sends the run back to
+the nearest `ai` step before it, as a round of its own counted in `rounds`; with no `ai` step before it the remark
+vetoes the `pass` (class `check`).
+
 Any step may have `if`, a `where` table (contracts 2.2: the same matchers, all entries must match) over what a prompt
 template sees of the run — `inputs`, `bead`, `rig`, `run`, `project` and `steps` of the steps before it — and
 `back_from`, the names of the checks that sent the run back into its current round (empty in the first round). A path

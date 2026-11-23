@@ -313,33 +313,96 @@ timeout = "10s"
     assert_eq!(w.attempts().len(), 1 + last as usize);
 }
 
-/// A remark asks the agent of an ai step again: an exec step has none, so a remark on it is refused.
+/// A remark on an exec step with no ai step before it is a veto (decision 157): the run fails its check.
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn a_remark_on_an_exec_step_is_refused() {
+async fn a_remark_on_an_exec_step_with_no_ai_step_before_it_vetoes() {
     let addon = "name = \"policy\"\nversion = \"0.1.0\"\n\
         [[hook]]\non = \"run.finishing\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
     let hooks = Arc::new(Hanging::default());
     let w = flow(&[exec("a", "true")], &[POLICY[0], ("policy/addon.toml", addon)], hooks);
     let run = w.start_flow().await;
-    w.until(Some(&run), "run.finishing", 0).await;
-    let seq = w.seq_of(&run, "run.finishing", 0).await;
-    let message = "again".to_owned();
-    let decision = Decision::Remark { message };
-    let refused = w
-        .core
-        .send(
-            None,
-            Msg::Decide {
-                run: run.clone(),
-                seq,
-                decision,
-            },
-        )
-        .await;
-    assert!(refused.unwrap_err().to_string().contains("does not apply"));
+    let message = "commit first".to_owned();
+    w.decide(&run, "run.finishing", 0, Decision::Remark { message }).await;
+    let (kind, data) = w.end(&run).await;
+    assert_eq!(
+        (kind.as_str(), &data["class"]),
+        ("run.failed", &json!("check")),
+        "{data}"
+    );
+    assert_eq!(data["reason"], "commit first");
+}
+
+/// A remark on a final exec step is a failed check (decision 157): the run goes back to the nearest ai step before
+/// it for a new round, counted in `rounds`, with the remark in the prompt; the next round passes.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_remark_on_a_final_exec_step_sends_the_run_back_to_the_ai_step_before_it() {
+    let addon = "name = \"policy\"\nversion = \"0.1.0\"\n\
+        [[hook]]\non = \"run.finishing\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
+    let steps = [
+        "rounds = 2\n".to_owned(),
+        prompt("code", "dev"),
+        exec("ci", "echo ci >> log"),
+    ];
+    let w = flow(
+        &steps,
+        &[
+            POLICY[0],
+            ("policy/addon.toml", addon),
+            ("shop/agents/dev/agent.toml", "harness = \"scripted\"\n"),
+            ("shop/agents/dev/prompt.template.md", "Code. [{{ remarks }}]"),
+        ],
+        Arc::new(Hanging::default()),
+    );
+    let (one, two) = (w.turn(), w.turn());
+    let run = w.start_flow().await;
+    assert_eq!(w.pass(&run, 1, json!({}), &one).await, "accepted");
     w.decide(&run, "run.finishing", 0, Decision::Abstain).await;
-    assert_eq!(w.end(&run).await.0, "run.passed");
+    let message = "merge conflict".to_owned();
+    w.decide(&run, "run.finishing", 1, Decision::Remark { message }).await;
+    assert_eq!(w.pass(&run, 3, json!({}), &two).await, "accepted");
+    w.decide(&run, "run.finishing", 2, Decision::Abstain).await;
+    w.decide(&run, "run.finishing", 3, Decision::Abstain).await;
+    let (kind, data) = w.end(&run).await;
+    assert_eq!(kind, "run.passed", "{data}");
+    assert_eq!(w.log(), "ci\nci\n");
+    let (_, prompts) = w.driver.sent(&run, 3);
+    assert_eq!(prompts, ["Code. []", "Code. [ci: merge conflict]"]);
+    let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let view = reader.run(&run).unwrap().unwrap();
+    assert_eq!(view["round"], 2, "{view}");
+}
+
+/// A remark on an exec step on its last round fails the run as a check that keeps failing does.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_remark_on_an_exec_step_past_the_last_round_fails_the_run() {
+    let addon = "name = \"policy\"\nversion = \"0.1.0\"\n\
+        [[hook]]\non = \"run.finishing\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
+    let steps = ["rounds = 1\n".to_owned(), prompt("code", "dev"), exec("ci", "true")];
+    let w = flow(
+        &steps,
+        &[
+            POLICY[0],
+            ("policy/addon.toml", addon),
+            ("shop/agents/dev/agent.toml", "harness = \"scripted\"\n"),
+        ],
+        Arc::new(Hanging::default()),
+    );
+    let one = w.turn();
+    let run = w.start_flow().await;
+    assert_eq!(w.pass(&run, 1, json!({}), &one).await, "accepted");
+    w.decide(&run, "run.finishing", 0, Decision::Abstain).await;
+    let message = "dirty tree".to_owned();
+    w.decide(&run, "run.finishing", 1, Decision::Remark { message }).await;
+    let (kind, data) = w.end(&run).await;
+    assert_eq!(
+        (kind.as_str(), &data["class"]),
+        ("run.failed", &json!("agent")),
+        "{data}"
+    );
+    assert_eq!(data["reason"], "still failing after 1 rounds: ci: dirty tree");
 }
 
 /// The daemon dies at every step boundary — a step in `finishing`, the next in `preparing`, a command in flight —
