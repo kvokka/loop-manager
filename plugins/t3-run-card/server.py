@@ -1,4 +1,4 @@
-"""Read-only MCP App for a run of a local loop-manager daemon (stdio)."""
+"""Interactive T3 Code card for sessions of a local loop-manager run."""
 
 import http.client
 import json
@@ -8,12 +8,13 @@ import socket
 import sys
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlencode
 
-URI = "ui://loop-manager/run-card.html"
+URI = "ui://loop-manager/t3-run-card.html"
 MIME = "text/html;profile=mcp-app"
 TERMINAL = {"passed", "failed", "cancelled"}
 PROPERTIES = {
@@ -93,18 +94,63 @@ def changed(path, run, cursor):
     return False, cursor
 
 
+# The journal records the resolved agent before launch and at finish. Keep only names,
+# keyed by the socket inode so two daemons with run_1 cannot share their history.
+_agent_names = OrderedDict()
+_agent_lock = threading.Lock()
+
+
+def recorded_agents(path, run, watermark):
+    stat = path.stat()
+    key = (str(path.resolve()), stat.st_ino, run)
+    with _agent_lock:
+        seq, names = _agent_names.pop(key, (0, {}))
+        if seq > watermark:
+            seq, names = 0, {}
+        while seq < watermark:
+            with closing(Connection(path)) as connection:
+                connection.request("GET", f"/v1/events?from={seq + 1}")
+                with connection.getresponse() as response:
+                    if response.status == 410:
+                        oldest = json.load(response).get("oldest")
+                        if not isinstance(oldest, int) or oldest <= seq + 1:
+                            break
+                        seq = oldest - 1
+                        continue
+                    if response.status != 200:
+                        break
+                    for line in response:
+                        if not line.startswith(b"data:"):
+                            continue
+                        event = json.loads(line[5:])
+                        if "seq" not in event:
+                            break
+                        seq = event["seq"]
+                        if event.get("run") == run and event["type"] in ("run.preparing", "run.finishing"):
+                            view = event["data"].get("run", {})
+                            if view.get("agent") and isinstance(view.get("attempt"), int):
+                                n = view["attempt"] + int(event["type"] == "run.preparing")
+                                names[(n, view.get("step"))] = view["agent"]
+                        if seq >= watermark:
+                            break
+                    # An in-stream gap or a closed stream can be retried on the next refresh.
+                    break
+        _agent_names[key] = (seq, names)
+        if len(_agent_names) > 32:
+            _agent_names.popitem(last=False)
+        return dict(names)
+
+
 def snapshot(path, run):
     # Read the watermark first. A transition during either following read is replayed.
     cursor = read(path, "/v1/daemon")["journal_seq"]
-    state = read(path, "/v1/runs/" + run)
+    state = read(path, "/v1/runs/" + run + "?all_attempts=true")
     query = urlencode({key: state[key] for key in ("project", "formula", "rig")})
     try:
         layout = read(path, "/v1/config/explain?" + query)
     except ValueError:
         layout = {}  # Historical runs can outlive their formula.
     plan = layout.get("steps", [])
-    if state["step"] not in {s["step"] for s in plan}:
-        plan.append({"step": state["step"], "kind": state["step_kind"]})
     card = {k: state.get(k) for k in (
         "id", "formula", "step", "step_kind", "state", "round", "step_attempt", "agent",
         "back_from", "waiting_for", "reason",
@@ -120,7 +166,32 @@ def snapshot(path, run):
         if attempts and attempts[-1]["step"] == state["step"] and attempts[-1]["n"] == state["attempt"]:
             summaries[state["step"]] = outcome["summary"]
     card["summaries"] = summaries
-    return {"card": card, "plan": plan, "cursor": cursor, "terminal": state["state"] in TERMINAL}
+    names = recorded_agents(path, run, cursor) if any(a["session"] for a in attempts) else {}
+    rounds = {}
+    seen = set()
+    known = {s["step"] for s in plan}
+    for a in attempts:
+        if "round" not in a:
+            raise ValueError("Update the LM daemon to a version with per-round attempt history")
+        step = a["step"]
+        if step not in known:
+            plan.append({"step": step, "kind": "ai" if a["session"] else a["harness"]})
+            known.add(step)
+        steps = rounds.setdefault(a["round"], {})
+        item = steps.setdefault(step, {"sessions": [], "result": None, "summary": None})
+        item["result"] = a.get("result")
+        item["summary"] = a.get("summary")
+        if a["session"] is not None:
+            identity = (a["round"], step, a["harness"], json.dumps(a["session"], sort_keys=True))
+            if identity not in seen:
+                seen.add(identity)
+                agent = names.get((a["n"], step))
+                if not agent and a["n"] == state["attempt"]:
+                    agent = state.get("agent")
+                item["sessions"].append({"attempt": a["n"], "harness": a["harness"], "agent": agent})
+    if state["step"] not in known:
+        plan.append({"step": state["step"], "kind": state["step_kind"]})
+    return {"roundHistory": rounds, "card": card, "plan": plan, "cursor": cursor, "terminal": state["state"] in TERMINAL}
 
 
 def tool(name, description, watch=False):
@@ -145,6 +216,18 @@ SHOW_NAME = "show_run_card"
 WATCH = tool("watch_run_card", "Wait for changes to an open run card.", watch=True)
 
 
+THREAD = {
+    "name": "read_run_thread",
+    "description": "Read the next page of the selected LM session in this round.",
+    "_meta": {"ui": {"visibility": ["app"]}},
+    "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    "inputSchema": {"type": "object", "properties": {
+        **PROPERTIES, "attempt": {"type": "integer", "minimum": 1},
+        "offset": {"type": "integer", "minimum": 0}},
+        "required": ["run", "attempt"], "additionalProperties": False},
+}
+
+
 def call(params):
     name = params["name"]
     args = params.get("arguments", {})
@@ -152,9 +235,17 @@ def call(params):
     if not isinstance(run, str) or not re.fullmatch(r"run_[0-9]+", run):
         raise ValueError("Expected a run ID such as run_1")
     allowed = WATCH["inputSchema"]["properties"] if name == WATCH["name"] else {*PROPERTIES, "daemon"}
+    if name == THREAD["name"]:
+        allowed = THREAD["inputSchema"]["properties"]
     if unknown := args.keys() - allowed:
         raise ValueError(f"Unknown argument: {', '.join(sorted(unknown))}. Open a new card with the daemon socket.")
     path = socket_path(args.get("socket"))
+    if name == THREAD["name"]:
+        attempt, offset = args.get("attempt"), args.get("offset", 0)
+        if type(attempt) is not int or attempt < 1 or type(offset) is not int or offset < 0:
+            raise ValueError("Expected a positive attempt and non-negative offset")
+        page = read(path, f"/v1/runs/{run}/live?chat=true&attempt={attempt}&offset={offset}")
+        return {"content": [], "structuredContent": page}
     if name == WATCH["name"]:
         cursor = args["cursor"]
         if type(cursor) is not int or cursor < 0:
@@ -204,13 +295,13 @@ def dispatch(method, params):
         version = params.get("protocolVersion")
         return {"protocolVersion": version if version in supported else supported[-1],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "run-card", "version": "0.0.9"}}
+                "serverInfo": {"name": "t3-run-card", "version": "0.1.0"}}
     if method in ("ping", "resources/templates/list"):
         return {"resourceTemplates": []} if method.startswith("resources") else {}
     if method == "tools/list":
-        show = tool(SHOW_NAME, "Show a live loop-manager run. If the user names a daemon, pass its registered name.")
-        return {"tools": [show, WATCH]}
-    resource = {"uri": URI, "name": "Run card", "mimeType": MIME}
+        show = tool(SHOW_NAME, "Open the interactive T3 Code run card with round selection and agent transcripts. If the user names a daemon, pass its registered name.")
+        return {"tools": [show, WATCH, THREAD]}
+    resource = {"uri": URI, "name": "T3 Code run card", "mimeType": MIME}
     if method == "resources/list":
         return {"resources": [resource]}
     if method == "resources/read" and params.get("uri") == URI:

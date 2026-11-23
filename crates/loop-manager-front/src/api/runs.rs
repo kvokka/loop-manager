@@ -117,12 +117,25 @@ pub(crate) async fn list(state: State, Param(Query(query)): Param<Query<ListQuer
     Ok(Json(state.reader.runs(&filter)?.into()))
 }
 
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct HistoryQuery {
+    /// Include all attempts across rounds (the default returns the last twenty).
+    all_attempts: Option<bool>,
+}
+
 /// The state of a run: its view, where it waits and its attempts.
-#[utoipa::path(get, path = "/v1/runs/{id}", params(("id" = String, Path)),
+#[utoipa::path(get, path = "/v1/runs/{id}", params(("id" = String, Path), HistoryQuery),
     responses((status = OK, description = RUN_VIEW, body = Run), (status = BAD_REQUEST, description = BAD_PATH,
         body = ErrorReply), (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply), Failed))]
-pub(crate) async fn get(state: State, Param(Path(id)): Param<Path<String>>) -> Reply {
-    let run = state.reader.run(&id)?;
+pub(crate) async fn get(
+    state: State,
+    Param(Path(id)): Param<Path<String>>,
+    Param(Query(query)): Param<Query<HistoryQuery>>,
+) -> Reply {
+    let run = state
+        .reader
+        .run_with_attempts(&id, query.all_attempts.unwrap_or(false))?;
     run.map(Json)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", format!("no run `{id}`")))
 }

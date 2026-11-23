@@ -147,7 +147,14 @@ async fn call(state: State, params: &Value) -> Option<Value> {
             (_, Err(e)) => Err(parse(e)),
         },
         "run_state" => match id() {
-            Ok(id) => runs::get(state, Param(Path(id))).await,
+            Ok(id) => {
+                runs::get(
+                    state,
+                    Param(Path(id)),
+                    Param(axum::extract::Query(runs::HistoryQuery::default())),
+                )
+                .await
+            }
             Err(e) => Err(e),
         },
         "list_runs" => match serde_json::from_value::<ListQuery>(args.clone()) {

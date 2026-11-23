@@ -162,6 +162,21 @@ async fn acp_shows_a_resumed_session_once_slices_a_continued_one_and_survives_a_
         .find(|u| kind(u) == "user_message");
     assert!(prompt.is_some(), "{replay:#?}");
 
+    // The T3 card selects a concrete session from its run, independently of the task tree.
+    for (run, expected) in [(&first, &old), (&second, &new)] {
+        let url = format!("/v1/runs/{run}/live?chat=true&attempt=1");
+        let page = d.get(&url).await;
+        let entries = page["entries"].as_array().unwrap();
+        let commands: Vec<_> = entries
+            .iter()
+            .filter(|e| e["type"] == "tool_call")
+            .filter_map(|e| e["input"]["command"].as_str())
+            .collect();
+        assert_eq!(&commands, expected);
+        assert_eq!(page["live"], false);
+        assert_eq!(d.get(&format!("{url}&offset=1")).await["entries"], json!(entries[1..]));
+    }
+
     // The transcript is gone: both threads stay, each says so and replays nothing.
     let files = transcripts(d.dir.path());
     assert_eq!(files.len(), 1, "{files:?}");

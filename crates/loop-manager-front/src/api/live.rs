@@ -35,17 +35,22 @@ pub(crate) struct LiveQuery {
     from: Option<i64>,
     /// Replay the current session's chat and follow it to run end. Mutually exclusive with a journal cursor.
     chat: Option<bool>,
+    /// With chat=true, read one page of this recorded session in its step and round.
+    attempt: Option<u32>,
+    /// Number of entries already read from that session slice.
+    offset: Option<u64>,
 }
 
 /// The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current
 /// session as `event: harness` with no `id`; `event: lagged` with `{"missed": n}` when the reader fell behind the
-/// session. With `chat=true`, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.
+/// session. With `chat=true&attempt=N`, returns a JSON page of that recorded session in its step and round.
+/// With `chat=true` alone, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.
 #[utoipa::path(get, path = "/v1/runs/{id}/live",
     params(("id" = String, Path), LiveQuery, ("Last-Event-ID" = Option<String>, Header)),
-    responses((status = OK, content_type = "text/event-stream", body = String),
+    responses((status = OK, content((String = "text/event-stream"), (chat::ChatPage = "application/json"))),
         (status = BAD_REQUEST, description = "`bad_request`: the path or query is malformed", body = ErrorReply),
         (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply),
-        (status = GONE, description = GAP, body = ErrorReply), Failed))]
+        (status = GONE, description = GAP, body = ErrorReply), (status = SERVICE_UNAVAILABLE, description = "The selected transcript is unavailable", body = ErrorReply), Failed))]
 pub(crate) async fn live(
     state: State,
     Param(Path(id)): Param<Path<String>>,
@@ -60,6 +65,13 @@ pub(crate) async fn live(
         ));
     };
     let cursor = query.from.or_else(|| after_last(&headers));
+    if (query.attempt.is_some() && query.chat != Some(true)) || (query.offset.is_some() && query.attempt.is_none()) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "attempt requires chat=true and offset requires attempt",
+        ));
+    }
     if query.chat == Some(true) {
         if cursor.is_some() {
             return Err(ApiError::new(
@@ -67,6 +79,18 @@ pub(crate) async fn live(
                 "bad_request",
                 "chat has no journal cursor",
             ));
+        }
+        if let Some(n) = query.attempt {
+            let project = view["project"].as_str().expect("run has a project");
+            let (_, attempts) = state.reader.work(project)?;
+            let selected = attempts
+                .iter()
+                .find(|a| a.run == id && a.n == n)
+                .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "attempt has no recorded session"))?;
+            let page = chat::page(&state, selected, &attempts, query.offset.unwrap_or(0))
+                .await
+                .map_err(|e| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "transcript_unavailable", e.to_string()))?;
+            return Ok(axum::Json(page).into_response());
         }
         let first = serde_json::from_value::<u32>(view["attempt"].clone())
             .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;

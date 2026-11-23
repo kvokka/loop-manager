@@ -9,7 +9,7 @@ fn card(d: &Daemon, name: &str, args: Value) -> Value {
 }
 
 fn card_in(d: &Daemon, name: &str, args: Value, runtime: &Path) -> Value {
-    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/run-card/server.py");
+    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/server.py");
     let mut child = common::program("timeout")
         .arg(WAIT.as_secs().to_string())
         .arg("python3")

@@ -34,7 +34,7 @@ fn the_manifests_are_what_claude_and_codex_install() {
     let codex = json(&root.join(".agents/plugins/marketplace.json"));
     assert_eq!(claude["name"], "loop-manager");
     assert_eq!(codex["name"], "loop-manager");
-    for name in ["loop-manager", "run-card"] {
+    for name in ["loop-manager", "t3-run-card"] {
         check_plugin(&root, entry(&claude, name), entry(&codex, name));
     }
 }
@@ -82,9 +82,9 @@ fn check_plugin(root: &Path, claude_entry: &Value, codex_entry: &Value) {
         // Both harnesses cache a plugin by its version: a release that changes a skill changes the version.
         assert_eq!(plugin["version"], version, "{manifest}");
     }
-    if claude_entry["name"] == "run-card" {
+    if claude_entry["name"] == "t3-run-card" {
         // Codex starts a plugin's MCP server in its own cwd and expands no plugin root in it.
-        let server = &json(&dir.join("mcp.json"))["mcpServers"]["run-card"];
+        let server = &json(&dir.join("mcp.json"))["mcpServers"]["t3-run-card"];
         assert_eq!(server["type"], "stdio");
         assert_eq!(server["cwd"], ".");
         assert_eq!(json(&dir.join(codex))["mcpServers"], "./mcp.json");
@@ -193,12 +193,13 @@ fn every_command_a_skill_names_exists() {
     assert!(seen > 0, "no command found in {}", skills.display());
 }
 
-/// The run-card hook, given a PostToolUse event with the option `auto_open` set to `option`: the context it adds.
+/// The t3-run-card hook, given a PostToolUse event with the option `auto_open` set to `option`: the context it adds.
 fn auto_open(option: &str, event: Value) -> Option<String> {
     use std::io::Write;
-    let hook = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/run-card/hooks/auto_open.py");
+    let hook = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/hooks/auto_open.py");
     let mut child = std::process::Command::new("python3")
         .arg(hook)
+        .env("T3CODE_THREAD_ID", "test-thread")
         .env("CLAUDE_PLUGIN_OPTION_AUTO_OPEN", option)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

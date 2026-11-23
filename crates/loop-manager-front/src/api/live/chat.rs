@@ -28,6 +28,93 @@ pub(super) async fn relay(state: &Api, run: &str, first: u32, tx: &Sender) {
     }
 }
 
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub(crate) struct ChatPage {
+    #[schema(value_type = Vec<Object>)]
+    entries: Vec<ChatEntry>,
+    next: u64,
+    more: bool,
+    live: bool,
+}
+
+/// A read-only page from one session, including resumed attempts in the same step and round.
+/// Prompt identities delimit the slice when a later round or run continues the same transcript.
+pub(super) async fn page(
+    state: &Api,
+    selected: &loop_manager_core::run::WorkAttempt,
+    attempts: &[loop_manager_core::run::WorkAttempt],
+    offset: u64,
+) -> io::Result<ChatPage> {
+    let same_slice = |a: &loop_manager_core::run::WorkAttempt| {
+        a.run == selected.run && a.round == selected.round && a.step == selected.step
+    };
+    let owners: Vec<_> = attempts
+        .iter()
+        .filter(|a| a.session == selected.session && a.harness == selected.harness)
+        .collect();
+    let live = owners.iter().any(|a| same_slice(a) && a.ended_ms.is_none());
+    let ended = owners.iter().all(|a| a.ended_ms.is_some());
+    let empty = || ChatPage {
+        entries: Vec::new(),
+        next: offset,
+        more: false,
+        live,
+    };
+    let driver = state
+        .drivers
+        .iter()
+        .find(|d| d.harness() == selected.harness)
+        .cloned()
+        .ok_or_else(|| io::Error::other("unknown session harness"))?;
+    let reference = selected.session.clone();
+    let log = match tokio::task::spawn_blocking(move || driver.chat_log(&reference)).await? {
+        Ok(log) => log,
+        Err(e) if live && e.kind() == io::ErrorKind::NotFound => return Ok(empty()),
+        Err(e) => return Err(e),
+    };
+    let mut tail = Tail::new(log);
+    let keys: std::collections::HashMap<_, _> = owners
+        .iter()
+        .flat_map(|a| a.prompts.iter().map(|k| (k.as_str(), same_slice(a))))
+        .collect();
+    let mut belongs = owners
+        .iter()
+        .min_by_key(|a| (a.started_ms, a.n))
+        .is_some_and(|a| same_slice(a));
+    let mut index = 0_u64;
+    let mut entries = Vec::new();
+    let mut bytes = 0;
+    while let Some((prompt, record)) = tail.next(ended).await? {
+        if let Some(key) = prompt {
+            belongs = keys.get(key.as_str()).copied().unwrap_or(false);
+        }
+        if !belongs {
+            continue;
+        }
+        for entry in record {
+            if index >= offset {
+                if entries.len() >= 64 || bytes >= 128 * 1024 {
+                    return Ok(ChatPage {
+                        entries,
+                        next: index,
+                        more: true,
+                        live,
+                    });
+                }
+                bytes += serde_json::to_vec(&entry)?.len();
+                entries.push(entry);
+            }
+            index += 1;
+        }
+    }
+    Ok(ChatPage {
+        entries,
+        next: index,
+        more: false,
+        live,
+    })
+}
+
 async fn follow(state: &Api, run: &str, mut attempt: u32, tx: &Sender) -> io::Result<()> {
     let mut written = state.written.clone();
     let (mut session, mut tail) = (None, None::<Tail>);

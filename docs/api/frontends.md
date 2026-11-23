@@ -174,17 +174,15 @@ tokens in every session, so an agent names it in its own config
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.
 
-## Expanded run card in chat
+## T3 Code run card
 
-Install `run-card@loop-manager` from the [operator plugin marketplace](../../plugins/README.md).
-In an MCP Apps host, ask to show the expanded card for a run ID. Its formula stays in place while the
-current step, round, step attempt and wait reason change. A dotted arrow marks a possible return;
-the highlighted arrows mark the checks in the run's `back_from`. Click the heading to collapse the card.
-The card of every run the agent starts opens by itself when the user turns this on: the plugin option `auto_open`
-in Claude Code, the trusted `run-card` hook in Codex.
+Install `t3-run-card@loop-manager` in the harness used by T3 Code. Open a run, select an executed round
+and click an agent name to read its session inside the card. The plugin uses the daemon socket. No
+imported ACP thread is needed. See the [installation and viewing guide](../../plugins/README.md).
 
-The host starts the plugin over stdio. It reads the run and the ordered steps and `back_to` edges of the
-currently configured formula. If the formula was removed, it shows the current step alone. The card
-follows the journal cursor over the daemon's Unix socket, refreshes its snapshot after a gap, reconnects
-on failure and stops following at a terminal state. Live refresh uses the host's MCP Apps bridge.
-Clients with text output get a status line and can follow the run with `loop-manager run watch <run>`.
+`GET /v1/runs/{id}?all_attempts=true` returns every recorded attempt with its round, result and summary.
+`GET /v1/runs/{id}/live?chat=true&attempt=N` returns a JSON page of the selected session's conversation.
+Resumes in the same run, round and step share history. A continued session is sliced at the recorded
+prompt keys. Pass the returned `next` as `offset` to read further. A page has `entries`, `more` and
+`live`. Poll at the end while `live` is true. A missing session reference gives 404 and an unreadable
+transcript gives 503.

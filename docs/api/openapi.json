@@ -1473,6 +1473,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "all_attempts",
+            "in": "query",
+            "description": "Include all attempts across rounds (the default returns the last twenty).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1748,7 +1757,7 @@
     },
     "/v1/runs/{id}/live": {
       "get": {
-        "summary": "The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current\nsession as `event: harness` with no `id`; `event: lagged` with `{\"missed\": n}` when the reader fell behind the\nsession. With `chat=true`, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.",
+        "summary": "The live view of a run as SSE: its events as on `/v1/events` (`id` the `seq`); the raw messages of its current\nsession as `event: harness` with no `id`; `event: lagged` with `{\"missed\": n}` when the reader fell behind the\nsession. With `chat=true&attempt=N`, returns a JSON page of that recorded session in its step and round.\nWith `chat=true` alone, emits `chat` entries and a `chat_error` on failure. The stream ends after the run's `run.passed`, `run.failed` or `run.cancelled`.",
         "operationId": "live",
         "parameters": [
           {
@@ -1779,6 +1788,28 @@
             }
           },
           {
+            "name": "attempt",
+            "in": "query",
+            "description": "With chat=true, read one page of this recorded session in its step and round.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Number of entries already read from that session slice.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
             "name": "Last-Event-ID",
             "in": "header",
             "required": false,
@@ -1796,6 +1827,11 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPage"
                 }
               }
             }
@@ -1842,6 +1878,16 @@
           },
           "500": {
             "description": "`storage` or `journal`: the daemon could not read its state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The selected transcript is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -2739,6 +2785,20 @@
             "format": "int64",
             "minimum": 0
           },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "round": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "session": {
             "type": [
               "object",
@@ -2752,6 +2812,12 @@
           "step": {
             "type": "string",
             "description": "The step of the formula the attempt ran."
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -2760,6 +2826,34 @@
         "properties": {
           "reason": {
             "type": "string"
+          }
+        }
+      },
+      "ChatPage": {
+        "type": "object",
+        "required": [
+          "entries",
+          "next",
+          "more",
+          "live"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -3538,7 +3632,7 @@
             "items": {
               "$ref": "#/components/schemas/Attempt"
             },
-            "description": "The last 20, newest last."
+            "description": "The last 20, newest last; all recorded attempts with `all_attempts=true`."
           },
           "back_from": {
             "type": "array",

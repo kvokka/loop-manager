@@ -71,10 +71,9 @@ and an agent attaches it with `addons = [{ name, params }]`
   useful answer goes on the bead as one comment.
 
 The [loop-manager marketplace](../plugins/README.md) packages plugins for the operator's harness.
-`plugins/loop-manager/` contains the operator skills. `plugins/run-card/` provides the live formula card
-as a stdio MCP App. Claude Code reads `.claude-plugin/marketplace.json` and each plugin's
+`plugins/loop-manager/` contains the operator skills. `plugins/t3-run-card/` provides the T3 Code round and session viewer as a stdio MCP App. Claude Code reads `.claude-plugin/marketplace.json` and each plugin's
 `.claude-plugin/plugin.json`. Codex reads `.agents/plugins/marketplace.json` and each plugin's root
-`plugin.json`, or `.codex-plugin/plugin.json` for `run-card`: Codex loads no hooks of a root `plugin.json`.
+`plugin.json`, or `.codex-plugin/plugin.json` for `t3-run-card`: Codex loads no hooks of a root `plugin.json`.
 
 ## The life of a run
 

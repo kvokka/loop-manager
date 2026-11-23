@@ -78,6 +78,11 @@ impl Reader {
     /// declared (null if none); why it ended (`reason`) and the closed gate a queued or parked run waits on; `None` if
     /// there is no such run.
     pub fn run(&self, id: &str) -> Result<Option<Value>, Error> {
+        self.run_with_attempts(id, false)
+    }
+
+    /// Include every recorded round on request. Ordinary run listings keep their bounded attempt history.
+    pub fn run_with_attempts(&self, id: &str, all: bool) -> Result<Option<Value>, Error> {
         let conn = self.conn();
         let Some(row) = Row::read(&conn, id)? else {
             return Ok(None);
@@ -109,7 +114,7 @@ impl Reader {
         view["gate"] = json!(gate);
         view["round"] = json!(round);
         view["back_from"] = super::render::back_from(&conn, id)?;
-        view["attempts"] = json!(row::attempts(&conn, id)?);
+        view["attempts"] = json!(row::attempt_history(&conn, id, all)?);
         view["steps"] = json!(super::render::step_results(&conn, id, &row.step)?);
         view["usage"] = row::usage(&conn, id)?;
         Ok(Some(view))

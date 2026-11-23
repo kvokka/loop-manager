@@ -31,19 +31,11 @@ start resumes the same sessions.
 
 ## T3 Code
 
-Checked against T3 Code's [ACP providers guide](https://github.com/pingdotgg/t3code/blob/ccae953c46c0/docs/user/providers-acp.md)
-(release v0.1.11):
-
-1. Open **Settings → Providers → Add provider**, select **Show more**, then **Local ACP command**.
-2. Enter `loop-manager` as the executable (or its full path) and `acp` as the one argument, and choose a display name.
-3. If the daemon is not on the default socket, add `LOOP_MANAGER_SOCKET` with its path in the instance's environment
-   overrides.
-4. On the provider card, choose the project whose root is the loop-manager project's directory and select **List
-   sessions**; importing a session opens the task as a thread.
-
-Sending a message in that thread is refused: the work is started and steered through loop-manager itself.
+Use the [T3 Code run card](../../plugins/README.md#follow-a-run-in-t3-code) to browse a run. Select a round
+and click the agent that performed the step. The card reads the real session directly through the daemon.
+This workflow requires no local ACP command registration or session import in T3.
 
 ## Verified by
 
 `crates/loop-manager/tests/e2e/acp.rs` and `acp/` drive `loop-manager acp` as a client does, on a real daemon with
-the real claude and codex on fake providers. The T3 Code steps are taken from its documentation, not from a test.
+the real claude and codex on fake providers.

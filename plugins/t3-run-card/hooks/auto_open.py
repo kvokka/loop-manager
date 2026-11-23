@@ -41,12 +41,12 @@ def context(event):
     if not found:
         return None
     args["run"] = found.group(1) or found.group(2)
-    return (f"Run {args['run']} started. The user turned on run-card auto-open: "
+    return (f"Run {args['run']} started. The user turned on t3-run-card auto-open: "
             f"call show_run_card with {json.dumps(args)} now.")
 
 
 if __name__ == "__main__":
     event = json.load(sys.stdin)
     enabled = os.environ.get("CLAUDE_PLUGIN_OPTION_AUTO_OPEN", "").strip().lower() in ("true", "1")
-    if (enabled or "turn_id" in event) and (text := context(event)):
+    if os.environ.get("T3CODE_THREAD_ID") and (enabled or "turn_id" in event) and (text := context(event)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}))
