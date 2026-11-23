@@ -220,7 +220,7 @@ async fn until(
 
 /// The project `shop` with the rig `repo` and the triggers of devloop (`devloop/loop-manager.toml`), the rig's path
 /// moved into the test's tree.
-fn devloop_project() -> String {
+pub(crate) fn devloop_project() -> String {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../devloop/loop-manager.toml");
     let devloop: toml::Table = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let mut repo = devloop["rigs"]["repo"].as_table().unwrap().clone();

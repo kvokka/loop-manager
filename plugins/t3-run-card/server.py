@@ -40,6 +40,11 @@ def socket_path(override):
         return path
     if os.environ.get("LOOP_MANAGER_SOCKET"):
         return Path(os.environ["LOOP_MANAGER_SOCKET"])
+    return default_socket()
+
+
+def default_socket():
+    """The socket the CLI finds without --socket or LOOP_MANAGER_SOCKET."""
     for key in ("XDG_RUNTIME_DIR", "XDG_STATE_HOME"):
         base = Path(os.environ.get(key, ""))
         if base.is_absolute():
@@ -151,6 +156,39 @@ def working_sessions(state):
             yield attempt, native
 
 
+def why(path, state, gate):
+    """What a run that does not move waits for, in words, or None."""
+    if state["state"] == "running" and state["step_kind"] == "await":
+        return f"Waiting for your decision on {state['step']}"
+    if gate:
+        return f"Held by a gate: {gate}"
+    reason = state.get("waiting_for") if state["state"] == "queued" else None
+    if state["state"] == "parked":
+        return "Parked: the agent runs as many runs as its max_runs, or the daemon is stopping"
+    if reason == "writers":
+        query = urlencode({"project": state["project"], "limit": 1000})
+        others = [r for r in read(path, "/v1/runs?" + query)
+                  if r["rig"] == state["rig"] and r["id"] != state["id"] and r["state"] not in TERMINAL | {"queued"}]
+        text = f"Waiting for a free place in rig {state['rig']}: its max_writers is reached"
+        if others:
+            busy = (f"{r['id']} ({r['step']}, {'awaiting a decision' if r['step_kind'] == 'await' else r['state']})"
+                    for r in others)
+            text += ". Active in the rig: " + ", ".join(busy)
+        return text
+    return {
+        "concurrency": "Waiting for a free run slot: the daemon's or the agent's max_runs is reached",
+        "daemon_stopping": "Waiting for the daemon: it is stopping",
+    }.get(reason)
+
+
+def answer(path, state):
+    """The command that gives the outcome of the await step the run waits in, or None."""
+    if state["state"] != "running" or state["step_kind"] != "await":
+        return None
+    flag = "" if path == default_socket() else f" --socket {path}"
+    return f"loop-manager{flag} run resolve {state['id']} {state['step']} pass --summary '<your answer>'"
+
+
 def snapshot(path, run, existing_links=False):
     # Read the watermark first. A transition during either following read is replayed.
     cursor = read(path, "/v1/daemon")["journal_seq"]
@@ -167,6 +205,8 @@ def snapshot(path, run, existing_links=False):
     )}
     card["rounds"] = layout.get("rounds")
     card["gate"] = (state.get("gate") or {}).get("reason")
+    card["why"] = why(path, state, card["gate"])
+    card["answer"] = answer(path, state)
     card["results"] = {name: item["result"] for name, item in state["steps"].items()}
     summaries = {name: item["summary"] for name, item in state["steps"].items() if item.get("summary")}
     # While entering a step the run can still point at the previous step's attempt.
@@ -337,7 +377,7 @@ def dispatch(method, params):
         version = params.get("protocolVersion")
         return {"protocolVersion": version if version in supported else supported[-1],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "t3-run-card", "version": "0.3.0"}}
+                "serverInfo": {"name": "t3-run-card", "version": "0.4.0"}}
     if method in ("ping", "resources/templates/list"):
         return {"resourceTemplates": []} if method.startswith("resources") else {}
     if method == "tools/list":

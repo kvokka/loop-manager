@@ -1,6 +1,6 @@
 {
   "name": "t3-run-card",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "T3 Code run card for browsing rounds and real agent session histories.",
   "mcpServers": {
     "t3-run-card": {
@@ -18,7 +18,7 @@
     "auto_open": {
       "type": "boolean",
       "title": "Open the card on run start",
-      "description": "After Claude starts a run with `loop-manager run start` or the `start_run` tool, show its live card without being asked.",
+      "description": "After a tool call of Claude starts a run, directly or through a trigger, show its live card without being asked.",
       "default": false
     }
   }

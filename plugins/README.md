@@ -68,12 +68,21 @@ have no working-session link. When another round or run continues the same harne
 replays the part belonging to the selected step and round. T3's read-only history import includes prompts, replies, tool calls and
 results. It does not start or steer an LM run.
 
-The card can also open without asking. After the agent starts a run with `loop-manager run start` or the
-`start_run` MCP tool, a plugin hook asks it to show that run's card on the daemon the command named with
-`--socket` or `LOOP_MANAGER_SOCKET=`. This is a per-user setting, off by default:
+Each step shows its `title` from the formula, or else its name made readable (`review_owner` reads
+**Review owner**). A passed script shows no `exit 0`. When the run does not move, the current step says why:
+the rig's `max_writers` with the runs active in that rig, a full `max_runs`, a gate, a stopping daemon. When it
+waits in an `await` step, the step also shows the `loop-manager run resolve` command that answers it. The card
+updates only while its T3 thread is running: in an idle thread it shows the last state it read.
+
+The card can also open without asking. After a tool call of the agent starts a run, a plugin hook asks it to
+show that run's card. The call can start the run itself (`loop-manager run start`, the `start_run` MCP tool) on
+the daemon it names with `--socket` or `LOOP_MANAGER_SOCKET=`. It can also make a change, such as a bead filed
+with a label, on which a trigger of the default or a registered daemon starts a run. Runs that sessions of LM
+runs start and scheduled runs do not open a card. The hook waits up to 0.3 s past the daemon's journal for a
+change the daemon reads late. This is a per-user setting, off by default:
 
 - In Claude Code, turn on the `auto_open` option (`/plugin configure t3-run-card@loop-manager` or `/config`).
-- Codex has no plugin options: trust the `t3-run-card` PostToolUse hook in `/hooks` to turn it on. An untrusted
+- Codex has no plugin options: trust the `t3-run-card` PreToolUse and PostToolUse hooks in `/hooks` to turn it on. An untrusted
   hook does not run.
 
 The T3 run card MCP server requires Python 3.8+ and uses **stdio only** between the host and the plugin.
