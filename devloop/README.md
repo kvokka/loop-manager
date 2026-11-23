@@ -112,6 +112,11 @@ Use `devloop/lm` from the repository root for client commands as well. It select
 its directory first on the daemon's `PATH` for child commands. The dev database and socket are under
 `~/.local/state/loop-manager-dev/loop-manager/`, separate from the ordinary installation.
 
+The daemon runs this installed copy, not the checkout's build, and keeps the config and pack it read at start
+until an explicit reload. A run may therefore change the product's interface, including the names the devloop pack
+uses, without affecting the running daemon; the change takes effect when the owner installs the new binary and
+restarts the service.
+
 For an authorized upgrade, install the new artifact between epics with `mise run devloop-install`, then restart the
 registered service through its manager. Installation replaces the file atomically. Subsequent CLI invocations use
 it immediately, and the daemon picks it up on restart.
