@@ -345,4 +345,11 @@ fn a_session_gets_the_tracker_variables_and_the_model_only_when_its_config_sets_
     };
     let env = env_of(&with_model);
     assert!(env.contains(&("BR_MODEL".to_owned(), "claude-haiku-5-5".to_owned())));
+    let mut old = part::process(&config(None), &plan, Path::new("/state")).unwrap();
+    old["actor"] = json!(["BD_ACTOR", "loop-manager:r:1"]);
+    let env = part::env(&old, "i1", None, Path::new("/state")).unwrap();
+    assert!(
+        env.contains(&("BD_ACTOR".to_owned(), "loop-manager:r:1".to_owned())),
+        "a launch of an older daemon keeps its actor"
+    );
 }

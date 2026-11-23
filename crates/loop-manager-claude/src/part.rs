@@ -333,8 +333,14 @@ pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>, host: &Path) -> Re
         ("LOOP_MANAGER_RUN".to_owned(), text(&p["run"])),
         ("LOOP_MANAGER_ATTEMPT_TOKEN".to_owned(), text(&p["token"])),
     ]);
-    // The tracker variables of the attempt, as the core planned them (contracts 5.1).
-    env.extend(serde_json::from_value::<Vec<(String, String)>>(p["actor"].clone()).unwrap_or_default());
+    // The tracker variables of the attempt, as the core planned them (contracts 5.1); a launch an older daemon
+    // queued holds the actor alone, as one pair.
+    let actor = p["actor"].clone();
+    env.extend(
+        serde_json::from_value::<Vec<(String, String)>>(actor.clone())
+            .or_else(|_| serde_json::from_value::<(String, String)>(actor).map(|pair| vec![pair]))
+            .unwrap_or_default(),
+    );
     env.extend(
         p["bead"]
             .as_str()
