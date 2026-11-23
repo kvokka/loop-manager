@@ -102,7 +102,7 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
   min).
 - An agent files, lists, comments on and closes issues through loop-manager's commands
   ([issue trackers](../guide/issue-trackers.md#the-commands)); what they do not cover, such as a `blocks` link, it
-  does with `br` itself.
+  does with `br` itself ([`br dep add`](../guide/issue-trackers.md#links-between-issues)).
 - The daemon creates one kind of issue: the root of a run started from the text of a task, an epic without labels whose
   `external_ref` is the key of the creation (`loop-manager-` and 16 hex digits); everything filed for that task goes
   under it. The adapter first looks the key up in

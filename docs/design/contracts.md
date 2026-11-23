@@ -638,10 +638,11 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 The trait has the eleven operations the core calls and three the API calls (`close_by`, `subtree`, `file`); an
 operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
-the daemon's own reads and for the `issue` commands from outside a session. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
-in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
-of its step, its harness and its model (`BR_AGENT_NAME`, `BR_HARNESS`, `BR_MODEL`, the last only when its effective
-config sets a model), which br records on the issue's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
+the daemon's own reads and for the `issue` commands from outside a session. Sessions and exec steps get the actor
+`loop-manager:<run id>:<attempt n>` and the database path in the tracker's variables
+([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
+of its step, its harness and its model (the last only when its effective
+config sets a model), which the tracker records on the issue's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
 human or an outside tool and starts a new correlation chain (`correlation`, 1.1).
 
 ```rust
@@ -712,7 +713,7 @@ input_tokens, output_tokens}` from the state as the attempt ends (`outcome` is t
 stop by the `context-budget` addon, and `summary` its text; `failure` is the attempt's failure; each is `null` when
 the attempt has none). A repeated effect (a restart between the call and its report) may append the entry twice. An
 `Unavailable` tracker is tried again and an `Invalid` answer dropped, both reported as
-`tracker.sync_failed{op: "attempt_ended"}`. br keeps it in `.beads/interactions.jsonl`
+`tracker.sync_failed{op: "attempt_ended"}`. The tracker keeps it in its audit trail
 ([tracker-br](tracker-br.md#one-database-per-project)).
 
 `comment` adds a comment to the issue `id` as the attempt's actor `loop-manager:<run id>:<attempt n>`: the comment
@@ -721,8 +722,8 @@ tracker. The core adds an effect for it on the queue `tracker:<project>`, so it 
 the issue that a later step's prompt shows (`lineage`): a comment accepted before `finish` is in that prompt, even
 after a tracker outage. The same text from the same attempt, while the first is still queued, is one comment. A
 repeated effect may add the comment twice. An `Unavailable` tracker is tried again and an `Invalid` answer dropped,
-both reported as `tracker.sync_failed{op: "comment"}`; an issue the tracker no longer has drops it. br adds it with
-`br comments add <id> --file /dev/stdin` ([tracker-br](tracker-br.md#one-database-per-project)).
+both reported as `tracker.sync_failed{op: "comment"}`; an issue the tracker no longer has drops it. The adapter
+passes the text on stdin, so no text reads as an option ([tracker-br](tracker-br.md#one-database-per-project)).
 
 `file`, `subtree` and `close_by` serve the commands `loop-manager issue create|list|close`
 ([frontends](../api/frontends.md#cli)): the API calls them outside the core and its queue, as it reads `lineage`, so
@@ -757,16 +758,16 @@ labels as read, not writes: a label removed and added again with no read seeing 
 after such a read is gained again. A read queued before the last one was made repeats writes already read: the cursor
 drops them, so a repeated observation raises nothing. The daemon gives a project a tracker when an adapter finds one in
 its directory, and every session and exec step of the project gets the tracker's variables (layer: project) and its
-actor `loop-manager:<run id>:<attempt n>` (br: `BEADS_DIR`, `BD_ACTOR`,
-[tracker-br](tracker-br.md#one-database-per-project)); the core sets the actor of an exec step and hands that of a
+actor `loop-manager:<run id>:<attempt n>`
+([tracker-br](tracker-br.md#one-database-per-project)); the core sets the actor of an exec step and hands that of a
 session to the adapter in the session plan.
 
 ### 5.2 Types and errors
 
 - `Issue`: `{id, title, description, status, priority, labels, assignee, epic, created_at, updated_at, closed_at}`.
-  `status` is br's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's tracker
-  policy adds (such as `rework`); the core decides nothing by it. `epic` is computed by the adapter (br has no such field,
-  [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of an issue is the prefix of its id (no label).
+  `status` is the tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's tracker
+  policy adds (such as `rework`); the core decides nothing by it. `epic` is computed by the adapter when the tracker has no such field
+  ([tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of an issue is the prefix of its id (no label).
 - `NewIssue`: `{title, description, labels, parent, prefix}`: an issue `file` files (5.1).
 - `Comment`: `{author, created_at, text}`. `Lineage`: the fields of `Issue`, `comments: [Comment]` and `parents`, each
   the fields of `Issue` and its `comments`. Comments are no part of `Issue`: an issue event carries none.
@@ -783,10 +784,10 @@ session to the adapter in the session plan.
   found another owner, nothing changed); `Unavailable { text }` (transient: retried by the effect queue with
   backoff, `tracker.sync_failed` on every failure); `Invalid { text }` (permanent).
 - `release` and `close` are conditional on `assignee == owner`. A release clears the assignee and sets `open`, but a
-  closed issue keeps its status: a release never reopens an issue. br 0.7.6 has neither a conditional close nor a
-  release, so the adapter reads, compares and writes
+  closed issue keeps its status: a release never reopens an issue. For a tracker with neither a conditional close nor
+  a release, the adapter reads, compares and writes
   ([tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). A `close` of a parent with open children leaves
-  it open: br refuses it, and the adapter releases the issue instead, so it does not stay `in_progress` behind a
+  it open: when the tracker refuses it, the adapter releases the issue instead, so it does not stay `in_progress` behind a
   terminal run. The window between read and write is open only to humans (the daemon is the only claimer, invariant 3).
   An owner found changed before the write is `OwnerMismatch`, reported as `resync.diverged`; a human write that lands
   inside the window shows up only as a `issue.updated` of the next `changes` batch, until the resync of the tracker
@@ -881,7 +882,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 
 | From | On | To | Effects after commit |
 |---|---|---|---|
-| — | create (API, CLI, MCP, trigger) with an idempotency key | `queued` | — (with a task input that names an issue the core knows, the run is recorded as the issue's owner in this transaction, invariant 3: an issue another live run holds refuses; `{ next_ready = true, epic }` takes the first issue of the last ready set, in the tracker's order, that is in the epic, of the run's rig or of no rig, without an owner and without a closed gate, passing over (reply `passed_over`) an issue whose `harness:` or `agent:` label the run cannot take; none → the reply `{"nothing_ready": true}`, for a trigger `trigger.skipped{nothing_ready}`; the input then holds the issue id; any other text gets its issue on `preparing`, tracker-br.md) |
+| — | create (API, CLI, MCP, trigger) with an idempotency key | `queued` | — (with a task input that names an issue the core knows, the run is recorded as the issue's owner in this transaction, invariant 3: an issue another live run holds refuses; `{ next_ready = true, epic }` takes the first issue of the last ready set, in the tracker's order, that is in the epic, of the run's rig or of no rig, without an owner and without a closed gate, passing over (reply `passed_over`) an issue whose `harness:` or `agent:` label the run cannot take; none → the reply `{"nothing_ready": true}`, for a trigger `trigger.skipped{nothing_ready}`; the input then holds the issue id; any other text gets its issue on `preparing`, [tracker-br](tracker-br.md#issues-and-runs)) |
 | — | create with `continue_from: <run>` (a terminal run with a session; a session is never reused implicitly) | `queued` | in the workdir of that run; the first attempt resumes that run's last session with the formula prompt; a later `resume` uses the run's own session, or that one while it has none and started no new one; a harness other than the agent's → `failed{infrastructure}`. Only the first step continues that session: a formula whose first step is not `ai`, or has an `if`, cannot be continued, and the later steps start sessions of their own |
 | `queued` | slot free, a place in the rig free (`max_writers`), no gate of the run closed | `preparing` | with a task text that names no issue the core knows: the tracker creates the root issue, or returns the issue the text names (`create`, key kept in the effect), the run owns it and its input takes the id; with an issue: the tracker claim as owner `loop-manager:<run>` (queue `tracker:<project>`), and the prompt renders once the claim returned the issue; `run.preparing` hooks |
 | `preparing` | decision `proceed` (or no hooks) | `starting` | attempt 1: instance acquire, `start_session`, `send_prompt` |

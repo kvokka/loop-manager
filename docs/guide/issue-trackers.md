@@ -76,7 +76,7 @@ loop-manager issue create --project {{ project.name }} --rig backend --parent {{
 The issue gets the rig's id prefix, and a `drain` step then gives it a run on that rig
 ([first formula](first-formula.md#runs-over-a-tracker)). The commands cover what loop-manager's callers need; anything
 else (a `blocks` link between two issues, say) an agent does with the tracker's own tools, which its environment
-points at the project's tracker.
+points at the project's tracker ([for br](#links-between-issues)).
 
 ## The br tracker
 
@@ -122,6 +122,12 @@ Every call of the adapter is one `br --json` process on the project's database, 
 | `comment` | `br comments add <id> --file /dev/stdin` |
 | the end of an attempt | `br audit record --stdin`: a line of `.beads/interactions.jsonl` |
 | changes | a watcher on `.beads/`, then a read-only read of the `events` table after the stored cursor |
+
+### Links between issues
+
+`loop-manager issue create` sets only the parent. A `blocks` link is br's own:
+`br dep add <issue> <blocker>` makes `<issue>` wait for `<blocker>` (the type defaults to `blocks`; `--type` sets
+another). The ready set leaves `<issue>` out until `<blocker>` is closed, and `issue list` shows what holds it.
 
 ### Inspect and repair a br tracker
 
