@@ -57,3 +57,6 @@ redirect
 
 # bv (beads viewer) lock file
 .bv.lock
+
+# Append-only audit log of agent interactions (br audit record): local telemetry, not the tracker
+interactions.jsonl
