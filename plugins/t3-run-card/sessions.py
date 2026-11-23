@@ -177,7 +177,7 @@ async def serve(path):
                     result = {
                         "protocolVersion": 2,
                         "capabilities": {"session": {}},
-                        "info": {"name": "t3-run-card", "version": "0.2.0"},
+                        "info": {"name": "t3-run-card", "version": "0.2.1"},
                     }
                 elif not initialized:
                     raise ValueError("Initialize first")

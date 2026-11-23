@@ -44,7 +44,8 @@ T3 project. Future clicks reuse it. Resumes within a step and round share a thre
 sessions and other rounds have their own links. Beadless runs work too.
 
 The link uses T3's HTTPS thread URL so desktop, web and iPhone clients can resolve the same thread.
-T3 may ask for confirmation on import or when opening the link. If the browser needs a fresh click
+The T3 MCP Apps host accepts only HTTP(S) links. On iPhone it asks for confirmation and hands the
+URL to iOS, which can open the browser first. Direct in-app navigation requires support in the T3 client. If the browser needs a fresh click
 after a long import, click the agent again. T3 0.1.11 imports a snapshot of the messages available at that point. Opening an already imported
 thread reuses its history.
 

@@ -1,6 +1,6 @@
 {
   "name": "t3-run-card",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "T3 Code run card for browsing rounds and real agent session histories.",
   "mcpServers": "./mcp.json",
   "author": {
