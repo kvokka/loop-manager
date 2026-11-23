@@ -110,8 +110,8 @@ async fn a_label_a_ready_bead_gains_fires_a_trigger_once_and_nothing_else_does()
     w.tracker.retitle(&held, "Renamed");
     w.changed().await;
 
-    // A bead filed with the label, or labelled before the core saw it ready, is new to the ready set: `bead.ready`
-    // tells it, and the label it gained is not of a ready bead.
+    // A bead filed with the label, or labelled before the core first read it, is new to the ready set: `bead.ready`
+    // tells it, and no label is told as gained, since each write is read with the bead as it is now.
     let filed = w.tracker.add_in("w", &["review"], None);
     let late = w.tracker.add_in("w", &[], None);
     w.tracker.label(&late, "review");
@@ -123,7 +123,7 @@ async fn a_label_a_ready_bead_gains_fires_a_trigger_once_and_nothing_else_does()
             .collect::<Vec<_>>()
     };
     assert!(of(&filed).is_empty(), "{:?}", of(&filed));
-    assert_eq!(of(&late)[0]["ready"], json!(false));
+    assert!(of(&late).is_empty(), "{:?}", of(&late));
     let new_ready = w.all("bead.ready");
     assert!(
         [&filed, &late]

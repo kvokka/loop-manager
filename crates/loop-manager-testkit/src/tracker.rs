@@ -417,7 +417,12 @@ impl Tracker for MemoryTracker {
                 .log
                 .iter()
                 .filter(|c| c.seq > after && c.seq <= last)
-                .cloned()
+                // The bead as it is when read, as br gives it (contracts 5.1, `Change.bead`).
+                .map(|c| Change {
+                    bead: (state.beads.iter().find(|b| b.id == c.bead.id))
+                        .map_or_else(|| c.bead.clone(), |b| b.clone()),
+                    ..c.clone()
+                })
                 .collect())
         })
     }
