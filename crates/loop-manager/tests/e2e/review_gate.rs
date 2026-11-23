@@ -129,8 +129,10 @@ impl Gate {
         fs::write(tools.path().join("plan.sh"), plan).unwrap();
         let task = |command: String| Provider::start(vec![Reply::Task(command)]);
         let planner = task(format!("sh {}", tools.path().join("plan.sh").display())).await;
+        // The coder holds while `hold` exists.
         let coder = task(format!(
-            "echo hello >greet.txt && {loop_manager} finish pass --summary coded"
+            "while [ -e {} ]; do sleep 0.1; done; echo hello >greet.txt && {loop_manager} finish pass --summary coded",
+            tools.path().join("hold").display()
         ))
         .await;
         let reviser = task(format!("{loop_manager} finish pass --summary addressed")).await;
@@ -345,7 +347,7 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
     assert_eq!(git(&root, &["ls-remote", "--heads", "origin", &branch]), "");
     assert_eq!(git(&root, &["branch", "--show-current"]), "main\n");
     assert_eq!(g.backend_pr(&view).1, "CLOSED", "{view}");
-    // The feature's issue is closed, and the backend's issue under it first.
+    // The feature's issue is closed; the backend's issue under it was closed by its coder.
     let issue = view["issue"].as_str().unwrap();
     let shown = g.d.get(&format!("/v1/projects/{PROJECT}/issues/{issue}")).await;
     let under = g.d.get(&format!("/v1/projects/{PROJECT}/issues?under={issue}")).await;
@@ -362,4 +364,45 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
     g.d.until_state(&failed, "failed").await;
     // A trigger's run commits with the event it matched (contracts 3.5): none came with `run.failed`.
     assert_eq!(g.runs_of("dev.cleanup").await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feature_cancelled_while_its_issue_is_open_has_the_issue_closed_by_cleanup() {
+    let g = Gate::start().await;
+    fs::write(g.tools.path().join("hold"), "").unwrap();
+    let run = g.feature(json!({ "task": "Greet the visitor" })).await;
+    let deadline = Instant::now() + WAIT;
+    let implement = loop {
+        if let [i] = &g.runs_of("dev.implement").await[..]
+            && i["state"] == "running"
+        {
+            break i["id"].as_str().unwrap().to_owned();
+        }
+        assert!(Instant::now() < deadline, "no implement run in work");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    g.d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+    let view = g.d.until_state(&run, "cancelled").await;
+    g.d.until_state(&implement, "cancelled").await;
+    let deadline = Instant::now() + WAIT;
+    let cleanup = loop {
+        if let [cleanup] = &g.runs_of("dev.cleanup").await[..] {
+            break cleanup["id"].as_str().unwrap().to_owned();
+        }
+        assert!(Instant::now() < deadline, "no cleanup");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    g.d.until_state(&cleanup, "passed").await;
+    // No coder closed the backend's issue: `cleanup` did, before the feature's own.
+    let issue = view["issue"].as_str().unwrap();
+    let shown = g.d.get(&format!("/v1/projects/{PROJECT}/issues/{issue}")).await;
+    let under = g.d.get(&format!("/v1/projects/{PROJECT}/issues?under={issue}")).await;
+    let statuses: Vec<&Value> = under.as_array().unwrap().iter().map(|i| &i["status"]).collect();
+    assert_eq!(
+        (&shown["status"], statuses),
+        (&json!("closed"), vec![&json!("closed")]),
+        "{shown} {under}"
+    );
 }

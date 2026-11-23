@@ -23,8 +23,8 @@ for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); 
   ! git show-ref -q --verify "refs/heads/$branch" || git branch -q -D "$branch"
 done
 # The issues under it close first, the newest first: a parent with an open child is not closed. A closed one stays so.
-for issue in $(loop-manager --json issue list --project "$project" "$LOOP_MANAGER_INPUT_ISSUE" |
-  jq -r 'reverse | .[] | select(.status != "closed") | .id') "$LOOP_MANAGER_INPUT_ISSUE"; do
+issues=$(loop-manager --json issue list --project "$project" "$LOOP_MANAGER_INPUT_ISSUE")
+for issue in $(printf '%s' "$issues" | jq -r 'reverse | .[] | select(.status != "closed") | .id') "$LOOP_MANAGER_INPUT_ISSUE"; do
   loop-manager issue close --project "$project" --reason "the feature was cancelled" "$issue" >/dev/null
 done
 echo "cleanup: $LOOP_MANAGER_INPUT_ISSUE"
