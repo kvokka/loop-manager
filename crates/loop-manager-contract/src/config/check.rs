@@ -273,7 +273,8 @@ pub(super) fn bundled(
 }
 
 /// The bundled addons on for a project: the orchestrator's `on`, except those the project's `tables` decide, and
-/// `worktree` for the formulas of its `packs` with `worktree = true`, named in its parameters.
+/// `worktree` when a formula of its `packs` has `worktree = true`, with no parameters: the core gives it the facts of
+/// each run's place as it queues the hook.
 pub(super) fn project_bundled(
     loader: &mut Loader,
     file: &Path,
@@ -285,16 +286,9 @@ pub(super) fn project_bundled(
     let decides = |b: &Bundled| own.iter().any(|n| n == b.name);
     let mine = bundled(loader, file, tables).into_iter().filter(decides);
     let mut all: Vec<Bundled> = on.iter().filter(|b| !decides(b)).cloned().chain(mine).collect();
-    let worktree: Vec<String> = (packs.iter())
-        .flat_map(|p| {
-            p.formulas
-                .iter()
-                .filter(|(_, f)| f.worktree)
-                .map(|(n, _)| format!("{}.{n}", p.name))
-        })
-        .collect();
-    if let Some(&(name, on, _)) = BUNDLED.iter().find(|b| b.0 == "worktree" && !worktree.is_empty()) {
-        let params = serde_json::json!({ "formulas": worktree });
+    let worktree = packs.iter().any(|p| p.formulas.values().any(|f| f.worktree));
+    if let Some(&(name, on, _)) = BUNDLED.iter().find(|b| b.0 == "worktree" && worktree) {
+        let params = Value::Object(Map::new());
         all.push(Bundled { name, on, params });
     }
     all.sort_by_key(|b| BUNDLED.iter().position(|(n, ..)| *n == b.name));

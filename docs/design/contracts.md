@@ -762,8 +762,10 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   when it is created (API, CLI, MCP) or by the trigger that fires there. A start that names no rig takes it from the
   id prefix of the bead an input names by id, and runs in the root when the id matches no rig or no bead is named. An
   unknown rig, or a bead that still carries a `rig:` label, is refused before the run exists. Its workdir is the place's
-  directory, or a worktree of it with `worktree = true` in the formula (config.md); in a directory without git that
-  run fails (`deny` of `worktree`). The session of an ai step works in the run's workdir, but that of an agent of
+  directory, or a worktree of it with `worktree = true` in the formula (config.md). A child of a `drain` or `formula`
+  step works from the base of its rig instead: the workdir of its parent on the parent's rig, the lazy worktree of an
+  ancestor with the key on another (config.md "Formula"); a worktree of its own comes from the HEAD of that base. In a
+  directory without git `worktree = true` makes no worktree: the run works in the directory. The session of an ai step works in the run's workdir, but that of an agent of
   scope `root` works in the root's directory when the run is on a rig. loop-manager does not lock a directory: by
   default two runs may work in one directory at once. Keeping parallel writers apart in one rig is the user's choice:
   `worktree = true` gives each run its own directory, the rig's `max_writers` keeps the runs past it that work in the
@@ -771,8 +773,9 @@ so that the state machine has one place where `run.attempt_failed` is decided.
 - Concurrency is bounded per orchestrator (`max_runs`, default 8) and per agent (`max_runs` in `agent.toml`). A run
   that started keeps its orchestrator slot from step to step; a step of an agent at its limit parks until a run of
   that agent ends.
-- A rig's `max_writers` (config.md "Project") bounds its writers: the runs on the rig whose formula has no
-  `worktree = true` and has an `exec` step or an `ai` step of an agent not of scope `root`, whatever step they are at.
+- A rig's `max_writers` (config.md "Project") bounds its writers: the runs on the rig whose formula has an `exec` step
+  or an `ai` step of an agent not of scope `root`, whatever step they are at, and that work in the rig's directory:
+  their formula has no `worktree = true`, and they work in no base of an ancestor other than that directory.
   A writer holds its place in every state but `queued` and the terminal ones, `parked` and `interrupted` included. Only
   a queued writer is checked: past the limit it waits with `waiting_for = "writers"`; a parked run resumes without the
   check. A run in a `drain` or `formula` step does not count against the runs that step started, nor against theirs
@@ -831,7 +834,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `running` (exec) | exit 0 / other code or a signal | `finishing` with outcome `pass` / `fail`, `summary` `exit <code>` or `signal <n>`, `data` `{exit_code, stdout, stderr}` (last 4 KiB each) | `run.finishing` hooks |
 | `preparing` (drain) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = drain`) | a read of the tracker; the config snapshot is `{drain: <formula>, pool, on_item_failure}` |
 | `running` (drain) | a read of the tracker (`Ready`) | `running` | while fewer than `pool` children are alive (queued or running) and no bead of this entry failed under `soft_stop`/`hard_stop`, each ready bead of its own (config.md, "Formula": of the run's rig, or of any rig for a run of the root) under the run's bead, at any depth, not given in this entry of the step (a restart starts a new attempt, not a new entry): the create of the first row with the bead as input, no rig, the run's correlation, `depth + 1`, `parent_run` the run (a refusal leaves the bead without a run); a run in a drain step holds no concurrency slot |
-| `preparing` (formula) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = formula`) | the child run of the step's formula is created, or found if a restart cut the attempt that made it |
+| `preparing` (formula) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = formula`) | the child run of the step's formula is created in the run's workdir (6.1), or found if a restart cut the attempt that made it |
 | `running` (formula) | the child cannot start: refused (depth, a bead held by another run) or `next_ready` finds no ready bead (`nothing_ready`) | `failed{infrastructure}`, no attempt left to `max_attempts` | — |
 | `preparing` (await) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = await`) | `run.awaiting {run, deadline}`; the config snapshot is `{fail_on_timeout}`; a run waiting in the step holds no concurrency slot |
 | `running` (await) | an outcome for the step (`POST /v1/runs/{id}/resolve`, `loop-manager run resolve`) | `finishing` with that outcome | `run.finishing` hooks; an outcome for another step or a run not waiting is refused (`rejected`) and changes nothing |

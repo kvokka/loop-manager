@@ -1,8 +1,12 @@
-//! `worktree` (docs/design/config.md): on `run.preparing` a run of a formula with `worktree = true` gets its own git
-//! worktree on the branch `loop-manager/<run>` as its workdir; once the run ends the worktree goes, only when it has no
-//! uncommitted change and its commits are reachable from a ref. The branch stays unless it is merged. A run continuing
+//! `worktree` (docs/design/config.md): on `run.preparing` a run moves to its base, and a run of a formula with
+//! `worktree = true` gets its own git worktree on the branch `loop-manager/<run>` from the HEAD of that base. The base
+//! of a run is its place's directory, the workdir it inherited, or the lazy worktree of an ancestor in its repository,
+//! made on the first child there. Once a run ends, its own worktree and its lazy ones go, each only when it has no
+//! uncommitted change and its commits are reachable from a ref; a branch stays unless it is merged. A run continuing
 //! the session of a run that had a worktree works in that same worktree, recreated on its branch if it was removed.
+//! The core gives the facts of the run's place (`Place`) as the hook's parameters.
 
+use loop_manager_contract::config::Place;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -15,11 +19,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Set by the loader, not by a table: the qualified names of the formulas with `worktree = true`.
+/// Set by the core as it queues the hook, not by a table: the place of the run of the event.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Params {
-    formulas: Vec<String>,
+    run: Option<Place>,
 }
 
 /// Where the worktrees of a repository live: inside its git directory, out of every working tree.
@@ -33,31 +37,84 @@ pub(crate) fn hook(event: &Value, p: &Params) -> Result<Option<Value>, String> {
     let run = &event["data"]["run"];
     let id = run["id"].as_str().ok_or("the event has no run")?;
     let workdir = Path::new(run["workdir"].as_str().ok_or("the run has no workdir")?);
+    let place = p.run.as_ref().ok_or("the hook has no place of the run")?;
     let until = Instant::now() + TIMEOUT;
-    match (event["type"].as_str(), worktree(workdir)) {
-        // A run continuing another's session got that run's workdir: its worktree, brought back if removed.
-        (Some("run.preparing"), Some((common, of))) => create(&common, of, until).map(Some),
-        (Some("run.preparing"), None) if p.formulas.iter().any(|f| run["formula"] == f.as_str()) => {
-            // A project root may be a plain directory (docs/design/config.md): the run fails, not the hook.
-            if !workdir.ancestors().any(|d| d.join(".git").exists()) {
-                let reason = format!(
-                    "worktree: `{}` is not a git repository; the formula has `worktree = true`",
-                    workdir.display()
-                );
-                return Ok(Some(json!({ "decision": "deny", "reason": reason })));
-            }
-            let common = git(
-                workdir,
-                &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-                until,
-            )?;
-            create(Path::new(&common), id, until).map(Some)
+    // The run's own worktree, or that of the run whose session it continues; never one it inherited.
+    let mine = worktree(workdir).filter(|(_, of)| *of == id || place.continued);
+    match (event["type"].as_str(), mine) {
+        // Prepared again, or continuing a session: that worktree, brought back on its branch if removed.
+        (Some("run.preparing"), Some((common, of))) => {
+            let _held = hold(&common, until)?;
+            let tree = add(&common, of, &place.dir, until)?;
+            Ok(Some(json!({ "decision": "proceed", "workdir": tree })))
         }
-        (Some("run.passed" | "run.failed" | "run.cancelled"), Some((common, of))) => {
-            remove(&common, workdir, of, until).map(|()| None)
+        (Some("run.preparing"), None) => prepare(place, id, workdir, until),
+        (Some("run.passed" | "run.failed" | "run.cancelled"), mine) => {
+            let mut failed = Vec::new();
+            if let Some((common, of)) = mine {
+                let base = base_of(&common, place);
+                failed.extend(remove(&common, workdir, of, &base, until).err());
+            }
+            // The lazy bases of the run in the other places it had children in go with it.
+            for dir in &place.rigs {
+                let Some(common) = common_dir(dir, until)? else {
+                    continue;
+                };
+                let tree = common.join(DIR).join(id);
+                failed.extend(remove(&common, &tree, id, dir, until).err());
+            }
+            match failed.is_empty() {
+                true => Ok(None),
+                false => Err(failed.join("; ")),
+            }
         }
         _ => Ok(None),
     }
+}
+
+/// Moves a run to its base, and into a worktree of its own from the HEAD of that base when its formula has the key.
+/// A base of a directory without git is that directory: no isolation.
+fn prepare(place: &Place, id: &str, workdir: &Path, until: Instant) -> Result<Option<Value>, String> {
+    let Some(common) = common_dir(&place.dir, until)? else {
+        return Ok(None);
+    };
+    let _held = hold(&common, until)?;
+    let base = match place.lazy.split_first() {
+        None => place.dir.clone(),
+        Some((first, farther)) => {
+            let mut made = farther.iter().map(|r| common.join(DIR).join(r));
+            let start = made.find(|t| t.join(".git").exists());
+            add(&common, first, start.as_deref().unwrap_or(&place.dir), until)?
+        }
+    };
+    let to = match place.own {
+        true => add(&common, id, &base, until)?,
+        false if base != workdir => base,
+        false => return Ok(None),
+    };
+    Ok(Some(json!({ "decision": "proceed", "workdir": to })))
+}
+
+/// The base a run's own worktree came from, where its merged branch is deleted: the lazy worktree when it is still
+/// there, else the directory of the base; the git common dir when that is gone.
+fn base_of(common: &Path, place: &Place) -> PathBuf {
+    let base = match place.lazy.first() {
+        Some(first) => common.join(DIR).join(first),
+        None => place.dir.clone(),
+    };
+    match base.exists() {
+        true => base,
+        false => common.to_owned(),
+    }
+}
+
+/// The git common dir of the repository of `dir`, `None` when `dir` is in none.
+fn common_dir(dir: &Path, until: Instant) -> Result<Option<PathBuf>, String> {
+    if !dir.ancestors().any(|d| d.join(".git").exists()) {
+        return Ok(None);
+    }
+    let common = git(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"], until)?;
+    Ok(Some(PathBuf::from(common)))
 }
 
 /// The git common dir and the run of a worktree this addon made: `<common>/loop-manager/worktrees/<run>`.
@@ -68,28 +125,28 @@ fn worktree(workdir: &Path) -> Option<(PathBuf, &str)> {
     dir.ends_with(DIR).then(|| (common.to_owned(), of))
 }
 
-/// Creates the worktree of run `id` in the repository with git dir `common`, from its HEAD; one already there is
-/// reused, so a hook run again after a crash decides the same; an existing branch `loop-manager/<id>` is checked out, never
-/// reset.
-fn create(common: &Path, id: &str, until: Instant) -> Result<Value, String> {
-    let _held = hold(common, until)?;
-    let path = common.join(DIR).join(id);
+/// The worktree of run `run` in the repository with git dir `common`, made from the HEAD of `start` when it is not
+/// there; the caller holds the lock. One already there is reused, so a hook run again after a crash decides the
+/// same; an existing branch `loop-manager/<run>` is checked out, never reset.
+fn add(common: &Path, run: &str, start: &Path, until: Instant) -> Result<PathBuf, String> {
+    let path = common.join(DIR).join(run);
     if !path.join(".git").exists() {
-        let branch = format!("loop-manager/{id}");
+        let branch = format!("loop-manager/{run}");
         let at = path.to_string_lossy();
         // A worktree removed by hand stays registered, and its branch may hold commits: take the branch as it is.
         git(common, &["worktree", "prune"], until)?;
         if git(common, &["branch", "--list", &branch], until)?.is_empty() {
-            git(common, &["worktree", "add", "-b", &branch, &at, "HEAD"], until)?;
+            git(start, &["worktree", "add", "-b", &branch, &at, "HEAD"], until)?;
         } else {
             git(common, &["worktree", "add", &at, &branch], until)?;
         }
     }
-    Ok(json!({ "decision": "proceed", "workdir": path }))
+    Ok(path)
 }
 
-/// Removes the worktree at `path` of run `id` unless it holds work a removal would lose.
-fn remove(common: &Path, path: &Path, id: &str, until: Instant) -> Result<(), String> {
+/// Removes the worktree at `path` of run `run` unless it holds work a removal would lose; its branch goes when it is
+/// merged into the HEAD of `base`.
+fn remove(common: &Path, path: &Path, run: &str, base: &Path, until: Instant) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
@@ -110,7 +167,7 @@ fn remove(common: &Path, path: &Path, id: &str, until: Instant) -> Result<(), St
     // Refuses a worktree with uncommitted changes.
     git(common, &["worktree", "remove", &path.to_string_lossy()], until)?;
     // Deletes the branch only when it is merged; an unmerged one is the run's work.
-    let _ = git(common, &["branch", "-d", &format!("loop-manager/{id}")], until);
+    let _ = git(base, &["branch", "-d", &format!("loop-manager/{run}")], until);
     Ok(())
 }
 

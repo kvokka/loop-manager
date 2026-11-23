@@ -2,7 +2,7 @@
 //! effect that commits with the event; the runner executes them after commit, one after another in addon order,
 //! and sends the combined decision of a deciding event back to the core.
 
-use super::{Decision, Msg, RunHandler, decide::parse};
+use super::{Decision, Msg, RunHandler, bases, decide::parse};
 use crate::{
     BoxFuture,
     config::Sourced,
@@ -70,8 +70,13 @@ impl RunHandler {
         // The bundled addons come last: a declared addon decides before the default policy.
         let bundled = p.map_or(&self.config.bundled, |p| &p.bundled);
         for bundled in bundled.iter().filter(|b| b.on.contains(&kind)) {
+            // `worktree` takes the place of the run from the core, which knows its lineage (docs/design/config.md).
+            let params = match (bundled.name, p, run) {
+                ("worktree", Some(p), Some(run)) => json!({ "run": bases::place(tx, p, run)? }),
+                _ => bundled.params.clone(),
+            };
             hooks.push(json!({
-                "addon": bundled.name, "bundled": bundled.name, "params": bundled.params,
+                "addon": bundled.name, "bundled": bundled.name, "params": params,
                 "timeout_ms": HOOK_TIMEOUT_MS,
             }));
         }

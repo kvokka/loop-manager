@@ -2,6 +2,7 @@
 //! drive a harness through its [`Driver`], and the driver events fed back to the writer as messages.
 
 mod await_step;
+mod bases;
 mod bead_events;
 mod beads;
 mod decide;

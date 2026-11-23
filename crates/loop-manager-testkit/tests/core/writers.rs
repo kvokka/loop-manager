@@ -3,7 +3,12 @@
 
 use crate::common;
 
-use common::{POLICY, World, beads::FIX, drain::SWEEP, last, world, world_with};
+use common::{
+    POLICY, World,
+    beads::{FIX, slow_turn},
+    drain::SWEEP,
+    last, world, world_with,
+};
 use loop_manager_core::run::{Create, Decision, ExecHooks, GateSpec, Msg};
 use loop_manager_testkit::Step;
 use serde_json::json;
@@ -179,6 +184,40 @@ async fn a_run_in_a_worktree_of_its_own_takes_no_place() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_run_inside_the_worktree_of_an_ancestor_takes_no_place() {
+    let formulas = [
+        (
+            "shop/formulas/outer.toml",
+            "name = \"outer\"\nworktree = true\n[[step]]\nname = \"sub\"\nkind = \"formula\"\nformula = \"leaf\"\n",
+        ),
+        (
+            "shop/formulas/leaf.toml",
+            "name = \"leaf\"\ninternal = true\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+        ),
+    ];
+    let w = world(&[RIGS, &formulas[..]].concat());
+    let outer = w.start_on_web("outer").await;
+    // The worktree the bundled `worktree` would give it: the test decides its hook.
+    let tree = w.dir.path().join("shop/web/.git/loop-manager/worktrees").join(&outer);
+    let proceed = Decision::Proceed {
+        workdir: Some(tree.clone()),
+        env: Default::default(),
+        prompt_append: None,
+    };
+    w.decide(&outer, "run.preparing", 0, proceed).await;
+    let queued = w.all("run.queued");
+    let leaf = queued.iter().find(|d| d["run"]["parent_run"] == json!(outer));
+    let leaf = leaf.unwrap()["run"]["id"].as_str().unwrap().to_owned();
+    // The child inherits the worktree and holds no place while alive: it works there, not in the rig's directory.
+    assert_eq!(w.states(&leaf).await, ["preparing"]);
+    let events = w.events(&leaf, Duration::from_millis(200)).await;
+    assert_eq!(last(&events, "run.preparing")["run"]["workdir"], json!(tree));
+    // The hook of `worktree` is never answered here: a run that left the queue stays in `preparing`.
+    let next = w.create().await;
+    assert_eq!(w.states(&next).await, ["preparing"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_run_that_only_works_in_the_root_takes_no_place() {
     let w = world(&[RIGS, LEAD].concat());
     let plan = w.start_on_web("plan").await;
@@ -203,7 +242,12 @@ async fn a_drain_under_max_writers_one_gives_its_beads_one_at_a_time() {
     for _ in 0..3 {
         w.tracker.add_in("w", &[], Some(&root));
     }
-    let run = w.sweep(&root).await;
+    // The sweep runs on `web`: its beads are of that rig, and it lends the rig's place to their runs.
+    for _ in 0..8 {
+        w.driver.script(slow_turn());
+    }
+    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
+    let run = reply["run"].as_str().unwrap().to_owned();
     let outsider = w.create().await;
     let kids = w.kids(&run);
     let states: Vec<&str> = kids.iter().map(|k| k.2.as_str()).collect();

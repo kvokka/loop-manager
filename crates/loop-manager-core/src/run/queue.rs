@@ -2,11 +2,11 @@
 //! a concurrency slot and a place in its rig (`max_writers`), then leaves for `preparing`, oldest first.
 
 use super::{
-    Create, RunHandler, drain::NO_PROCESS, events::attempt_live, not_found, rejected, row::Row, token_sha256,
+    Create, RunHandler, bases, drain::NO_PROCESS, events::attempt_live, not_found, rejected, row::Row, token_sha256,
     triggers::MAX_DEPTH,
 };
 use crate::{
-    config::{Formula, InputType, Name, Project, Rig, Step, StepKind},
+    config::{Formula, InputType, Name, Project, Step, StepKind},
     writer::{Error, Tx},
 };
 use rusqlite::{OptionalExtension, params};
@@ -89,7 +89,7 @@ impl RunHandler {
         let project = self.config.projects.iter().find(|p| p.name == c.project);
         let project = project.ok_or_else(|| not_found(format!("no project `{}`", c.project)))?;
         let (name, formula) = c.resolve_formula(project, direct)?;
-        let (rig_name, rig) = c.select_rig(project, formula)?;
+        let rig_name = c.select_rig(project, formula)?;
         c.validate_inputs(&name, formula)?;
         let first = &formula.steps[0];
         // A run holds at most one bead (docs/design/contracts.md 5); its task input becomes the id of the bead it works
@@ -132,10 +132,7 @@ impl RunHandler {
             }
             None => self.bead_agent(tx, &c.project, &rig_name, &name.to_string(), formula, None)?,
         };
-        let workdir = match &c.continue_from {
-            Some(from) => continued_workdir(tx, from)?,
-            None => rig.path.to_string_lossy().into_owned(),
-        };
+        let workdir = workdir(tx, project, &c, &rig_name, direct)?;
         let n: i64 = tx
             .sql()
             .query_row("SELECT COALESCE(MAX(n), 0) + 1 FROM runs", [], |r| r.get(0))?;
@@ -333,7 +330,7 @@ impl Create {
         Ok((name, formula))
     }
 
-    fn select_rig<'a>(&mut self, project: &'a Project, formula: &Formula) -> Result<(String, &'a Rig), Error> {
+    fn select_rig(&mut self, project: &Project, formula: &Formula) -> Result<String, Error> {
         // A start that names no rig runs on the rig of the bead its task names, else on the root.
         let rig_name = self.rig.take().unwrap_or_else(|| {
             let beads = formula.inputs.iter().filter(|(_, i)| i.kind == InputType::Task);
@@ -343,9 +340,10 @@ impl Create {
                 .unwrap_or(&project.root.0)
                 .to_owned()
         });
-        let rig = project.place(&rig_name);
-        let rig = rig.ok_or_else(|| not_found(format!("no rig `{rig_name}` in `{}`", self.project)))?;
-        Ok((rig_name, rig))
+        if project.place(&rig_name).is_none() {
+            return Err(not_found(format!("no rig `{rig_name}` in `{}`", self.project)));
+        }
+        Ok(rig_name)
     }
 
     fn validate_inputs(&mut self, name: &Name, formula: &Formula) -> Result<(), Error> {
@@ -383,6 +381,21 @@ impl Create {
         }
         Ok(())
     }
+}
+
+/// Where run `c` on `rig` starts: a continued session where the harness wrote its transcript; a child of a step in the
+/// directory of its base on its rig, where the bundled `worktree` moves it on to a lazy base after the hooks of the
+/// project saw that directory; any other run in its place's directory.
+fn workdir(tx: &Tx<'_>, project: &Project, c: &Create, rig: &str, direct: bool) -> Result<String, Error> {
+    if let Some(from) = &c.continue_from {
+        return continued_workdir(tx, from);
+    }
+    let parent = match direct {
+        true => None,
+        false => bases::step_parent(tx, c.parent_run.as_deref())?,
+    };
+    let (dir, _) = bases::base(tx, project, rig, parent)?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 /// A continued session resumes in the workdir where the harness wrote its transcript.

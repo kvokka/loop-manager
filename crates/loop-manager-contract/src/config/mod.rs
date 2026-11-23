@@ -111,6 +111,26 @@ pub struct Bundled {
     pub params: serde_json::Value,
 }
 
+/// The facts of a run's place the core gives the bundled `worktree` as its hook parameters `{"run": <Place>}`, never
+/// in an event (docs/design/config.md "Bundled addons"): the core knows the lineage and the config, the addon git.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Place {
+    /// The directory the run's base is in: its place's own, or the workdir of the nearest ancestor of a step on it.
+    pub dir: PathBuf,
+    /// The ancestors of a step whose lazy worktree in the repository of `dir` is the run's base, nearest first: the
+    /// first is the base, made from the worktree of the first of the others that exists, else from the HEAD of
+    /// `dir`. Empty: the base is `dir` itself.
+    pub lazy: Vec<String>,
+    /// The run gets a worktree of its own: its formula has `worktree = true`.
+    pub own: bool,
+    /// The run continues the session of another (`continue_from`) and works where that one did.
+    pub continued: bool,
+    /// The directories of the other places where the run had children, when its formula has `worktree = true`:
+    /// its lazy worktrees are there.
+    pub rigs: Vec<PathBuf>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Project {
     pub name: String,

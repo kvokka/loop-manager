@@ -40,10 +40,7 @@ fn worktree_is_on_for_the_formulas_that_ask_for_it() {
     assert!(config.projects[0].packs[1].formulas["audit"].worktree);
     assert_eq!(
         names(&config.projects[0].bundled),
-        [
-            ("default-policy", "{}".to_owned()),
-            ("worktree", r#"{"formulas":["kit.audit"]}"#.to_owned())
-        ]
+        [("default-policy", "{}".to_owned()), ("worktree", "{}".to_owned())]
     );
     assert!(
         config.bundled.iter().all(|b| b.name != "worktree"),

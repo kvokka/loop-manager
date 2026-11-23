@@ -451,15 +451,18 @@ last `-` ([tracker-br.md](tracker-br.md#the-rig-of-a-bead)); changing it makes t
 root.
 
 `max_writers` bounds the runs that work in the rig's own directory at once; a run past it waits in `queued` with
-`waiting_for = "writers"` ([contracts 6.1](contracts.md#61-states)). A run counts by its formula, whatever step it is
-at: one of a formula without `worktree = true` with an `exec` step, or an `ai` step of an agent not of scope `root`, on
-this rig (one whose formula or agent no longer resolves counts too). Such a run holds its place from `preparing` to its
+`waiting_for = "writers"` ([contracts 6.1](contracts.md#61-states)). A run counts by its formula and its base, whatever
+step it is at: one with an `exec` step, or an `ai` step of an agent not of scope `root`, on this rig (one whose formula
+or agent no longer resolves counts too), unless it works apart from the rig's directory: its formula has
+`worktree = true` (in a place without git too, where keeping such runs apart is the user's), or, as a child of a
+`drain` or `formula` step, it works in a base of an ancestor other than the rig's directory (see "Formula"). Such a run
+holds its place from `preparing` to its
 terminal state, `parked` and `interrupted` included: unlike a slot of `max_runs`, a parked run keeps its place, since it
 left the directory half done. A run in a `drain` or `formula` step lends its place to the runs that step started, and
 to theirs down such a chain: against them it does not count, against any other run it does. A run a session starts
 (`loop-manager run start` from an agent) is not such a child: its parent works in the directory, so under a limit of 1
 it waits for the parent to end; give its formula `worktree = true` or raise the limit. A run that continues the
-session of a run in a worktree (`continue_from`) counts by its own formula all the same. A reload that changes the
+session of a run in a worktree (`continue_from`) counts by its own formula alone. A reload that changes the
 limit ends no run; the queue takes the new limit at once. Two drains of formulas that count, both alive when a reload
 lowers the limit to 1, hold back each other's beads until one is cancelled or the limit is raised again.
 
@@ -472,8 +475,8 @@ a rig, under its own name: the run's `rig` in events, its gate `rig:<project>/<r
 and limits all take it the same way; `{{ rig.name }}` and `{{ rig.path }}` of a run in the root are the root's. The
 root has these two settings and no variables: text a project gives an agent is a file of the agent (see "Agent"). Without `[root]` it is `root`, the directory of `loop-manager.toml`; a project of one repository needs no
 rigs. When `path` points elsewhere, the config files (`.loop-manager/agents/`, packs) and the tracker stay next to
-`loop-manager.toml`. The root need not be a git repository: a run in a plain directory works, and only `worktree = true`
-fails that run (`deny`, naming the directory). A rig at the root's path or under the root's name is a config
+`loop-manager.toml`. The root need not be a git repository: a run in a plain directory works, one of a formula with
+`worktree = true` too, in the directory itself, with no worktree and no isolation (so does a rig without git). A rig at the root's path or under the root's name is a config
 error. `[root]` takes no `settings`, `agents`, `triggers` or `max_writers`: the project's own are the root's, and a project
 `[[trigger]]` that names no `rig` fires in the root.
 
@@ -885,6 +888,15 @@ a git worktree that loop-manager makes and removes (the bundled `worktree`, see 
 directory: without a worktree, runs of one rig share its directory, and keeping them apart is the user's choice
 (`worktree`, the rig's `max_writers`, `pool`, `max_runs`).
 
+A child that a `drain` or `formula` step starts works from the base of its rig. On the rig of its parent that is the
+parent's workdir, the parent's worktree when it has one. On another rig it is the lazy base of the parent when the
+parent's formula has `worktree = true`: a worktree on the branch `loop-manager/<parent>`, which the first such child
+there makes from the HEAD of the first that exists of: the lazy base there of the next ancestor with the key up the
+chain of such steps, the workdir of the nearest ancestor on that rig, the rig's directory; an ancestor without the key
+ends that chain. A parent without the key has the rig's directory as its base there: the checkout on its branch. A child whose own formula has
+`worktree = true` gets its worktree from the HEAD of that base. Nothing is merged back, and a child never removes the
+base it works in. A run a session starts is no such child: it starts in its place's directory.
+
 A prompt template is checked at load against each formula whose steps name its agent (contracts 2.3):
 `inputs.<name>` must be a declared input; `bead.<field>` needs a `task` input and a field of `Bead` (contracts 5.2),
 or `comments` or `parents`, which only a prompt template may name; `run.<field>` a field of `RunView` (1.3); `project.name`,
@@ -1076,11 +1088,18 @@ or for a project.
   `crash_pause_s` (300), `resume_failures` (3), `unknown_after_s` (30), `unknown_retries` (3). The waits and caps that a
   zero would turn into a hot loop (`quota_wait_s`, `model_pause_s`, both bases and both caps, `crash_pause_s`) and
   `crash_loop` must be at least 1; `quota_margin_s`, `rapid_s` and `unknown_after_s` must not be negative.
-- `worktree` has no table: it is on for the runs of the formulas with `worktree = true` (a formula setting; there is no central
-  list and no agent-level switch), and a `[builtin.worktree]` table is a config error saying so. Each such run gets a git worktree of its
-  rig on the branch `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, as its workdir. When the
-  run ends the worktree is removed unless it has uncommitted changes or a HEAD no ref reaches (then `addon.hook_failed`
-  says why); the branch is deleted only when it is merged. A run with `continue_from` starts in the workdir of the run
+- `worktree` has no table: it is on in a project with a formula with `worktree = true` (a formula setting; there is no
+  central list and no agent-level switch), and a `[builtin.worktree]` table is a config error saying so. The core
+  gives its hook the place of the run as its parameters, not in the event: the directory of its base, the ancestors
+  whose lazy worktree is that base, whether its formula has the key, whether it continues a session, and the other
+  places it had children in. On `run.preparing` the addon moves a child of a step to its base (see "Formula"), making
+  a lazy base that is not there yet, and gives each run of a formula with the key a git worktree on the branch
+  `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, from the HEAD of that base, as its workdir.
+  The hooks of declared addons come first and see the directory the run was created in. A base in a directory
+  without git is that directory: no worktree, no isolation. When the run ends its own worktree, and its lazy bases in
+  the other places, are removed unless one has uncommitted changes or a HEAD no ref reaches (then `addon.hook_failed`
+  says why); a branch is deleted only when it is merged into the HEAD of the base it came from. A worktree a run
+  inherited is never removed by it. A run with `continue_from` starts in the workdir of the run
   it continues (a session resumes where it ran); when that is a worktree of this addon, it is brought back on its branch
   if it was removed, whatever the run's formula says. A reload that leaves a project no formula with `worktree = true`
   turns the addon off there: the worktrees of its runs still going are left in place, as are their branches. Runs of one
