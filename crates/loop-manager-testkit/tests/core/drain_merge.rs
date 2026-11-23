@@ -17,7 +17,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -372,10 +372,12 @@ async fn a_refusal_of_the_projects_hook_fails_the_child() {
     );
 }
 
-/// The bundled hooks, except the first `run.finishing`: it merges and the daemon dies before its decision.
+/// The bundled hooks, except the first `run.finishing`: it merges and the daemon dies before its decision. `timeout_ms`:
+/// the time that hook had.
 struct MergedThenLost {
     hooks: Arc<ExecHooks>,
     lost: AtomicBool,
+    timeout_ms: AtomicU64,
 }
 
 impl HookRunner for MergedThenLost {
@@ -386,6 +388,8 @@ impl HookRunner for MergedThenLost {
         }
         for hook in payload["hooks"].as_array().into_iter().flatten() {
             let name = hook["bundled"].as_str().unwrap();
+            self.timeout_ms
+                .store(hook["timeout_ms"].as_u64().unwrap(), Ordering::SeqCst);
             loop_manager_addons::run(name, event, &hook["params"]).unwrap();
         }
         Box::pin(std::future::pending())
@@ -397,8 +401,10 @@ async fn a_merge_repeated_after_a_restart_merges_once() {
     let hooks = MergedThenLost {
         hooks: bundled(),
         lost: AtomicBool::new(false),
+        timeout_ms: AtomicU64::new(0),
     };
-    let mut w = world(&[], Arc::new(hooks));
+    let hooks = Arc::new(hooks);
+    let mut w = world(&[], hooks.clone());
     let web = w.dir.path().join("shop/web");
     let root = w.tracker.add(&[], None);
     let w1 = bead(&w, "w", &root, "Show the cart");
@@ -409,6 +415,8 @@ async fn a_merge_repeated_after_a_restart_merges_once() {
     w.finish_attempt(&kid, 1, Verdict::Pass, "done").await;
     turns.end(1);
     until("no merge", || merges(&web, "main").len() == 1).await;
+    // The merge waits for its siblings' and runs the project's hooks: it has the ceiling of a hook.
+    assert_eq!(hooks.timeout_ms.load(Ordering::SeqCst), 300_000);
     w.restart().await;
     w.until(Some(&kid), "run.passed", 0).await;
     assert_eq!(merges(&web, "main"), [format!("chore(merge): Show the cart [{w1}]")]);

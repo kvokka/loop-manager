@@ -121,7 +121,7 @@ fn base(common: &Path, place: &Place, until: Instant) -> Result<PathBuf, String>
 /// so siblings merge one at a time. Uncommitted work (untracked files too: the worktree could not go) and a conflict
 /// go back to the agent as a remark; a refusal of the project's own git hook is a veto with its output. Run again
 /// after a restart it decides the same: a merge left halfway is aborted and made again, a branch already merged is
-/// accepted.
+/// accepted (git has nothing to merge and makes no commit).
 fn merge(common: &Path, place: &Place, run: &Value, title: &str, tree: &Path, until: Instant) -> Result<Value, String> {
     let id = run["id"].as_str().ok_or("the event has no run")?;
     let bead = run["bead"].as_str().ok_or("the run has no bead")?;
@@ -145,9 +145,6 @@ fn merge(common: &Path, place: &Place, run: &Value, title: &str, tree: &Path, un
         git(&base, &["merge", "--abort"], until)?;
     }
     let branch = format!("loop-manager/{id}");
-    if output(&base, &["merge-base", "--is-ancestor", &branch, "HEAD"], until)?.0 {
-        return Ok(json!({ "decision": "accept" }));
-    }
     let subject = format!("chore(merge): {title} [{bead}]");
     let merge = ["merge", "--no-ff", "--no-edit", "-m", &subject, &branch];
     let (merged, out, err) = output(&base, &merge, until)?;
