@@ -7,7 +7,9 @@ use common::{
     beads::{FIX, next_ready, slow_turn},
     hollow_turn, last, world,
 };
+use loop_manager_core::driver::Normalized;
 use loop_manager_core::run::{Msg, Verdict};
+use loop_manager_testkit::Step;
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -174,6 +176,44 @@ async fn an_unavailable_tracker_is_reported_and_the_claim_retried_until_it_answe
     w.tracker.set_down(false);
     tokio::time::sleep(Duration::from_secs(10)).await;
     assert!(w.states(&run).await.contains(&"running".to_owned()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_record_of_an_attempt_on_an_unavailable_tracker_is_reported_and_retried_until_it_lands() {
+    let pair = "name = \"pair\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        [[step]]\nkind = \"ai\"\nagent = \"fixer\"\n[[step]]\nkind = \"ai\"\nagent = \"fixer\"\n";
+    let w = world(&[FIX, &[("shop/formulas/pair.toml", pair)]].concat());
+    let bead = w.tracker.add(&[], None);
+    w.driver.script(slow_turn());
+    // Step two works on while the tracker is down: its run ends with no release.
+    let mut long = hollow_turn();
+    long.insert(1, Step::Wait(Duration::from_secs(3600)));
+    w.driver.script(long);
+    let run = w.start_bead("pair", Some("web"), json!(bead)).await.unwrap()["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    // The end of step one is the only tracker call while the tracker is down.
+    w.tracker.set_down(true);
+    w.finish_attempt(&run, 1, Verdict::Pass, "fixed").await;
+    tokio::time::sleep(Duration::from_secs(20)).await;
+    let all = w.all("tracker.sync_failed");
+    assert!(
+        all.len() >= 2 && all.iter().all(|f| f["op"] == "attempt_ended"),
+        "{all:?}"
+    );
+    assert_eq!(all[0]["bead"], json!(bead));
+    assert!(all[0]["next_retry_at"].is_string(), "{all:?}");
+    assert!(w.tracker.attempts().is_empty());
+    w.tracker.set_down(false);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    let records = w.tracker.attempts();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(
+        (&records[0].2["attempt"], &records[0].2["outcome"]),
+        (&json!(1), &json!("pass"))
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -403,4 +443,86 @@ async fn each_ended_attempt_of_a_run_with_a_bead_is_recorded_on_it_once_and_a_ru
         "{pass}"
     );
     assert!(of(&plain).is_empty(), "a run without a bead records nothing");
+}
+
+/// The record of an attempt holds its model, session, tokens and failure, and its session has the tracker variables of
+/// its step: the agent, the harness, and the model only when the config sets one (docs/design/contracts.md 5.1).
+#[tokio::test(start_paused = true)]
+async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_session_the_steps_agent() {
+    let pair = "name = \"pair\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        [[step]]\nkind = \"ai\"\nagent = \"fixer\"\n[[step]]\nkind = \"ai\"\nagent = \"checker\"\n";
+    let files = [
+        (
+            "shop/agents/fixer/agent.toml",
+            "harness = \"scripted\"\nmodel = \"m1\"\n",
+        ),
+        ("shop/agents/fixer/prompt.template.md", "Fix {{ bead.title }}."),
+        ("shop/agents/checker/agent.toml", "harness = \"scripted\"\n"),
+        ("shop/agents/checker/prompt.template.md", "Check {{ bead.title }}."),
+        ("shop/formulas/pair.toml", pair),
+    ];
+    let w = world(&files);
+    let bead = w.tracker.add(&[], None);
+    let mut first = slow_turn();
+    first.insert(
+        1,
+        Step::Emit(Normalized::Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            rate_limit: None,
+        }),
+    );
+    w.driver.script(first);
+    w.driver.script(vec![Step::Exit {
+        code: None,
+        signal: Some(9),
+    }]);
+    let run = w.start_bead("pair", Some("web"), json!(bead)).await.unwrap()["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    w.finish_attempt(&run, 1, Verdict::Pass, "fixed").await;
+    tokio::time::sleep(Duration::from_secs(20)).await;
+    let env = |attempt| {
+        let env = w.driver.sent(&run, attempt).0.unwrap();
+        let vars = ["TRACKER_AGENT", "TRACKER_HARNESS", "TRACKER_MODEL"].map(|k| env.get(k).cloned());
+        vars.map(|v| v.map(Value::from).unwrap_or_default())
+    };
+    assert_eq!(env(1), [json!("shop.fixer"), json!("scripted"), json!("m1")]);
+    assert_eq!(
+        env(2),
+        [json!("shop.checker"), json!("scripted"), Value::Null],
+        "no model, no variable"
+    );
+    let records = w.tracker.attempts();
+    let record = |n: u32| {
+        &records
+            .iter()
+            .find(|(_, _, e)| e["run"] == run.as_str() && e["attempt"] == n)
+            .unwrap()
+            .2
+    };
+    let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let view = reader.run(&run).unwrap().unwrap();
+    let (fixed, crashed) = (record(1), record(2));
+    let fields = |e: &Value| {
+        json!([
+            e["agent"],
+            e["model"],
+            e["input_tokens"],
+            e["output_tokens"],
+            e["failure"]
+        ])
+    };
+    assert_eq!(fields(fixed), json!(["shop.fixer", "m1", 100, 20, null]), "{fixed}");
+    assert_eq!(fixed["session"], view["attempts"][0]["session"]);
+    assert!(fixed["session"].is_object(), "{fixed}");
+    assert_eq!(
+        (&crashed["agent"], &crashed["model"]),
+        (&json!("shop.checker"), &Value::Null),
+        "{crashed}"
+    );
+    assert_eq!(crashed["failure"]["kind"], "harness_crash", "{crashed}");
+    assert_eq!(crashed["session"], view["attempts"][1]["session"]);
 }

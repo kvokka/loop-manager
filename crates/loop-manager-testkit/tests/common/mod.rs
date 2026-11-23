@@ -170,6 +170,9 @@ fn core_on(
         p.tracker.present = true;
         p.tracker.actor = Some("TRACKER_ACTOR".to_owned());
         p.tracker.prefix = Some("TRACKER_PREFIX".to_owned());
+        p.tracker.agent = Some("TRACKER_AGENT".to_owned());
+        p.tracker.harness = Some("TRACKER_HARNESS".to_owned());
+        p.tracker.model = Some("TRACKER_MODEL".to_owned());
     }
     let mut drivers: Vec<Arc<dyn loop_manager_core::driver::Driver>> = vec![Arc::new(driver.clone())];
     // A world that declares the harness `other` has it on the same scripted driver.
