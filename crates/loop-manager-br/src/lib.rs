@@ -2,7 +2,7 @@
 //! (0.7.6) on the project's database named explicitly by `BEADS_DIR`, with the caller's actor; the writes come from
 //! br's `events` table and what holds the beads under a root from its `issues` and `dependencies`, read-only, and a
 //! watcher on `.beads/` says when to read the writes (docs/design/experiments.md, experiment 3). A created bead is an
-//! epic whose `external_ref` is its key.
+//! epic; a bead created or filed with a key has it as its `external_ref`.
 
 #![deny(clippy::disallowed_methods)]
 
@@ -12,7 +12,7 @@ use loop_manager_contract::{
     BoxFuture,
     config::{Project, TrackerLink},
     driver::Check,
-    tracker::{Adapter, Change, Commented, Issue, Lineage, OnChange, Tracker, TrackerError, Wait, Watch},
+    tracker::{Adapter, Change, Commented, Issue, Lineage, NewIssue, OnChange, Tracker, TrackerError, Wait, Watch},
 };
 use parse::{bead, commented, field};
 use serde_json::{Value, json};
@@ -133,15 +133,24 @@ impl Br {
 
     /// Runs `br <args> --json` as `actor`; the parsed stdout, or the failure with br's exit code.
     async fn br(&self, actor: &str, args: &[&str]) -> Result<Value, Fail> {
-        self.br_with(actor, args, None).await
+        self.br_with(actor, args, None, None).await
     }
 
-    /// [`Self::br`] with `input` on br's stdin.
-    async fn br_with(&self, actor: &str, args: &[&str], input: Option<&[u8]>) -> Result<Value, Fail> {
+    /// [`Self::br`] with `input` on br's stdin and the id prefix `prefix` of a rig for a created bead.
+    async fn br_with(
+        &self,
+        actor: &str,
+        args: &[&str],
+        input: Option<&[u8]>,
+        prefix: Option<&str>,
+    ) -> Result<Value, Fail> {
         let mut command = tokio::process::Command::new(&self.binary);
+        // A rig's prefix in the daemon's environment would give the root's beads its ids.
+        match prefix {
+            Some(prefix) => command.env("BD_ISSUE_PREFIX", prefix),
+            None => command.env_remove("BD_ISSUE_PREFIX"),
+        };
         command
-            // A rig's prefix in the daemon's environment would give the root's beads its ids.
-            .env_remove("BD_ISSUE_PREFIX")
             .args(args)
             .args([
                 "--json",
@@ -155,8 +164,10 @@ impl Br {
             .kill_on_drop(true);
         let out = loop_manager_contract::orphans::output(&mut command, input)
             .await
-            .map_err(|e| Fail(None, unavailable(format!("br: {e}"))))?;
-        let body: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
+            .map_err(|e| Fail(None, unavailable(format!("br: {e}")), String::new()))?;
+        // A skipped close prints its result and then the error: the last document is the answer.
+        let documents = serde_json::Deserializer::from_slice(&out.stdout).into_iter::<Value>();
+        let body = documents.map_while(Result::ok).last().unwrap_or(Value::Null);
         let code = out.status.code();
         if code == Some(0) {
             return Ok(body);
@@ -167,17 +178,15 @@ impl Br {
             .map_or_else(|| String::from_utf8_lossy(&out.stderr).trim().to_owned(), str::to_owned);
         // By the exit code, never the text (docs/design/tracker-br.md, exit codes): 2 with `retryable` is a lock
         // timeout, 130 a shutdown, a killed br an unknown outcome the next read settles.
-        Err(Fail(
-            code,
-            match code {
-                Some(3) => TrackerError::NotFound,
-                Some(2) if error["retryable"] == true => unavailable(text),
-                Some(130) | None => unavailable(text),
-                Some(c) => TrackerError::Invalid {
-                    text: format!("br exit {c}: {text}"),
-                },
+        let e = match code {
+            Some(3) => TrackerError::NotFound,
+            Some(2) if error["retryable"] == true => unavailable(text.clone()),
+            Some(130) | None => unavailable(text.clone()),
+            Some(c) => TrackerError::Invalid {
+                text: format!("br exit {c}: {text}"),
             },
-        ))
+        };
+        Err(Fail(code, e, text))
     }
 
     /// The beads `ids` as `br show` has them, in that order.
@@ -188,6 +197,27 @@ impl Br {
         let args: Vec<&str> = ["show"].into_iter().chain(ids.iter().copied()).collect();
         let shown = self.br(READER, &args).await?;
         shown.as_array().into_iter().flatten().map(bead).collect()
+    }
+
+    /// Every bead, closed ones too, as `br list` has them: `br show` finds no external ref and takes a partial id, so a
+    /// key or an exact id is searched for in the whole list.
+    async fn list(&self) -> Result<Vec<Value>, TrackerError> {
+        let all = self.br(READER, &["list", "-a", "--limit", "0"]).await?;
+        Ok(all["issues"].as_array().or(all.as_array()).cloned().unwrap_or_default())
+    }
+
+    /// The bead filed with the key `key`.
+    async fn keyed(&self, key: &str) -> Result<Option<Issue>, TrackerError> {
+        match self
+            .list()
+            .await?
+            .iter()
+            .find(|b| b["external_ref"] == key)
+            .and_then(|b| b["id"].as_str())
+        {
+            Some(id) => self.one(id).await.map(Some),
+            None => Ok(None),
+        }
     }
 
     async fn one(&self, id: &str) -> Result<Issue, TrackerError> {
@@ -252,11 +282,11 @@ impl Br {
     }
 }
 
-/// A failed br call: its exit code (`None`: br did not run or was killed) and what it means to the core.
-struct Fail(Option<i32>, TrackerError);
+/// A failed br call: its exit code (`None`: br did not run or was killed), what it means to the core and br's message.
+struct Fail(Option<i32>, TrackerError, String);
 
 impl From<Fail> for TrackerError {
-    fn from(Fail(_, e): Fail) -> Self {
+    fn from(Fail(_, e, _): Fail) -> Self {
         e
     }
 }
@@ -290,6 +320,19 @@ held(bead, blocker, kind, status) AS (
 SELECT h.bead, h.blocker, h.kind, h.status, h.blocker IN (SELECT id FROM under) FROM held h
 ORDER BY h.bead, h.blocker, h.kind";
 
+/// The beads under the root `?1` at any depth (`Tracker::subtree`), the root left out, oldest first; the subtree is
+/// `under` of [`WAITING`].
+const SUBTREE: &str = "
+WITH RECURSIVE
+under(id) AS (
+    SELECT ?1
+    UNION
+    SELECT d.issue_id FROM dependencies d JOIN under u ON d.depends_on_id = u.id WHERE d.type = 'parent-child'
+)
+SELECT i.id FROM issues i JOIN under u ON u.id = i.id
+WHERE i.id <> ?1 AND i.status <> 'tombstone'
+ORDER BY i.created_at, i.id";
+
 struct Row {
     seq: i64,
     bead: String,
@@ -303,11 +346,11 @@ impl Tracker for Br {
             match self.br(owner, &["update", id, "--claim"]).await {
                 Ok(_) => self.one(id).await,
                 // Exit 4 is a refused claim; who holds the bead is read from the bead, not the message.
-                Err(Fail(Some(4), e)) => match self.one(id).await?.assignee {
+                Err(Fail(Some(4), e, _)) => match self.one(id).await?.assignee {
                     Some(holder) if holder != owner => Err(TrackerError::Claimed { holder }),
                     _ => Err(e),
                 },
-                Err(Fail(_, e)) => Err(e),
+                Err(Fail(_, e, _)) => Err(e),
             }
         })
     }
@@ -323,7 +366,7 @@ impl Tracker for Br {
                     args.extend(["-s", "open"]);
                 }
                 match self.br(owner, &args).await {
-                    Err(Fail(Some(6), _)) => {}
+                    Err(Fail(Some(6), ..)) => {}
                     other => return Ok(other.map(drop)?),
                 }
             }
@@ -340,10 +383,25 @@ impl Tracker for Br {
             }
             match self.br(owner, &["close", id, "-r", reason]).await {
                 // Exit 3 also means already closed. A replay or a close since the read must not reopen it.
-                Err(Fail(Some(3), _)) if self.held(owner, id).await?.status != "closed" => {
+                Err(Fail(Some(3), ..)) if self.held(owner, id).await?.status != "closed" => {
                     self.release(owner, id).await
                 }
-                Err(Fail(Some(3), _)) => Ok(()),
+                Err(Fail(Some(3), ..)) => Ok(()),
+                other => Ok(other.map(drop)?),
+            }
+        })
+    }
+
+    fn close_by<'a>(&'a self, actor: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            let reason = format!("--reason={reason}");
+            match self.br(actor, &["close", id, &reason]).await {
+                // Exit 3 is also a close br skipped: the bead already closed, or a parent with open children or a bead
+                // with open blockers, which stays open.
+                Err(Fail(Some(3), _, text)) => match self.one(id).await? {
+                    bead if bead.status == "closed" => Ok(()),
+                    _ => Err(TrackerError::Invalid { text }),
+                },
                 other => Ok(other.map(drop)?),
             }
         })
@@ -377,6 +435,29 @@ impl Tracker for Br {
                 .flatten()
                 .filter_map(|b| b["id"].as_str().map(str::to_owned))
                 .collect())
+        })
+    }
+
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+        Box::pin(async move {
+            let ids = self
+                .read(|db| {
+                    let found = "SELECT count(*) FROM issues WHERE id = ?1 AND status <> 'tombstone'";
+                    if db.query_row(found, [root], |r| r.get::<_, i64>(0))? == 0 {
+                        return Ok(None);
+                    }
+                    let mut stmt = db.prepare(SUBTREE)?;
+                    let rows = stmt.query_map([root], |r| r.get::<_, String>(0))?;
+                    rows.collect::<Result<Vec<_>, _>>().map(Some)
+                })
+                .await?
+                .ok_or(TrackerError::NotFound)?;
+            let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            match self.show(&ids).await {
+                // A bead deleted between the two reads: the next read has the subtree right.
+                Err(TrackerError::NotFound) => Err(unavailable("the subtree changed while read".to_owned())),
+                other => other,
+            }
         })
     }
 
@@ -455,12 +536,10 @@ impl Tracker for Br {
         description: &'a str,
     ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         Box::pin(async move {
-            // `br show` finds no external ref and takes a partial id: the whole list, closed beads too, is searched.
-            let all = self.br(READER, &["list", "-a", "--limit", "0"]).await?;
-            let mut listed = all["issues"].as_array().or(all.as_array()).into_iter().flatten();
-            let made = listed.clone().find(|b| b["external_ref"] == key);
+            let listed = self.list().await?;
+            let made = listed.iter().find(|b| b["external_ref"] == key);
             if let Some(id) = made
-                .or_else(|| listed.find(|b| b["id"] == description))
+                .or_else(|| listed.iter().find(|b| b["id"] == description))
                 .and_then(|b| b["id"].as_str())
             {
                 return self.one(id).await;
@@ -480,6 +559,41 @@ impl Tracker for Br {
         })
     }
 
+    fn file<'a>(
+        &'a self,
+        actor: &'a str,
+        key: Option<&'a str>,
+        new: &'a NewIssue,
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        Box::pin(async move {
+            // br splits `--labels` at commas.
+            if let Some(label) = new.labels.iter().find(|l| l.contains(',')) {
+                return Err(TrackerError::Invalid {
+                    text: format!("label `{label}` has a comma"),
+                });
+            }
+            if let Some(key) = key
+                && let Some(made) = self.keyed(key).await?
+            {
+                return Ok(made);
+            }
+            // `--name=value`: a value with a leading `-` would read as an option. Not `--parent`: its id `<parent>.<n>`
+            // drops a rig's prefix (docs/design/tracker-br.md).
+            let mut args = vec![
+                "create".to_owned(),
+                format!("--title={}", new.title),
+                format!("--description={}", new.description),
+            ];
+            args.extend(new.labels.iter().map(|l| format!("--labels={l}")));
+            args.extend(new.parent.iter().map(|p| format!("--deps=parent-child:{p}")));
+            args.extend(key.map(|k| format!("--external-ref={k}")));
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let made = bead(&self.br_with(actor, &args, None, new.prefix.as_deref()).await?)?;
+            // `create` leaves out the parent; `show` has it.
+            self.one(&made.id).await
+        })
+    }
+
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>> {
         Box::pin(async move {
             let mut line: Vec<Commented> = Vec::new();
@@ -487,7 +601,7 @@ impl Tracker for Br {
             // One `show` per bead, up the parents; a parent met twice would never end, one deleted meanwhile ends it.
             while let Some(id) = next.filter(|id| line.iter().all(|c| c.issue.id != *id)) {
                 let shown = match self.br(READER, &["show", &id]).await {
-                    Err(Fail(_, TrackerError::NotFound)) if !line.is_empty() => break,
+                    Err(Fail(_, TrackerError::NotFound, _)) if !line.is_empty() => break,
                     shown => shown?,
                 };
                 let found = commented(shown.get(0).ok_or(TrackerError::NotFound)?)?;
@@ -514,9 +628,9 @@ impl Tracker for Br {
             let record = serde_json::json!({ "kind": "attempt_ended", "issue_id": id, "extra": entry });
             let args = ["audit", "record", "--stdin"];
             let input = record.to_string();
-            match self.br_with(actor, &args, Some(input.as_bytes())).await {
+            match self.br_with(actor, &args, Some(input.as_bytes()), None).await {
                 Ok(_) => Ok(()),
-                Err(Fail(_, e)) => Err(e),
+                Err(Fail(_, e, _)) => Err(e),
             }
         })
     }
@@ -525,9 +639,9 @@ impl Tracker for Br {
         Box::pin(async move {
             // On stdin: a text in an argument could read as an option.
             let args = ["comments", "add", id, "--file", "/dev/stdin"];
-            match self.br_with(actor, &args, Some(text.as_bytes())).await {
+            match self.br_with(actor, &args, Some(text.as_bytes()), None).await {
                 Ok(_) => Ok(()),
-                Err(Fail(_, e)) => Err(e),
+                Err(Fail(_, e, _)) => Err(e),
             }
         })
     }

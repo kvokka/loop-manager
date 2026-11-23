@@ -171,9 +171,17 @@ pub(crate) struct Commented {
     answer: String,
 }
 
-/// An issue of a project as its tracker gives it (docs/design/contracts.md 5.2), with its comments, oldest first.
-#[derive(ToSchema)]
+/// An issue of a project with its comments, oldest first.
+#[derive(serde::Serialize, ToSchema)]
 pub(crate) struct IssueReply {
+    #[serde(flatten)]
+    issue: Issue,
+    comments: Vec<IssueComment>,
+}
+
+/// An issue of a project as its tracker gives it (docs/design/contracts.md 5.2).
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct Issue {
     id: String,
     title: String,
     description: String,
@@ -188,10 +196,9 @@ pub(crate) struct IssueReply {
     created_at: String,
     updated_at: String,
     closed_at: Option<String>,
-    comments: Vec<IssueComment>,
 }
 
-#[derive(ToSchema)]
+#[derive(serde::Serialize, ToSchema)]
 pub(crate) struct IssueComment {
     author: String,
     created_at: String,

@@ -635,9 +635,10 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 
 ### 5.1 Operations
 
-The trait has the eleven operations the core calls; an operation is added only when a caller needs it.
+The trait has the eleven operations the core calls and three the API calls (`close_by`, `subtree`, `file`); an
+operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
-the daemon's own reads. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
+the daemon's own reads and for the `issue` commands from outside a session. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
 in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
 of its step, its harness and its model (`BR_AGENT_NAME`, `BR_HARNESS`, `BR_MODEL`, the last only when its effective
 config sets a model), which br records on the issue's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
@@ -648,12 +649,17 @@ trait Tracker: Send + Sync {
     fn claim(&self, owner: &str, id: &str) -> BoxFuture<Result<Issue, TrackerError>>;
     fn release(&self, owner: &str, id: &str) -> BoxFuture<Result<(), TrackerError>>;   // conditional
     fn close(&self, owner: &str, id: &str, reason: &str) -> BoxFuture<Result<(), TrackerError>>; // conditional
+    fn close_by(&self, actor: &str, id: &str, reason: &str)
+        -> BoxFuture<Result<(), TrackerError>>;                                 // whoever holds it
     fn ready(&self) -> BoxFuture<Result<Vec<Issue>, TrackerError>>;          // every ready issue, tracker order
     fn under(&self, root: &str) -> BoxFuture<Result<Vec<String>, TrackerError>>;     // ready ids below root
+    fn subtree(&self, root: &str) -> BoxFuture<Result<Vec<Issue>, TrackerError>>;    // every issue below root
     fn waiting(&self, root: &str) -> BoxFuture<Result<Vec<Wait>, TrackerError>>;     // what holds the issues below root
     fn changes(&self, after: i64) -> BoxFuture<Result<Vec<Change>, TrackerError>>;           // after a seq
     fn create(&self, actor: &str, key: &str, title: &str, description: &str)
         -> BoxFuture<Result<Issue, TrackerError>>;                               // once per key
+    fn file(&self, actor: &str, key: Option<&str>, new: &NewIssue)
+        -> BoxFuture<Result<Issue, TrackerError>>;                               // once per key, if any
     fn lineage(&self, id: &str) -> BoxFuture<Result<Lineage, TrackerError>>;          // comments and parents
     fn attempt_ended(&self, actor: &str, id: &str, entry: &Value)
         -> BoxFuture<Result<(), TrackerError>>;                                 // audit trail, not idempotent
@@ -718,6 +724,20 @@ repeated effect may add the comment twice. An `Unavailable` tracker is tried aga
 both reported as `tracker.sync_failed{op: "comment"}`; an issue the tracker no longer has drops it. br adds it with
 `br comments add <id> --file /dev/stdin` ([tracker-br](tracker-br.md#one-database-per-project)).
 
+`file`, `subtree` and `close_by` serve the commands `loop-manager issue create|list|close`
+([frontends](../api/frontends.md#cli)): the API calls them outside the core and its queue, as it reads `lineage`, so
+an agent or a user files, lists and closes issues without knowing the tracker. Each writes as the attempt's actor
+`loop-manager:<run id>:<attempt n>` when the command comes from a session whose token is that of the current attempt
+of a live run, and as `loop-manager` otherwise; the core reads the write back through `changes` like any other.
+`file` files `NewIssue {title, description, labels, parent, prefix}`: under `parent` when it has one (a `parent` the
+tracker does not have is `NotFound`), with the id prefix `prefix`, the rig's (decision 96), or the tracker's own for an
+issue of the root. With a `key` it files once per key, as `create` does: the API gives it the request's idempotency key,
+so a request cut before its reply is kept files one issue. `subtree` gives every issue below `root` at any depth by
+its `parent-child` links, the root left out, closed ones included, `tombstone` left out, oldest first; a `root` the
+tracker does not have is `NotFound`. `close_by` closes the issue `id` as `actor` whoever holds it, unlike `close`: a
+human's close of the issue of a live run, which the run sees as `issue_closed` (6.2) unless the write is its own. A
+closed issue stays closed and answers `Ok`; a parent with open children is `Invalid` and stays open.
+
 `changes` is pull-only; the adapter also owns a watcher that sends a "changed" message to the core, and the core then
 calls `changes` from its stored cursor (and on start and after recovery without waiting for a signal). One effect on the
 queue `tracker:<project>` reads `changes(cursor)`, then `ready()`, then `under` and `waiting` for the root of each run
@@ -744,6 +764,7 @@ the core sets the actor of an exec step and hands that of a session to the adapt
   `status` is br's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's tracker
   policy adds (such as `rework`); the core decides nothing by it. `epic` is computed by the adapter (br has no such field,
   [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of an issue is the prefix of its id (no label).
+- `NewIssue`: `{title, description, labels, parent, prefix}`: an issue `file` files (5.1).
 - `Comment`: `{author, created_at, text}`. `Lineage`: the fields of `Issue`, `comments: [Comment]` and `parents`, each
   the fields of `Issue` and its `comments`. Comments are no part of `Issue`: an issue event carries none.
 - `Wait`: `{issue, blocker, kind: "blocks"|"conditional-blocks"|"waits-for"|"status", status, under}`: an open issue

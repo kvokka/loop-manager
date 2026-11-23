@@ -193,6 +193,9 @@ pub enum Msg {
         token: String,
         text: String,
     },
+    /// The reply of a request the API carried out itself, outside the core (an issue filed or closed): the reply is
+    /// this value, kept under the request's idempotency key.
+    Keep(Value),
 }
 
 /// The outcome an agent declares (contracts 1.3 `Outcome`).

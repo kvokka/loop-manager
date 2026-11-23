@@ -206,6 +206,33 @@ impl Reader {
         Ok(json!({ "outbox_depth": depth, "outbox_oldest_ms": oldest, "active_runs": active }))
     }
 
+    /// The attempt whose token is `token` when it is the current attempt of the live run `run`: the session a call of
+    /// the API acts for, as the attempt's actor (contracts 6.3).
+    pub fn attempt(&self, run: &str, token: &str) -> Result<Option<u32>, Error> {
+        let n = self
+            .conn()
+            .query_row(
+                "SELECT a.n FROM attempts a JOIN runs r ON r.id = a.run AND r.attempt = a.n \
+                 WHERE a.run = ?1 AND a.token_sha256 = ?2 AND r.state NOT IN ('passed', 'failed', 'cancelled')",
+                params![run, super::token_sha256(token)],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(n)
+    }
+
+    /// The reply kept for the idempotency key `key` and what its request was, as [`Msg::Keep`](super::Msg::Keep)
+    /// or any keyed message left them.
+    pub fn kept(&self, key: &str) -> Result<Option<(Value, String)>, Error> {
+        let kept: Option<(String, String)> = self
+            .conn()
+            .query_row("SELECT reply, request FROM idempotency WHERE key = ?1", [key], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()?;
+        Ok(kept.map(|(reply, request)| (serde_json::from_str(&reply).unwrap_or_default(), request)))
+    }
+
     /// Sessions a run has bound from `from` inclusive and whether it ended. A slow observer may span
     /// more attempts than the recent ones in the run view. Read the state first so a terminal read includes them all.
     pub fn sessions_since(&self, run: &str, from: u32) -> Result<(Vec<AttemptSession>, bool), Error> {

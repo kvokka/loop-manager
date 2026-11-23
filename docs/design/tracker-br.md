@@ -63,6 +63,15 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
   agents and humans leave on an issue are how the steps and rounds of a run, and the runs after it, hand the work over.
   `loop-manager issue show` reads an issue by the same lineage read, the issue and each parent up to the root, and
   replies with the issue and its comments only; an error reading a parent is an error of the command.
+- `loop-manager issue create` files a bead with `br create` as the command's actor, every value as `--name=value`
+  so that a leading `-` is no option: its labels (a label with a comma is refused, br splits `--labels` at commas),
+  its parent as `--deps parent-child:<parent>` (`--parent` would give it the id `<parent>.<n>` and drop a rig's
+  prefix), the rig's prefix in `BD_ISSUE_PREFIX` (removed for an issue of the root and for every other call), and the
+  request's idempotency key as its `external_ref`, so a repeat finds the bead in `br list -a` and files none.
+  `loop-manager issue list` reads the subtree from the `parent-child` rows of `dependencies` read-only, as `waiting`
+  does, and the beads with `br show`. `loop-manager issue close` is `br close` as the command's actor, whoever is the
+  assignee, which stays; br's exit 3 is told by the bead read after it: closed (already, or by the call) is done, still
+  open (a parent with open children, or a bead with open blockers) is the refusal, with br's message.
 - An issue has at most one live owner run; a second request for it is refused with the reason.
 - An issue named by id that belongs to another rig is refused at the start; the claim checks it again
   (`failed{infrastructure, issue_of_another_rig}`, the claim released). A start with no rig takes the rig of

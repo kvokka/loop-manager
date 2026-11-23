@@ -155,16 +155,8 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             key,
         } => {
             let inputs: Map<String, Value> = inputs.iter().map(|i| input(i)).collect();
-            // The session the command runs in, as the finisher finds it.
-            let parent = match (
-                std::env::var("LOOP_MANAGER_RUN"),
-                std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN"),
-            ) {
-                (Ok(run), Ok(token)) => json!({ "run": run, "token": token }),
-                _ => Value::Null,
-            };
             let body = json!({ "project": project, "rig": rig, "formula": formula, "inputs": inputs,
-                "continue_from": continue_from, "parent": parent });
+                "continue_from": continue_from, "parent": session() });
             let reply = client.request("POST", "/v1/runs", Some(&body), key.as_deref()).await?;
             match reply["run"].as_str() {
                 _ if json => print(json, &reply),
@@ -323,13 +315,104 @@ pub enum IssueCommand {
         #[arg(long)]
         project: String,
     },
+    /// List the issues under a root issue at any depth, closed ones too, with their status.
+    List {
+        root: String,
+        #[arg(long)]
+        project: String,
+    },
+    /// File an issue in the project's tracker; prints its id. Inside an agent session (`LOOP_MANAGER_RUN`,
+    /// `LOOP_MANAGER_ATTEMPT_TOKEN`) the session's attempt files it.
+    Create {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        /// A label of the issue; repeat it for more.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// The issue it lies under.
+        #[arg(long)]
+        parent: Option<String>,
+        /// The rig it is filed for: its id takes the rig's prefix. Without it, an issue of the project root.
+        #[arg(long)]
+        rig: Option<String>,
+        /// The idempotency key: a repeat with the same key files nothing more.
+        #[arg(long = "key")]
+        idempotency: Option<String>,
+    },
+    /// Close an issue of a project, whoever holds it; a live run that holds it is cancelled, unless this session is
+    /// that run's.
+    Close {
+        issue: String,
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        reason: String,
+        /// The idempotency key: a repeat with the same key changes nothing.
+        #[arg(long = "key")]
+        idempotency: Option<String>,
+    },
 }
 
 pub(super) async fn issue(client: &Client, json: bool, command: IssueCommand) -> Result<(), ClientError> {
-    let IssueCommand::Show { issue, project } = command;
-    let path = format!("/v1/projects/{}/issues/{}", encode(&project), encode(&issue));
-    print(json, &client.request("GET", &path, None, None).await?);
+    let issues = |project: &str| format!("/v1/projects/{}/issues", encode(project));
+    match command {
+        IssueCommand::Show { issue, project } => {
+            let path = format!("{}/{}", issues(&project), encode(&issue));
+            print(json, &client.request("GET", &path, None, None).await?);
+        }
+        IssueCommand::List { root, project } => {
+            let path = format!("{}?under={}", issues(&project), encode(&root));
+            print(json, &client.request("GET", &path, None, None).await?);
+        }
+        IssueCommand::Create {
+            project,
+            title,
+            description,
+            labels,
+            parent,
+            rig,
+            idempotency,
+        } => {
+            let body = json!({ "title": title, "description": description, "labels": labels, "parent": parent,
+                "rig": rig, "session": session() });
+            let reply = (client.request("POST", &issues(&project), Some(&body), idempotency.as_deref())).await?;
+            match reply["id"].as_str() {
+                Some(id) if !json => println!("{id}"),
+                _ => print(json, &reply),
+            }
+        }
+        IssueCommand::Close {
+            issue,
+            project,
+            reason,
+            idempotency,
+        } => {
+            let path = format!("{}/{}/close", issues(&project), encode(&issue));
+            let body = json!({ "reason": reason, "session": session() });
+            print(
+                json,
+                &client
+                    .request("POST", &path, Some(&body), idempotency.as_deref())
+                    .await?,
+            );
+        }
+    }
     Ok(())
+}
+
+/// The agent session the command runs in, as the finisher finds it; `null` outside one.
+fn session() -> Value {
+    match (
+        std::env::var("LOOP_MANAGER_RUN"),
+        std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN"),
+    ) {
+        (Ok(run), Ok(token)) => json!({ "run": run, "token": token }),
+        _ => Value::Null,
+    }
 }
 
 /// An `--input` with its `=`: a bare name is a mistake, not an empty value.

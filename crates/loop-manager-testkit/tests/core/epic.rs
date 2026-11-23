@@ -6,7 +6,7 @@ use crate::common;
 use loop_manager_core::{
     BoxFuture, Clock, Journal, config, open,
     run::{self, ExecHooks, Msg},
-    tracker::{Change, Issue, Lineage, Tracker, TrackerError, Wait},
+    tracker::{Change, Issue, Lineage, NewIssue, Tracker, TrackerError, Wait},
 };
 use loop_manager_testkit::MemoryTracker;
 use serde_json::Value;
@@ -28,6 +28,9 @@ impl Tracker for Chain {
     fn close<'a>(&'a self, owner: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
         self.0.close(owner, id, reason)
     }
+    fn close_by<'a>(&'a self, actor: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
+        self.0.close_by(actor, id, reason)
+    }
     fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
         Box::pin(async move {
             let unblocked = |b: &Issue| {
@@ -44,6 +47,9 @@ impl Tracker for Chain {
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>> {
         self.0.under(root)
     }
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+        self.0.subtree(root)
+    }
     fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>> {
         self.0.waiting(root)
     }
@@ -58,6 +64,14 @@ impl Tracker for Chain {
         text: &'a str,
     ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         self.0.create(actor, key, title, text)
+    }
+    fn file<'a>(
+        &'a self,
+        actor: &'a str,
+        key: Option<&'a str>,
+        new: &'a NewIssue,
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        self.0.file(actor, key, new)
     }
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>> {
         self.0.lineage(id)

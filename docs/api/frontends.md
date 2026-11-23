@@ -46,8 +46,9 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 (`GET /v1/agents` gives each agent's harness in the project outside any rig and formula, `null` when its layers do not
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
-formulas, packs, addons (list), config check, explain and reload; an issue of a project with its comments
-(`GET /v1/projects/{project}/issues/{issue}`); runs
+formulas, packs, addons (list), config check, explain and reload; the issues of a project: one with its comments
+(`GET /v1/projects/{project}/issues/{issue}`), those under a root (`GET /v1/projects/{project}/issues?under=<root>`),
+filing one (`POST /v1/projects/{project}/issues`) and closing one (`POST /v1/projects/{project}/issues/{issue}/close`); runs
 (start, list, state, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
 account); events; daemon status, drain and planned restart.
@@ -116,6 +117,28 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   skill or an agent reads an issue whatever the project's tracker. A project or an issue there is none of is
   `not_found`, a project without a tracker `rejected`, a tracker that cannot be read `tracker_unavailable` (503) or
   `tracker` (502); each exits 1.
+- `loop-manager issue list <root> --project <project>` (`GET /v1/projects/{project}/issues?under=<root>`) lists the
+  issues under the root issue at any depth, the root left out, closed ones included, oldest first, each with its
+  fields as `issue show` gives them but without comments: `status` tells what is left to do.
+- `loop-manager issue create --project <project> --title <title> [--description <text>] [--label <label>]...
+  [--parent <issue>] [--rig <rig>] [--key <key>]` (`POST /v1/projects/{project}/issues`) files an issue and prints
+  its bare id (the issue as filed with `--json`). With `--rig` the id takes the rig's prefix
+  ([config](../design/config.md#project-loop-managertoml), decision 96); without it the issue is of the project root,
+  with the tracker's own prefix. `--parent` files it under another issue, as a planner files the work under the root
+  issue of its run.
+- `loop-manager issue close <issue> --project <project> --reason <text> [--key <key>]`
+  (`POST /v1/projects/{project}/issues/{issue}/close`) closes the issue whoever holds it and prints `null`; a closed
+  issue stays closed and answers alike. A live run that holds the issue is cancelled with reason `issue_closed`, unless
+  the close comes from that run's own session.
+- `issue create` and `issue close` write as the session's attempt (`loop-manager:<run>:<attempt>`) inside an agent
+  session (`LOOP_MANAGER_RUN` and `LOOP_MANAGER_ATTEMPT_TOKEN` set, sent as `session`), as `loop-manager comment` does,
+  and as `loop-manager` from a shell of its own ([contracts](../design/contracts.md#51-operations)). A token that is
+  not that of the current attempt of a live run is `rejected`. A rig, a parent or an issue there is none of is
+  `not_found`; a project without a tracker `rejected`; a tracker that refuses the call (a parent with open children
+  is not closed) `tracker` (502), one that cannot be reached `tracker_unavailable` (503); each exits 1. The daemon
+  carries these two out itself, not the core, and keeps their reply under the idempotency key in the core's table, so
+  a repeat answers as the first and the key of another request is `idempotency_key_reused`; the tracker gets the key
+  too, so a request cut before its reply was kept files one issue.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - Without a daemon only `loop-manager format`, `loop-manager daemon`, `loop-manager cache clear`, `loop-manager --version`, and

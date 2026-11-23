@@ -1,11 +1,11 @@
-//! A tracker in memory (contracts 5) for core tests: claims, conditional release and close, the ready set in
-//! creation order, creation once per key, blocking dependencies, and an outage switch. As in br, a parent with open
-//! children is not ready and is released, not closed, and an issue held by a dependency of its own or of a parent is not
-//! ready.
+//! A tracker in memory (contracts 5) for core tests: claims, conditional release and close, a close by anyone, the
+//! ready set in creation order, the subtree of a root, creation and filing once per key, blocking dependencies, and an
+//! outage switch. As in br, a parent with open children is not ready and is released, not closed, and an issue held by
+//! a dependency of its own or of a parent is not ready.
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Change, Comment, Commented, Issue, Lineage, Tracker, TrackerError, Wait},
+    tracker::{Change, Comment, Commented, Issue, Lineage, NewIssue, Tracker, TrackerError, Wait},
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -110,12 +110,7 @@ impl MemoryTracker {
 
     /// `actor` closes `id` whoever holds it, as `br close` does; the issue keeps its assignee.
     pub fn close_as(&self, id: &str, actor: &str) {
-        let mut state = self.lock();
-        if let Some(b) = state.issues.iter_mut().find(|b| b.id == id) {
-            "closed".clone_into(&mut b.status);
-            b.closed_at = Some(b.updated_at.clone());
-            state.record(id, "closed", actor, &[]);
-        }
+        self.lock().close(id, actor);
     }
 
     /// A human makes `id` depend on `blocker` with the blocking type `kind` (`blocks`, `conditional-blocks`,
@@ -207,6 +202,15 @@ impl State {
         });
         self.record(&id, "created", actor, &[]);
         id
+    }
+
+    /// `actor` closes `id`, keeping its assignee.
+    fn close(&mut self, id: &str, actor: &str) {
+        if let Some(b) = self.issues.iter_mut().find(|b| b.id == id) {
+            "closed".clone_into(&mut b.status);
+            b.closed_at = Some(b.updated_at.clone());
+            self.record(id, "closed", actor, &[]);
+        }
     }
 
     /// Whether `id` is the parent of an issue not closed.
@@ -309,6 +313,33 @@ impl Tracker for MemoryTracker {
         })
     }
 
+    fn close_by<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        _reason: &'a str,
+    ) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            let mut state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            let issue = state.issues.iter().find(|b| b.id == id).ok_or(TrackerError::NotFound)?;
+            if issue.status == "closed" {
+                return Ok(());
+            }
+            if state.has_open_children(id) {
+                return Err(TrackerError::Invalid {
+                    text: format!("{id} has open children"),
+                });
+            }
+            state.close(id, actor);
+            Ok(())
+        })
+    }
+
     fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
         Box::pin(async move {
             let state = self.lock();
@@ -339,6 +370,25 @@ impl Tracker for MemoryTracker {
             Ok(ids
                 .filter(|id| std::iter::successors(parent(id), parent).any(|e| e == root))
                 .collect())
+        })
+    }
+
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+        Box::pin(async move {
+            let state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            if !state.issues.iter().any(|b| b.id == root) {
+                return Err(TrackerError::NotFound);
+            }
+            let under = state
+                .issues
+                .iter()
+                .filter(|b| state.parents(&b.id).iter().any(|p| p == root));
+            Ok(under.cloned().collect())
         })
     }
 
@@ -448,6 +498,45 @@ impl Tracker for MemoryTracker {
                 None => {
                     let id = state.push("b", Some(title), description, &[], None, actor);
                     state.keys.push((key.to_owned(), id.clone()));
+                    id
+                }
+            };
+            state
+                .issues
+                .iter()
+                .find(|b| b.id == id)
+                .cloned()
+                .ok_or(TrackerError::NotFound)
+        })
+    }
+
+    fn file<'a>(
+        &'a self,
+        actor: &'a str,
+        key: Option<&'a str>,
+        new: &'a NewIssue,
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        Box::pin(async move {
+            let mut state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            let made = key.and_then(|key| state.keys.iter().find(|(k, _)| k == key));
+            let id = match made.map(|(_, id)| id.clone()) {
+                Some(id) => id,
+                None => {
+                    if let Some(parent) = &new.parent
+                        && state.issues.iter().all(|b| &b.id != parent)
+                    {
+                        return Err(TrackerError::NotFound);
+                    }
+                    let labels: Vec<&str> = new.labels.iter().map(String::as_str).collect();
+                    let prefix = new.prefix.as_deref().unwrap_or("b");
+                    let epic = new.parent.as_deref();
+                    let id = state.push(prefix, Some(&new.title), &new.description, &labels, epic, actor);
+                    state.keys.extend(key.map(|key| (key.to_owned(), id.clone())));
                     id
                 }
             };

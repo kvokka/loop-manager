@@ -101,6 +101,31 @@ async fn a_comment_of_a_session_whose_run_has_no_issue_fails_and_says_so() {
     assert!(error.contains("code: no_issue") && error.contains(&says), "{error}");
 }
 
+/// An issue a session files and closes through `loop-manager issue` is written by the session's attempt, as its
+/// comments are (docs/api/frontends.md).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_files_and_closes_an_issue_as_its_attempt() {
+    let file = format!(
+        "{0} issue create --project shop --title Filed >id.txt && {0} issue close $(cat id.txt) --project shop \
+         --reason done",
+        common::EXE
+    );
+    let finish = format!("{} finish pass --summary filed", common::EXE);
+    let plan = vec![Reply::Bash(file), Reply::Bash(finish), Reply::Text("Done.".into())];
+    let provider = Provider::start(plan).await;
+    let d = daemon(&provider).await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    let shop = d.dir.path().join("config/loop-manager/shop");
+    let id = fs::read_to_string(shop.join("web/id.txt")).unwrap();
+    let shown: Value = serde_json::from_str(&br(&shop, &["show", id.trim(), "--json"])).unwrap();
+    assert_eq!(
+        (&shown[0]["created_by"], &shown[0]["status"]),
+        (&json!(format!("loop-manager:{run}:1")), &json!("closed")),
+        "{shown}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_live_view_of_a_run_relays_its_session_and_ends_with_the_run() {
     // The command sleeps first, so the view taps the session before the tool result comes back.

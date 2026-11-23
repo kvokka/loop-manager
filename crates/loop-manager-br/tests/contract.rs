@@ -4,7 +4,7 @@
 //! trail.
 
 use loop_manager_br::Br;
-use loop_manager_contract::tracker::{Tracker, TrackerError, Wait};
+use loop_manager_contract::tracker::{NewIssue, Tracker, TrackerError, Wait};
 use std::{path::Path, process::Command, sync::mpsc, time::Duration};
 
 /// A fresh tracker in a temporary directory.
@@ -236,6 +236,113 @@ async fn a_bead_filed_with_a_rig_prefix_under_a_root_keeps_it_and_parent_loses_i
     assert_eq!(t.under(&root).await.unwrap(), [kept]);
     assert_eq!(on_rig(&format!("--parent={root}")), format!("{root}.1"));
     assert!(root.starts_with("t-"), "a root bead has the database's prefix: {root}");
+}
+
+/// `file` takes a title and a description with a leading `-` as text, keeps a rig's prefix under a parent, records its
+/// actor as the creator and files once per key.
+#[tokio::test(flavor = "multi_thread")]
+async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
+    let (dir, t) = tracker();
+    let root = create(dir.path(), "Root", &["-t", "epic"]);
+    let new = NewIssue {
+        title: "-Rig work".into(),
+        description: "--not an option".into(),
+        labels: vec!["agent:coder".into(), "x".into()],
+        parent: Some(root.clone()),
+        prefix: Some("api".into()),
+    };
+    let filed = t.file("loop-manager:run_1", Some("k1"), &new).await.unwrap();
+    assert!(filed.id.starts_with("api-"), "{}", filed.id);
+    assert_eq!(
+        (filed.title.as_str(), filed.description.as_str(), filed.epic.as_ref()),
+        ("-Rig work", "--not an option", Some(&root))
+    );
+    assert_eq!(filed.labels, ["agent:coder", "x"]);
+    let changes = t.changes(0).await.unwrap();
+    let created = changes.iter().find(|c| c.issue.id == filed.id && c.kind == "created");
+    assert_eq!(created.unwrap().actor, "loop-manager:run_1");
+    let other = NewIssue {
+        title: "Other".into(),
+        ..new.clone()
+    };
+    assert_eq!(
+        t.file("loop-manager:run_2", Some("k1"), &other).await.unwrap().id,
+        filed.id
+    );
+    assert_eq!(
+        t.subtree(&root).await.unwrap().len(),
+        1,
+        "a repeated key files no second bead"
+    );
+    let plain = NewIssue {
+        labels: Vec::new(),
+        parent: None,
+        prefix: None,
+        ..new.clone()
+    };
+    assert!(
+        t.file("loop-manager:run_1", None, &plain)
+            .await
+            .unwrap()
+            .id
+            .starts_with("t-")
+    );
+    let orphan = NewIssue {
+        parent: Some("t-nope".into()),
+        ..plain.clone()
+    };
+    assert_eq!(
+        t.file("loop-manager:run_1", None, &orphan).await,
+        Err(TrackerError::NotFound)
+    );
+    let comma = NewIssue {
+        labels: vec!["a,b".into()],
+        ..plain
+    };
+    assert!(matches!(
+        t.file("loop-manager:run_1", None, &comma).await,
+        Err(TrackerError::Invalid { .. })
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subtree_gives_every_bead_below_the_root_closed_ones_too_oldest_first() {
+    let (dir, t) = tracker();
+    let root = create(dir.path(), "Root", &["-t", "epic"]);
+    let kid = create(dir.path(), "Kid", &[&format!("--deps=parent-child:{root}")]);
+    let epic = create(dir.path(), "Epic", &["-t", "epic", "--parent", &root]);
+    let grandchild = create(dir.path(), "Grandchild", &["--parent", &epic]);
+    create(dir.path(), "Lone", &[]);
+    br(dir.path(), &["close", &kid]);
+    let ids: Vec<String> = t.subtree(&root).await.unwrap().into_iter().map(|b| b.id).collect();
+    assert_eq!(ids, [kid, epic, grandchild]);
+    assert_eq!(t.subtree("t-nope").await, Err(TrackerError::NotFound));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn close_by_closes_whoever_holds_it_once_and_keeps_a_parent_with_open_children_open() {
+    let (dir, t) = tracker();
+    let parent = create(dir.path(), "Parent", &["-t", "epic"]);
+    let [held, open] = ["Held", "Open"].map(|title| create(dir.path(), title, &["--parent", &parent]));
+    t.claim("loop-manager:run_1", &held).await.unwrap();
+    t.close_by("bob", &held, "-done by hand").await.unwrap();
+    let changes = t.changes(0).await.unwrap();
+    let last = changes.last().unwrap();
+    assert_eq!(
+        (last.kind.as_str(), last.actor.as_str(), last.issue.status.as_str()),
+        ("closed", "bob", "closed")
+    );
+    assert_eq!(last.issue.assignee.as_deref(), Some("loop-manager:run_1"));
+    t.close_by("bob", &held, "again").await.unwrap();
+    assert_eq!(t.changes(last.seq).await.unwrap(), [], "a repeat writes nothing");
+    match t.close_by("bob", &parent, "early").await {
+        Err(TrackerError::Invalid { text }) => assert!(text.contains("open children"), "{text}"),
+        other => panic!("{other:?}"),
+    }
+    let shown = t.subtree(&parent).await.unwrap();
+    assert!(shown.iter().any(|b| b.id == open && b.status == "open"));
+    assert_eq!(t.lineage(&open).await.unwrap().parents[0].issue.status, "open");
+    assert_eq!(t.close_by("bob", "t-nope", "x").await, Err(TrackerError::NotFound));
 }
 
 #[tokio::test(flavor = "multi_thread")]

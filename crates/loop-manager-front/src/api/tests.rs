@@ -129,3 +129,58 @@ async fn an_issue_is_read_from_the_tracker_of_its_project() {
     tracker.set_down(true);
     assert_eq!(status("shop", &id, true).await, (503, "tracker_unavailable".into()));
 }
+
+/// `issue create`, `issue list` and `issue close` call the project's tracker as the actor they are given: a filed issue
+/// takes its labels, parent and rig prefix, the list holds what is under the root, a close takes any holder's issue;
+/// a parent or an issue the tracker does not have is `not_found`, a refused close `tracker`.
+#[tokio::test]
+async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project() {
+    use loop_manager_core::tracker::{NewIssue, Tracker};
+    use std::{collections::BTreeMap, sync::Arc};
+    let tracker = Arc::new(loop_manager_testkit::MemoryTracker::new());
+    let root = tracker.add(&[], None);
+    let trackers = BTreeMap::from([("shop".to_owned(), tracker.clone() as Arc<dyn Tracker>)]);
+    let new = |parent: &str| NewIssue {
+        title: "Fix the cart".to_owned(),
+        description: "The total is wrong".to_owned(),
+        labels: vec!["agent:coder".to_owned()],
+        parent: Some(parent.to_owned()),
+        prefix: Some("w".to_owned()),
+    };
+    let actor = "loop-manager:run_1:1";
+    let Ok(filed) = super::issues::file(&trackers, true, "shop", actor, None, &new(&root)).await else {
+        panic!("not filed");
+    };
+    let id = filed["id"].as_str().unwrap().to_owned();
+    assert!(id.starts_with("w-"), "{filed}");
+    assert_eq!(
+        (&filed["epic"], &filed["labels"]),
+        (&root.clone().into(), &serde_json::json!(["agent:coder"]))
+    );
+    let code = |e: super::ApiError| e.into_response().status().as_u16();
+    let lost = super::issues::file(&trackers, true, "shop", actor, None, &new("b-none")).await;
+    assert_eq!(lost.map_err(code), Err(404));
+    let Ok(axum::Json(listed)) = super::issues::under(&trackers, true, "shop", &root).await else {
+        panic!("`{root}` is not listed");
+    };
+    assert_eq!(
+        (&listed[0]["id"], &listed[0]["status"]),
+        (&id.clone().into(), &"open".into()),
+        "{listed}"
+    );
+    assert_eq!(
+        super::issues::under(&trackers, true, "shop", "b-none")
+            .await
+            .map_err(code)
+            .err(),
+        Some(404)
+    );
+    tracker.assign(&id, "loop-manager:run_9");
+    // A parent with open children is refused and stays open; its child closes whoever holds it.
+    let shut = async |issue: &str| super::issues::shut(&trackers, true, "shop", "loop-manager", issue, "dropped").await;
+    assert_eq!(shut(&root).await.map_err(code), Err(502));
+    assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
+    assert_eq!(tracker.issue(&id).unwrap().status, "closed");
+    assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
+    assert_eq!(shut("b-none").await.map_err(code), Err(404));
+}

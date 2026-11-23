@@ -37,6 +37,9 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("trigger disable", "POST", "/v1/triggers/disable"),
     ("project list", "GET", "/v1/projects"),
     ("issue show", "GET", "/v1/projects/{project}/issues/{issue}"),
+    ("issue list", "GET", "/v1/projects/{project}/issues"),
+    ("issue create", "POST", "/v1/projects/{project}/issues"),
+    ("issue close", "POST", "/v1/projects/{project}/issues/{issue}/close"),
     ("agent list", "GET", "/v1/agents"),
     ("formula list", "GET", "/v1/formulas"),
     ("pack list", "GET", "/v1/packs"),
@@ -113,7 +116,7 @@ pub enum Command {
     /// Projects and their rigs.
     #[command(subcommand)]
     Project(ListCommand),
-    /// Issues of a project, read from its tracker.
+    /// Issues of a project, through its tracker.
     #[command(subcommand)]
     Issue(IssueCommand),
     /// Agents.

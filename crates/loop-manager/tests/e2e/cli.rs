@@ -392,3 +392,122 @@ async fn an_issue_is_shown_from_the_tracker_of_its_project() {
         );
     }
 }
+
+/// A daemon whose project `shop` has a br tracker with the prefix `t`.
+async fn with_br() -> Daemon {
+    Daemon::start(|dir| {
+        crate::tracker::br_in(
+            &dir.join("config/loop-manager/shop"),
+            None,
+            &["init", "--prefix", "t", "-q"],
+        );
+    })
+    .await
+}
+
+/// The error code of a command that exits 1.
+fn code(d: &Daemon, args: &[&str], env: &[(&str, &str)]) -> String {
+    let out = d.cli(&[&["--json"], args].concat(), env);
+    assert_eq!(out.status.code(), Some(1), "{args:?}");
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    error["error"]["code"].as_str().unwrap().to_owned()
+}
+
+/// `issue create`, `issue list` and `issue close` go through the daemon to the project's br tracker: an issue filed
+/// for a rig takes the rig's prefix and is written as `loop-manager` outside a session, the list holds the issues under
+/// a root with their status, and a parent with open children is not closed (docs/api/frontends.md).
+#[tokio::test]
+async fn issues_are_filed_listed_and_closed_from_the_cli() {
+    let d = with_br().await;
+    let project = d.dir.path().join("config/loop-manager/shop");
+    let out = d.cli(&["issue", "create", "--project", "shop", "--title", "Dark mode"], &[]);
+    let root = String::from_utf8(out.stdout).unwrap().trim().to_owned();
+    assert!(out.status.success() && root.starts_with("t-"), "{root}");
+    let text = "A switch in the header";
+    let filed = d.json(&[
+        "issue",
+        "create",
+        "--project",
+        "shop",
+        "--title",
+        "Toggle",
+        "--description",
+        text,
+        "--label",
+        "agent:coder",
+        "--parent",
+        &root,
+        "--rig",
+        "web",
+    ]);
+    let child = filed["id"].as_str().unwrap().to_owned();
+    assert!(child.starts_with("w-"), "{filed}");
+    assert_eq!(
+        (&filed["epic"], &filed["labels"], &filed["description"]),
+        (&json!(root), &json!(["agent:coder"]), &json!(text))
+    );
+    let shown = crate::tracker::br_in(&project, None, &["show", &child, "--json"]);
+    let shown: Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(shown[0]["created_by"], "loop-manager");
+    let listed = d.json(&["issue", "list", &root, "--project", "shop"]);
+    assert_eq!(
+        (listed.as_array().map(Vec::len), &listed[0]["id"], &listed[0]["status"]),
+        (Some(1), &json!(child), &json!("open")),
+        "{listed}"
+    );
+    let close = |issue: &str| ["issue", "close", issue, "--project", "shop", "--reason", "done"].map(str::to_owned);
+    let args = close(&root);
+    assert_eq!(
+        code(&d, &args.each_ref().map(String::as_str), &[]),
+        "tracker",
+        "a parent with an open child"
+    );
+    for issue in [&child, &child, &root] {
+        let out = d.cli(&close(issue).each_ref().map(String::as_str), &[]);
+        assert!(
+            out.status.success(),
+            "{issue}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let listed = d.json(&["issue", "list", &root, "--project", "shop"]);
+    assert_eq!(listed[0]["status"], "closed", "{listed}");
+}
+
+/// A repeated key files nothing more and another request with it is refused; a rig, a parent or a root there is none
+/// of is `not_found`, a session token that is no live attempt's `rejected` (docs/api/frontends.md).
+#[tokio::test]
+async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
+    let d = with_br().await;
+    let keyed = |title: &str| {
+        let args = [
+            "--json",
+            "issue",
+            "create",
+            "--project",
+            "shop",
+            "--title",
+            title,
+            "--key",
+            "k",
+        ];
+        d.cli(&args, &[])
+    };
+    let first: Value = serde_json::from_slice(&keyed("Once").stdout).unwrap();
+    let again: Value = serde_json::from_slice(&keyed("Once").stdout).unwrap();
+    assert_eq!(first["id"], again["id"]);
+    let error: Value = serde_json::from_slice(&keyed("Other").stderr).unwrap();
+    assert_eq!(error["error"]["code"], "idempotency_key_reused");
+    let create = ["issue", "create", "--project", "shop", "--title", "Lost"];
+    assert_eq!(code(&d, &[&create[..], &["--rig", "api"]].concat(), &[]), "not_found");
+    assert_eq!(
+        code(&d, &[&create[..], &["--parent", "t-none"]].concat(), &[]),
+        "not_found"
+    );
+    let stale = [("LOOP_MANAGER_RUN", "run_9"), ("LOOP_MANAGER_ATTEMPT_TOKEN", "nope")];
+    assert_eq!(code(&d, &create, &stale), "rejected");
+    assert_eq!(
+        code(&d, &["issue", "list", "t-none", "--project", "shop"], &[]),
+        "not_found"
+    );
+}

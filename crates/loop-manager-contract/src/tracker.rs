@@ -81,6 +81,19 @@ pub struct Lineage {
     pub parents: Vec<Commented>,
 }
 
+/// An issue `Tracker::file` files (contracts 5.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewIssue {
+    pub title: String,
+    pub description: String,
+    pub labels: Vec<String>,
+    /// The issue it lies under.
+    pub parent: Option<String>,
+    /// The id prefix of the rig it is filed for (decision 96); none for an issue of the root, which takes the
+    /// tracker's own.
+    pub prefix: Option<String>,
+}
+
 /// One write to the tracker (contracts 5.2): `seq` orders the writes and is the cursor of `changes`; `actor` is who
 /// made it (`loop-manager:<run id>[:<attempt n>]` for loop-manager and its sessions); `changed` names the fields of an `updated`.
 #[derive(Clone, Debug, PartialEq)]
@@ -145,17 +158,23 @@ impl fmt::Display for TrackerError {
     }
 }
 
-/// The operations of contracts 5.1, those the core calls; `owner` is `loop-manager:<run id>`.
+/// The operations of contracts 5.1, those the core and the API call; `owner` is `loop-manager:<run id>`.
 pub trait Tracker: Send + Sync {
     fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>>;
     /// Conditional on `assignee == owner`; clears the assignee and sets `open`, but a closed issue stays closed.
     fn release<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
     /// Conditional on `assignee == owner`.
     fn close<'a>(&'a self, owner: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
+    /// Closes the issue `id` as `actor`, whoever holds it (`loop-manager issue close`); a closed issue stays closed and
+    /// answers `Ok`, a parent with open children is `Invalid` and stays open.
+    fn close_by<'a>(&'a self, actor: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
     /// Every ready issue, in the tracker's order (the core picks within an epic itself).
     fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>>;
     /// The ids of the ready issues under `root`, at any depth, in the tracker's order; `NotFound` with no `root`.
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>>;
+    /// Every issue under `root` at any depth, the root left out, with any status but `tombstone`, oldest first
+    /// (`loop-manager issue list`); `NotFound` with no `root`.
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>>;
     /// The open issues under `root` that wait, each with what holds it: one entry per issue, blocker and kind, ordered
     /// by them; `NotFound` with no `root`.
     fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>>;
@@ -169,6 +188,14 @@ pub trait Tracker: Send + Sync {
         key: &'a str,
         title: &'a str,
         description: &'a str,
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>>;
+    /// Files the issue `new` as `actor` (`loop-manager issue create`); with a `key`, once per key: a repeat returns the
+    /// issue of the first call. A `parent` the tracker does not have is `NotFound`.
+    fn file<'a>(
+        &'a self,
+        actor: &'a str,
+        key: Option<&'a str>,
+        new: &'a NewIssue,
     ) -> BoxFuture<'a, Result<Issue, TrackerError>>;
     /// The issue `id` with its comments and its parents with theirs (contracts 5.1); a parent the tracker no longer
     /// has ends the line, `NotFound` with no `id`.

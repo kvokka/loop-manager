@@ -44,9 +44,9 @@ pub(crate) struct CreateRun {
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct ParentAttempt {
-    run: String,
+    pub(super) run: String,
     /// The attempt token of the session; a stale one is rejected.
-    token: String,
+    pub(super) token: String,
 }
 
 /// Starts a run of a formula; the reply is `{"run": "<id>"}`, or `{"nothing_ready": true}` when a task input
