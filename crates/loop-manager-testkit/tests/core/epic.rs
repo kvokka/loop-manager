@@ -71,6 +71,10 @@ impl Tracker for Chain {
     ) -> BoxFuture<'a, Result<(), TrackerError>> {
         self.0.attempt_ended(actor, id, entry)
     }
+
+    fn comment<'a>(&'a self, actor: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Tracker::comment(&self.0, actor, id, text)
+    }
 }
 
 #[tokio::test]

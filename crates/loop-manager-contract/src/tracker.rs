@@ -150,4 +150,7 @@ pub trait Tracker: Send + Sync {
         id: &'a str,
         entry: &'a serde_json::Value,
     ) -> BoxFuture<'a, Result<(), TrackerError>>;
+    /// Adds the comment `text` to the bead `id` as `actor` (`loop-manager:<run>:<attempt>`, contracts 5.1). Not
+    /// idempotent: a repeated call adds it again.
+    fn comment<'a>(&'a self, actor: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
 }

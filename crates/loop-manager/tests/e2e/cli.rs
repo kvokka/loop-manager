@@ -328,3 +328,11 @@ fn check_config_lists(d: &Daemon) {
     assert!(shop, "every project's addons without --project: {addons}");
     assert!(!d.cli(&["agent", "list", "--project", "nope"], &[]).status.success());
 }
+
+#[tokio::test]
+async fn a_comment_outside_a_session_needs_the_session_environment() {
+    let d = Daemon::start(|_| {}).await;
+    let out = d.cli(&["--json", "comment", "--file", "note.md"], &[]);
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!((out.status.code(), &error["error"]["code"]), (Some(1), &"usage".into()));
+}

@@ -491,3 +491,20 @@ async fn the_end_of_an_attempt_lands_in_the_interactions_as_its_actor_and_writes
     assert_eq!(t.changes(0).await.unwrap(), changes, "no event");
     assert_eq!(br(dir.path(), &["show", &id, "--json"]), bead, "the bead is as it was");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_comment_lands_on_its_bead_as_its_actor_and_a_missing_bead_is_not_found() {
+    let (dir, t) = tracker();
+    let id = create(dir.path(), "Five", &[]);
+    let text = "--summary: two lines\nhere";
+    t.comment("loop-manager:run_1:2", &id, text).await.unwrap();
+    let lineage = t.lineage(&id).await.unwrap();
+    let comments: Vec<(&str, &str)> = (lineage.bead.comments.iter())
+        .map(|c| (c.author.as_str(), c.text.as_str()))
+        .collect();
+    assert_eq!(comments, [("loop-manager:run_1:2", text)]);
+    assert_eq!(
+        t.comment("loop-manager:run_1:2", "t-none", text).await,
+        Err(TrackerError::NotFound)
+    );
+}

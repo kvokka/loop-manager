@@ -526,3 +526,46 @@ async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_se
     assert_eq!(crashed["failure"]["kind"], "harness_crash", "{crashed}");
     assert_eq!(crashed["session"], view["attempts"][1]["session"]);
 }
+
+impl common::World {
+    /// A comment of the attempt whose token is `token` on the bead of `run`: the core's answer.
+    async fn comment(&self, run: &str, token: &str, text: &str) -> Value {
+        let msg = Msg::Comment {
+            run: run.into(),
+            token: token.into(),
+            text: text.into(),
+        };
+        self.core.send(None, msg).await.unwrap()["answer"].clone()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_comment_of_an_attempt_reaches_the_bead_of_its_run_as_the_attempt() {
+    use loop_manager_core::tracker::Tracker;
+    let w = world(FIX);
+    let bead = w.tracker.add(&[], None);
+    w.driver.script(slow_turn());
+    let run = w.fix(json!(bead)).await.unwrap()["run"].as_str().unwrap().to_owned();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let token = w.driver.token(&run, 1).unwrap();
+    assert_eq!(w.comment(&run, &token, "- done: the parser").await, "accepted");
+    assert_eq!(w.comment(&run, "forged", "x").await, "invalid");
+    assert_eq!(w.comment(&run, &token, &"x".repeat(64 * 1024 + 1)).await, "invalid");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let comments = w.tracker.lineage(&bead).await.unwrap().bead.comments;
+    let comments: Vec<(&str, &str)> = comments.iter().map(|c| (c.author.as_str(), c.text.as_str())).collect();
+    assert_eq!(
+        comments,
+        [(format!("loop-manager:{run}:1").as_str(), "- done: the parser")]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_comment_of_a_run_without_a_bead_is_refused() {
+    let w = world(&[]);
+    w.driver.script(slow_turn());
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let token = w.driver.token(&run, 1).unwrap();
+    assert_eq!(w.comment(&run, &token, "a note").await, "no_bead");
+}

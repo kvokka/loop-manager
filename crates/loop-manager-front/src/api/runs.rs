@@ -4,7 +4,7 @@ mod sessions;
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Failed, Finished, Keyed, Run, Started},
+    replies::{Commented, Failed, Finished, Keyed, Run, Started},
 };
 use axum::{
     Json,
@@ -234,5 +234,28 @@ pub(crate) async fn finish(
         token: body.token,
         outcome: body.outcome,
     };
+    Ok(Json(state.core.send_request(key(&headers), msg).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct CommentRun {
+    /// The attempt token the session got.
+    token: String,
+    /// The comment, up to 64 KiB.
+    text: String,
+}
+
+/// A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the
+/// reply is `{"answer": "accepted"|"no_bead"|"stale_attempt"|"run_terminal"|"invalid"}`.
+#[utoipa::path(post, path = "/v1/runs/{id}/comment", request_body = CommentRun,
+    params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+    responses((status = OK, body = Commented), Keyed))]
+pub(crate) async fn comment(
+    state: State,
+    headers: HeaderMap,
+    Param(Path(run)): Param<Path<String>>,
+    Body(CommentRun { token, text }): Body<CommentRun>,
+) -> Reply {
+    let msg = Msg::Comment { run, token, text };
     Ok(Json(state.core.send_request(key(&headers), msg).await?))
 }

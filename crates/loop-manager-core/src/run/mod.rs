@@ -136,6 +136,7 @@ impl Handler for RunHandler {
         match msg {
             Msg::Create(create) => return self.create(tx, create),
             Msg::Finish { run, token, outcome } => return self.finish(tx, &run, &token, &outcome),
+            Msg::Comment { run, token, text } => return Self::comment(tx, &run, &token, &text),
             Msg::Fire { project, rig, trigger } => return self.fire_by_hand(tx, &project, &rig, &trigger),
             Msg::SwitchTrigger {
                 project,

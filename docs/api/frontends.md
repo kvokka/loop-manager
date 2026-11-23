@@ -106,6 +106,9 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `loop-manager finish` reads the attempt token from the session environment and prints the acknowledgement
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
+- `loop-manager comment --file <file>` (`POST /v1/runs/{id}/comment`) puts the text of the file as a comment on the
+  bead of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
+  A run without a bead (`no_bead`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - Without a daemon only `loop-manager format`, `loop-manager daemon`, `loop-manager cache clear`, `loop-manager --version`, and

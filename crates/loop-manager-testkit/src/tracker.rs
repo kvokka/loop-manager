@@ -477,6 +477,23 @@ impl Tracker for MemoryTracker {
             Ok(())
         })
     }
+
+    fn comment<'a>(&'a self, actor: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            let state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            if state.beads.iter().all(|b| b.id != id) {
+                return Err(TrackerError::NotFound);
+            }
+            drop(state);
+            MemoryTracker::comment(self, id, actor, text);
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]

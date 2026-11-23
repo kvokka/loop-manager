@@ -38,6 +38,9 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   (`{"kind": "attempt_ended", "issue_id": <bead>, "actor": ..., "extra": {...}}`). It adds no row to `events` and does
   not rewrite `issues.jsonl`, so the watcher sees nothing and no `bead.*` event follows. The entries are read in
   `.beads/interactions.jsonl` itself: `br audit log` shows only `events`.
+- A comment of an attempt (`loop-manager comment`, `comment` of [contracts 5.1](contracts.md#51-operations)) is
+  `br comments add <bead> --file /dev/stdin` as the attempt's actor; the text comes on stdin, so no text reads as an
+  option.
 
 ## Beads and runs
 

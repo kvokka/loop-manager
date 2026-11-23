@@ -83,6 +83,25 @@ async fn a_claude_session_that_calls_the_finisher_passes_its_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_comment_of_a_session_whose_run_has_no_bead_fails_and_says_so() {
+    let comment = format!(
+        "printf 'a note' >note.md; {} comment --file note.md 2>err.txt; echo $? >code.txt",
+        common::EXE
+    );
+    let finish = format!("{} finish pass --summary noted", common::EXE);
+    let plan = vec![Reply::Bash(comment), Reply::Bash(finish), Reply::Text("Done.".into())];
+    let provider = Provider::start(plan).await;
+    let d = daemon(&provider).await;
+    let run = d.create("build", None).await;
+    d.until_state(&run, "passed").await;
+    let web = d.dir.path().join("config/loop-manager/shop/web");
+    assert_eq!(fs::read_to_string(web.join("code.txt")).unwrap(), "1\n");
+    let error = fs::read_to_string(web.join("err.txt")).unwrap();
+    let says = format!("the run {run} has no bead to comment on");
+    assert!(error.contains("code: no_bead") && error.contains(&says), "{error}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_live_view_of_a_run_relays_its_session_and_ends_with_the_run() {
     // The command sleeps first, so the view taps the session before the tool result comes back.
     let finish = format!("sleep 1 && {} finish pass --summary built", common::EXE);

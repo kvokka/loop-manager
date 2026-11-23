@@ -27,6 +27,7 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("run cancel", "POST", "/v1/runs/{id}/cancel"),
     ("run resolve", "POST", "/v1/runs/{id}/resolve"),
     ("finish", "POST", "/v1/runs/{id}/finish"),
+    ("comment", "POST", "/v1/runs/{id}/comment"),
     ("gate list", "GET", "/v1/gates"),
     ("gate close", "POST", "/v1/gates"),
     ("gate open", "POST", "/v1/gates/open"),
@@ -139,6 +140,12 @@ pub enum Command {
         /// JSON, or `@<file>` with JSON.
         #[arg(long)]
         data: Option<String>,
+    },
+    /// Put the text of `--file` as a comment on the bead of this session's run (`LOOP_MANAGER_RUN`,
+    /// `LOOP_MANAGER_ATTEMPT_TOKEN`), as its attempt.
+    Comment {
+        #[arg(long)]
+        file: std::path::PathBuf,
     },
     /// Serve read-only ACPv2 access to recorded working sessions over stdio.
     Acp,
@@ -272,6 +279,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Addon(command) => config::list(client, json, "addons", command).await?,
         Command::Events { from } => follow(client.events(from).await?, json).await?,
         Command::Finish { result, summary, data } => return finish(client, json, result, summary, data).await,
+        Command::Comment { file } => return finish::comment(client, json, &file).await,
         Command::Acp => acp::serve(client).await?,
         Command::Status => print(json, &client.request("GET", "/v1/daemon", None, None).await?),
         Command::Drain { timeout, key } => print(

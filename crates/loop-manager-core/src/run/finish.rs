@@ -14,6 +14,20 @@ use serde_json::{Value, json};
 pub const MAX_REMARKS: i64 = 10;
 pub(super) const MAX_SUMMARY: usize = 4 * 1024;
 pub(super) const MAX_DATA: usize = 64 * 1024;
+const MAX_COMMENT: usize = 64 * 1024;
+
+/// The attempt of `run` whose token is `token`.
+fn attempt_of(tx: &Tx<'_>, run: &str, token: &str) -> Result<Option<u32>, Error> {
+    let n = tx
+        .sql()
+        .query_row(
+            "SELECT n FROM attempts WHERE run = ?1 AND token_sha256 = ?2",
+            params![run, token_sha256(token)],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(n)
+}
 
 impl RunHandler {
     pub(super) fn finish(
@@ -29,15 +43,9 @@ impl RunHandler {
             Err(Error::Rejected(_) | Error::NotFound(_)) => return answer("invalid"),
             Err(e) => return Err(e),
         };
-        let n: Option<u32> = tx
-            .sql()
-            .query_row(
-                "SELECT n FROM attempts WHERE run = ?1 AND token_sha256 = ?2",
-                params![run, token_sha256(token)],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(n) = n else { return answer("invalid") };
+        let Some(n) = attempt_of(tx, run, token)? else {
+            return answer("invalid");
+        };
         if !row.live() {
             return answer("run_terminal");
         }
@@ -59,6 +67,38 @@ impl RunHandler {
             params![run, n, json!(outcome).to_string()],
         )?;
         Self::stop_background(tx, &row)?;
+        answer("accepted")
+    }
+
+    /// A comment of the attempt whose token is `token` on the bead of its run: an effect on the tracker's queue of
+    /// records, as the attempt's actor, while the token is valid (contracts 6.3).
+    pub(super) fn comment(tx: &mut Tx<'_>, run: &str, token: &str, text: &str) -> Result<Value, Error> {
+        let answer = |a: &str| Ok(json!({ "answer": a }));
+        let row = match Row::load(tx, run) {
+            Ok(row) => row,
+            Err(Error::Rejected(_) | Error::NotFound(_)) => return answer("invalid"),
+            Err(e) => return Err(e),
+        };
+        let Some(n) = attempt_of(tx, run, token)? else {
+            return answer("invalid");
+        };
+        if !row.live() {
+            return answer("run_terminal");
+        }
+        if n != row.attempt {
+            return answer("stale_attempt");
+        }
+        let Some(bead) = &row.bead else {
+            return answer("no_bead");
+        };
+        if text.len() > MAX_COMMENT {
+            return answer("invalid");
+        }
+        let payload = json!({ "op": "tracker", "call": "comment", "project": row.project, "bead": bead, "run": run,
+            "attempt": n, "text": text });
+        // The same text twice while the first is still queued is one comment.
+        let dedupe = format!("comment:{run}:{n}:{}", token_sha256(text));
+        tx.effect(&super::beads::queue(&row.project, "comment"), &dedupe, &payload)?;
         answer("accepted")
     }
 

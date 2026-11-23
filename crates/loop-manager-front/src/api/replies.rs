@@ -166,6 +166,12 @@ pub(crate) struct Finished {
 }
 
 #[derive(ToSchema)]
+pub(crate) struct Commented {
+    /// `accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`.
+    answer: String,
+}
+
+#[derive(ToSchema)]
 pub(crate) struct Reloaded {
     config_generation: u64,
     /// The idle instances stopped because no agent of the new config uses them.

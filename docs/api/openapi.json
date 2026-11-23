@@ -1657,6 +1657,104 @@
         }
       }
     },
+    "/v1/runs/{id}/comment": {
+      "post": {
+        "summary": "A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_bead\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
+        "operationId": "comment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Commented"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{id}/finish": {
       "post": {
         "summary": "The finisher: the agent declares the outcome of its attempt (contracts 6.3); the reply is\n`{\"answer\": \"accepted\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
@@ -2650,6 +2748,35 @@
               "null"
             ],
             "description": "`YYYY-MM-DDTHH:MM:SS[.fff]Z`; absent: until opened by hand."
+          }
+        }
+      },
+      "CommentRun": {
+        "type": "object",
+        "required": [
+          "token",
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The comment, up to 64 KiB."
+          },
+          "token": {
+            "type": "string",
+            "description": "The attempt token the session got."
+          }
+        }
+      },
+      "Commented": {
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "`accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`."
           }
         }
       },

@@ -635,7 +635,7 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 
 ### 5.1 Operations
 
-The trait has the ten operations the core calls; an operation is added only when a caller needs it.
+The trait has the eleven operations the core calls; an operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
 the daemon's own reads. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
 in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
@@ -657,6 +657,8 @@ trait Tracker: Send + Sync {
     fn lineage(&self, id: &str) -> BoxFuture<Result<Lineage, TrackerError>>;          // comments and parents
     fn attempt_ended(&self, actor: &str, id: &str, entry: &Value)
         -> BoxFuture<Result<(), TrackerError>>;                                 // audit trail, not idempotent
+    fn comment(&self, actor: &str, id: &str, text: &str)
+        -> BoxFuture<Result<(), TrackerError>>;                                 // a comment, not idempotent
 }
 ```
 
@@ -704,6 +706,13 @@ the attempt has none). A repeated effect (a restart between the call and its rep
 `Unavailable` tracker is tried again and an `Invalid` answer dropped, both reported as
 `tracker.sync_failed{op: "attempt_ended"}`. br keeps it in `.beads/interactions.jsonl`
 ([tracker-br](tracker-br.md#one-database-per-project)).
+
+`comment` adds a comment to the bead `id` as the attempt's actor `loop-manager:<run id>:<attempt n>`: the comment
+of a session through `loop-manager comment` (6.3), so an addon or an agent comments on its bead without knowing the
+tracker. The core adds an effect for it on the queue `tracker:<project>:audit`, with the records of `attempt_ended`.
+A repeated effect may add the comment twice. An `Unavailable` tracker is tried again and an `Invalid` answer dropped,
+both reported as `tracker.sync_failed{op: "comment"}`; a bead the tracker no longer has drops it. br adds it with
+`br comments add <id> --file /dev/stdin` ([tracker-br](tracker-br.md#one-database-per-project)).
 
 `changes` is pull-only; the adapter also owns a watcher that sends a "changed" message to the core, and the core then
 calls `changes` from its stored cursor (and on start and after recovery without waiting for a signal). One effect on the
@@ -907,6 +916,11 @@ of a run whose gate the operator closed parks it instead (invariant 18).
   is over, and an outcome now would decide nothing). With the daemon unreachable the command retries with backoff for 60
   s (`LOOP_MANAGER_FINISH_RETRY` seconds overrides it), then exits with code 75; every try carries the same idempotency
   key, a hash of the request, so a retry after a lost reply gets the first answer.
+- CLI: `loop-manager comment --file <file>` → `POST /v1/runs/{id}/comment` of `{token, text}`: the text, up to 64
+  KiB, goes on the run's bead as a comment of the attempt (`comment`, 5.1). Answers: `accepted` (the comment is queued
+  for the tracker and reaches the bead shortly after); `no_bead` (the run has none); `stale_attempt` (not the run's
+  current attempt); `run_terminal`; `invalid` (unknown token or run, text over 64 KiB). The command exits 1 on any
+  answer but `accepted` and does not retry an unreachable daemon.
 - The finisher is the agent's word on the outcome: `pass` or `fail`, a short summary, optional data. A failure of
   the infrastructure is not an outcome: it raises `run.attempt_failed`. The outcome is kept in the run's result
   and reaches triggers as `outcome` of `run.passed` and `run.failed` (`outcome.data.<key>` in `where` and `inputs`).

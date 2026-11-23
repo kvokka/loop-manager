@@ -1,10 +1,12 @@
-//! The finisher (contracts 6.3): `loop-manager finish pass|fail` inside an agent session.
+//! The commands of an agent session (contracts 6.3): the finisher `loop-manager finish pass|fail` and
+//! `loop-manager comment`.
 
 use super::{Verdict, fail, print, run_path};
 use crate::client::{Client, ClientError};
 use serde_json::{Value, json};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
+    path::Path,
     process::ExitCode,
     time::Duration,
 };
@@ -14,6 +16,43 @@ use std::{
 const FINISH_RETRY: Duration = Duration::from_secs(60);
 const EX_TEMPFAIL: u8 = 75;
 
+/// The run and the attempt token of the session the command runs in.
+fn session() -> Option<(String, String)> {
+    let run = std::env::var("LOOP_MANAGER_RUN").ok()?;
+    Some((run, std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN").ok()?))
+}
+
+/// `loop-manager comment --file <f>`: the text of `file` goes on the bead of the session's run (contracts 6.3).
+pub(super) async fn comment(client: &Client, json: bool, file: &Path) -> Result<ExitCode, ClientError> {
+    let Some((run, token)) = session() else {
+        return Ok(fail(
+            json,
+            "usage",
+            "LOOP_MANAGER_RUN and LOOP_MANAGER_ATTEMPT_TOKEN are not set: `loop-manager comment` runs inside an agent session",
+        ));
+    };
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) => return Ok(fail(json, "usage", &format!("{}: {e}", file.display()))),
+    };
+    let body = json!({ "token": token, "text": text });
+    let reply = client
+        .request("POST", &run_path(&run, "/comment"), Some(&body), None)
+        .await?;
+    let answer = reply["answer"].as_str().unwrap_or_default();
+    let message = match answer {
+        "accepted" => {
+            print(json, if json { &reply } else { &reply["answer"] });
+            return Ok(ExitCode::SUCCESS);
+        }
+        "no_bead" => format!("the run {run} has no bead to comment on"),
+        "stale_attempt" => "this session's attempt is no longer the run's current one".to_owned(),
+        "run_terminal" => format!("the run {run} has ended"),
+        _ => "the daemon refused the comment: an unknown run or token, or a text over 64 KiB".to_owned(),
+    };
+    Ok(fail(json, answer, &message))
+}
+
 /// The finisher: the run and the token come from the session environment; an unreachable daemon is retried.
 pub(super) async fn finish(
     client: &Client,
@@ -22,10 +61,7 @@ pub(super) async fn finish(
     summary: String,
     data: Option<String>,
 ) -> Result<ExitCode, ClientError> {
-    let (Ok(run), Ok(token)) = (
-        std::env::var("LOOP_MANAGER_RUN"),
-        std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN"),
-    ) else {
+    let Some((run, token)) = session() else {
         return Ok(fail(
             json,
             "usage",

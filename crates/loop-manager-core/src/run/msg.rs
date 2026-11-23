@@ -186,6 +186,13 @@ pub enum Msg {
         token: String,
         outcome: Outcome,
     },
+    /// A comment of an attempt on the bead of its run (contracts 6.3); the reply is
+    /// `{"answer": "accepted"|"no_bead"|"stale_attempt"|"run_terminal"|"invalid"}`.
+    Comment {
+        run: String,
+        token: String,
+        text: String,
+    },
 }
 
 /// The outcome an agent declares (contracts 1.3 `Outcome`).

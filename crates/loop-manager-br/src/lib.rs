@@ -433,6 +433,17 @@ impl Tracker for Br {
             }
         })
     }
+
+    fn comment<'a>(&'a self, actor: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            // On stdin: a text in an argument could read as an option.
+            let args = ["comments", "add", id, "--file", "/dev/stdin"];
+            match self.br_with(actor, &args, Some(text.as_bytes())).await {
+                Ok(_) => Ok(()),
+                Err(Fail(_, e)) => Err(e),
+            }
+        })
+    }
 }
 
 fn unavailable(text: String) -> TrackerError {
