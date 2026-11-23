@@ -3,8 +3,8 @@
 //! whose id it is or create an epic for it; the run then claims that bead as any other.
 //!
 //! The drain step (docs/design/config.md): an attempt with no process that, on every read of the tracker, gives each
-//! ready bead under the run's bead, at any depth, a run of the step's formula — the one creation every start goes
-//! through — once per entry of the step.
+//! ready bead of its own under the run's bead, at any depth, a run of the step's formula — the one creation every
+//! start goes through — once per entry of the step, and waits while a bead of its own waits on a foreign blocker.
 
 use super::{
     Create, Outcome, RunHandler, Verdict, beads::tracker_key, new_token, render::DRAIN_TIMEOUT_MS, row::Row,
@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     config::{InputType, OnItemFailure},
-    tracker::{Bead, TrackerError},
+    tracker::{Bead, TrackerError, Wait},
     writer::{Error, Tx},
 };
 use rusqlite::{OptionalExtension, params};
@@ -45,12 +45,13 @@ impl RunHandler {
     }
 
     /// One pass of every run of `project` in a drain step, after a read of its tracker that found the ready beads
-    /// `under` each root.
+    /// `under` each root and the open beads that wait (`waits`) under it.
     pub(super) fn drained(
         &mut self,
         tx: &mut Tx<'_>,
         project: &str,
         under: &BTreeMap<String, Vec<String>>,
+        waits: &BTreeMap<String, Vec<Wait>>,
     ) -> Result<(), Error> {
         let runs: Vec<String> = {
             let sql = format!("SELECT id FROM runs WHERE project = ?1 AND {DRAINING} ORDER BY n");
@@ -58,29 +59,41 @@ impl RunHandler {
             stmt.query_map([project], |r| r.get(0))?.collect::<Result<_, _>>()?
         };
         for id in runs {
-            self.pass(tx, Row::load(tx, &id)?, under)?;
+            self.pass(tx, Row::load(tx, &id)?, under, waits)?;
         }
         Ok(())
     }
 
-    /// Gives each ready bead under the run's bead that this entry of the step has not given yet a run of the step's
-    /// formula, at most `pool` in work at once; a refused bead gets no run and stays open. The step passes once
-    /// nothing was given, no child is alive and no later read is queued, with `{closed, failed, refused}` of the beads
-    /// of this entry. Once a bead failed under `soft_stop` no bead is given; under `hard_stop` the alive children are
+    /// Gives each ready bead of its own under the run's bead that this entry of the step has not given yet a run of
+    /// the step's formula, at most `pool` in work at once; a refused bead gets no run and stays open. A bead is its
+    /// own when the run is on the root, or the bead is of the run's rig; a foreign one is passed over, no error. The
+    /// step passes once nothing was given, no child is alive, no later read is queued and no bead of its own it has
+    /// not given waits on a foreign blocker or a `blocked` status, with `{closed, failed, refused}` of the beads of
+    /// this entry. Once a bead failed under `soft_stop` no bead is given; under `hard_stop` the alive children are
     /// cancelled too; the step then fails with `stopped_on` and `not_started` besides. A restart starts a new
     /// attempt, not a new entry; a round does.
-    fn pass(&mut self, tx: &mut Tx<'_>, row: Row, under: &BTreeMap<String, Vec<String>>) -> Result<(), Error> {
+    fn pass(
+        &mut self,
+        tx: &mut Tx<'_>,
+        row: Row,
+        under: &BTreeMap<String, Vec<String>>,
+        waits: &BTreeMap<String, Vec<Wait>>,
+    ) -> Result<(), Error> {
         let Some(root) = row.bead.clone().filter(|_| row.state == "running") else {
             return Ok(());
         };
         // A read asked before this attempt began does not know the root and decides nothing.
-        let Some(under) = under.get(&root) else {
+        let (Some(under), Some(waits)) = (under.get(&root), waits.get(&root)) else {
             return Ok(());
         };
-        let config: Value = (row.config.as_deref())
+        let config = std::sync::Arc::clone(&self.config);
+        let project = config.projects.iter().find(|p| p.name == row.project);
+        let on_root = project.is_some_and(|p| p.root.0 == row.rig);
+        let own = |bead: &str| on_root || project.and_then(|p| p.rig_of(bead)) == Some(row.rig.as_str());
+        let step: Value = (row.config.as_deref())
             .and_then(|c| serde_json::from_str(c).ok())
             .unwrap_or_default();
-        let formula = config["drain"].as_str().unwrap_or_default().to_owned();
+        let formula = step["drain"].as_str().unwrap_or_default().to_owned();
         let Some(input) = self.task_key(&row.project, &formula) else {
             let reason = format!("formula `{formula}` of the drain step is gone or takes no bead");
             return self.terminal(tx, row, "failed", Some("infrastructure"), &reason);
@@ -101,7 +114,7 @@ impl RunHandler {
             rows.collect::<Result<_, _>>()?
         };
         let live = |state: &str| !matches!(state, "passed" | "failed" | "cancelled");
-        let policy: OnItemFailure = serde_json::from_value(config["on_item_failure"].clone()).unwrap_or_default();
+        let policy: OnItemFailure = serde_json::from_value(step["on_item_failure"].clone()).unwrap_or_default();
         // Stopped: a bead of this entry failed under a policy that stops. Derived from the children, so a restart
         // keeps it and a new entry (a repeat, a round) clears it.
         let stopped =
@@ -112,12 +125,12 @@ impl RunHandler {
             }
         }
         // A child in work holds a place of the pool from its creation, queued or running.
-        let pool = usize::try_from(config["pool"].as_u64().unwrap_or(1)).unwrap_or(usize::MAX);
+        let pool = usize::try_from(step["pool"].as_u64().unwrap_or(1)).unwrap_or(usize::MAX);
         let mut free = pool.saturating_sub(kids.iter().filter(|(_, _, state, _)| live(state)).count());
         let depth = row.depth + 1;
         let (mut given, mut refused, mut not_started) = (0, Map::new(), Vec::new());
         for bead in Self::ready_in(tx, &row.project, None)? {
-            if !under.contains(&bead) || kids.iter().any(|(_, b, _, mine)| *mine && *b == bead) {
+            if !under.contains(&bead) || !own(&bead) || kids.iter().any(|(_, b, _, mine)| *mine && *b == bead) {
                 continue;
             }
             if stopped || free == 0 {
@@ -159,7 +172,15 @@ impl RunHandler {
             [tracker_key(&row.project)],
             |r| r.get(0),
         )?;
-        if given > 0 || alive || reads > 1 {
+        // A bead of its own this entry has not given waits on a foreign blocker, or a lock by hand: the step waits
+        // for the read its end brings. The root is no blocker: it ends with this run.
+        let held = !stopped
+            && waits.iter().any(|w| {
+                own(&w.bead)
+                    && !kids.iter().any(|(_, b, _, mine)| *mine && *b == w.bead)
+                    && (w.kind == "status" || (w.blocker != root && (!w.under || !own(&w.blocker))))
+            });
+        if given > 0 || alive || reads > 1 || held {
             return Ok(());
         }
         let outcome = drain_outcome(&kids, stopped, not_started, refused);

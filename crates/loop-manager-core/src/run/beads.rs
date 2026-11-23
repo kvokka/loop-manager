@@ -332,7 +332,7 @@ pub(super) async fn execute(trackers: &Trackers, core: &CoreHandle<Msg>, payload
             let read = async {
                 let changes = tracker.changes(payload["after"].as_i64().unwrap_or_default()).await?;
                 let beads = tracker.ready().await?;
-                let mut under = BTreeMap::new();
+                let (mut under, mut waits) = (BTreeMap::new(), BTreeMap::new());
                 for root in payload["under"]
                     .as_array()
                     .into_iter()
@@ -345,12 +345,18 @@ pub(super) async fn execute(trackers: &Trackers, core: &CoreHandle<Msg>, payload
                         found => found?,
                     };
                     under.insert(root.to_owned(), found);
+                    let held = match tracker.waiting(root).await {
+                        Err(TrackerError::NotFound) => Vec::new(),
+                        held => held?,
+                    };
+                    waits.insert(root.to_owned(), held);
                 }
                 Ok(Msg::Ready {
                     project: text("project").to_owned(),
                     beads,
                     changes,
                     under,
+                    waits,
                 })
             };
             match read.await {

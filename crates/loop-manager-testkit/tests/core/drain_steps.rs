@@ -205,6 +205,7 @@ async fn a_read_older_than_the_end_of_a_child_does_not_end_the_step() {
         beads: Vec::new(),
         changes: Vec::new(),
         under: [(root.clone(), Vec::new())].into_iter().collect(),
+        waits: [(root.clone(), Vec::new())].into_iter().collect(),
     };
     w.core.send(None, stale).await.unwrap();
     let later = w.tracker.add_in("w", &[], Some(&root));
@@ -262,6 +263,7 @@ async fn a_read_that_does_not_know_the_root_decides_nothing() {
         beads: Vec::new(),
         changes: Vec::new(),
         under: BTreeMap::new(),
+        waits: BTreeMap::new(),
     };
     w.core.send(None, blind).await.unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;

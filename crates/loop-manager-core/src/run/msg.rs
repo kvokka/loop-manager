@@ -3,7 +3,7 @@
 use super::{Exit, GateSpec};
 use crate::{
     driver::{DriverEvent, Failure, InstanceHandle, PromptKey, SessionRef},
-    tracker::{Bead, Change, TrackerError},
+    tracker::{Bead, Change, TrackerError, Wait},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -157,12 +157,13 @@ pub enum Msg {
         result: Result<crate::tracker::Lineage, TrackerError>,
     },
     /// The writes to the tracker of `project` after its cursor, its ready set and, for the root bead of each run in
-    /// a drain step when the read was asked, the ready beads under it at any depth.
+    /// a drain step when the read was asked, the ready beads under it at any depth and the open ones that wait.
     Ready {
         project: String,
         beads: Vec<Bead>,
         changes: Vec<Change>,
         under: BTreeMap<String, Vec<String>>,
+        waits: BTreeMap<String, Vec<Wait>>,
     },
     /// The tracker of the project changed: its ready set is read again.
     TrackerChanged(String),

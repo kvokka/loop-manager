@@ -40,12 +40,12 @@ pub(crate) const SWEEP: &[(&str, &str)] = &[
 pub(crate) type Kid = (String, String, String, String, String, String, i64);
 
 impl World {
-    /// Starts `sweep` on `root` on rig `web`; returns its run.
+    /// Starts `sweep` on `root` on the root, which gives the beads of every rig; returns its run.
     pub(crate) async fn sweep(&self, root: &str) -> String {
         for _ in 0..8 {
             self.driver.script(slow_turn());
         }
-        let reply = self.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
+        let reply = self.start_bead("sweep", None, json!(root)).await.unwrap();
         reply["run"].as_str().unwrap().to_owned()
     }
 

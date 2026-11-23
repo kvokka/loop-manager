@@ -741,8 +741,10 @@ step's, else the project's `[exec]`, else the orchestrator's; default false); th
 tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and `LOOP_MANAGER_STEP_*` below),
 so an `env` key cannot replace them. A rig has no `[exec]`.
 
-A `drain` step gives every ready bead under the run's bead, at any depth, a run of `formula`, on each read of the
-tracker, until none is left: the same start as `loop-manager run start` with the bead as the formula's input of type
+A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read
+of the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root
+owns the beads of every rig under its root. Any other bead is foreign — of another place, or outside the subtree: it
+is not given and is no error, it is the work of others with their own acceptance. Each own bead gets the same start as `loop-manager run start` with the bead as the formula's input of type
 `task`, no rig named (the prefix of the bead's id gives it, the project root when it matches no rig, and its
 `agent:`/`harness:` labels apply as to any run), the run's correlation, one level deeper, the run as `parent_run`. A
 bead goes out once per entry of the step: a child that failed is not run again in it, and an attempt cut by a restart
@@ -750,7 +752,11 @@ bead goes out once per entry of the step: a child that failed is not run again i
 `harness:` label the config does not give) gets no run and stays open. The step has no process (contracts 6.2): it ends
 once nothing was given, no child is alive and no later read of the tracker is queued, with
 `data = {closed, failed, refused}` — the beads whose runs passed, those whose runs failed or were cancelled, and the
-refused ones with the reason. `pool` (default 1) is the most beads of the step in work at once: a child holds its place
+refused ones with the reason. The step does not end while an open bead of its own it has not given in this entry waits
+on an open foreign blocker, directly or through its parents (a blocked epic holds all its descendants; a `deferred` or
+`in_progress` blocker holds too), or has a `blocked` status set by hand on itself or a parent: a lock. Its own failed
+beads do not hold it. The tracker's watcher wakes it (`bead.closed` of the blocker); the wait ends at the step's
+`timeout`, which fails the attempt as for any step (`runaway_turn`). `pool` (default 1) is the most beads of the step in work at once: a child holds its place
 from its creation, queued or running, and the end of one gives out the next ready bead. `on_item_failure` says what a
 failed run of a bead does: `continue` (default) — the other beads go on and the step passes; `soft_stop` — no new bead
 goes out, the started ones end; `hard_stop` — the started ones are cancelled too (reason `drain_hard_stop`), on the read
