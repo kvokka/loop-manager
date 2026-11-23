@@ -574,7 +574,7 @@
     },
     "/v1/doctor": {
       "get": {
-        "summary": "The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and br\nbinaries it would run with their versions and logins, its private directories and its state. A check failing is an\n`error` level in the reply, not an error reply.",
+        "summary": "The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and tracker\nbinaries it would run with their versions and logins, its private directories and its state. A check failing is an\n`error` level in the reply, not an error reply.",
         "operationId": "doctor",
         "responses": {
           "200": {
@@ -1447,7 +1447,7 @@
         }
       },
       "post": {
-        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready issue to take (docs/design/tracker-br.md). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
+        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready issue to take (docs/design/contracts.md 2.3). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
         "operationId": "create",
         "parameters": [
           {

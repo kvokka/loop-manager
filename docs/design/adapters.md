@@ -1,4 +1,4 @@
-# Harness adapters
+# Adapters
 
 A harness is an agent CLI loop-manager drives (claude, codex). The core treats every harness as the `Driver` trait
 ([contracts 4](contracts.md#4-driver-interface)); each harness gets an adapter crate, `crates/loop-manager-<name>`, that
@@ -6,6 +6,10 @@ translates its protocol into the trait. Everything known of one harness — its 
 options, its model short names, its `doctor` checks — lives in its adapter. Adapters are modules of the one
 `loop-manager` binary, not processes of their own: there is no adapter protocol between processes; the way to connect an
 outside harness later is a generic ACP v2 driver.
+
+A tracker is the store of a project's issues (br). The core treats every tracker as the `Tracker` trait
+([contracts 5](contracts.md#5-tracker-interface)); each tracker gets an adapter crate in the same way
+([Adding a tracker](#adding-a-tracker)).
 
 Where adapters stand among the other parts, and the boundaries the build checks, is in the
 [architecture](../architecture.md). The adapter never decides policy: retry, park and refuse live in addons and
@@ -133,3 +137,39 @@ Made for the two harnesses there are; none is changed before a harness needs it.
 - `capabilities(&ProcessPart)` takes a process part although the minimum version does not depend on it; the root
   reads it from `Adapter.minimum` instead.
 - `InstanceHandle{pid, start_time, pgid}`: an instance is a local child process of the daemon.
+
+## Adding a tracker
+
+Everything known of one tracker — its calls, where a project keeps it, the environment its tools need in a session,
+the files its own tools read, its `doctor` checks — lives in its adapter crate; the rest of the build names none of it.
+`scripts/core-boundary.sh` checks this for br: outside `crates/loop-manager-br`, its tests and the test crates, no
+Rust code names br, bv, a bead, `.beads` or a `BR_`/`BD_`/`BEADS_` variable.
+
+1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Tracker`.
+2. In it, one exported description of itself:
+
+   ```rust
+   pub const ADAPTER: loop_manager_contract::tracker::Adapter = Adapter {
+       name: "<name>",                    // the binary mise resolves
+       tested: [(0, 7, 6), (0, 7, 6)],    // binary versions tested, oldest and newest; the daemon and doctor warn outside
+       link,                              // fn(&Path) -> TrackerLink
+       new,                               // fn(binary: &Path, dir: &Path) -> Arc<dyn Tracker>
+       watch,                             // fn(&Path, OnChange) -> Result<Watch, String>
+       start,                             // fn(binary: &Path, config: &Path, &[&Project]) -> Vec<String>
+       doctor,                            // fn(binary: &Path, &[&Project]) -> Vec<Check>
+   };
+   ```
+
+   Each gets the directory of a project (that of its `loop-manager.toml`). `link` says whether the project has this
+   tracker (`present`) and how its sessions and commands reach it ([config](config.md)): the variables every one of
+   them gets, naming the tracker explicitly so a tool's own search never climbs to another project's, and the
+   variables that carry the attempt's actor, a rig's prefix, the agent, the harness and the model. A project's tracker
+   is that of the first adapter whose `link` finds it; a project with none gets the first adapter's `link`. `new` is
+   the tracker of a project, `watch` calls its callback at the tracker's writes as long as the returned value lives,
+   so the core reads the changes. `start` runs once at the daemon's start with the projects that have the tracker and
+   writes the files the tracker's own tools read (br: `.bv/workspace.yaml` next to the orchestrator config); it
+   returns warnings, not errors. `doctor` gives the checks beyond the binary's version, which the root makes from
+   `tested`.
+3. One row in `TRACKERS` (`crates/loop-manager/src/tracker.rs`) and the crate in `crates/loop-manager/Cargo.toml`.
+4. The binary pinned in `mise.toml` and contract tests of the adapter on it (br:
+   `crates/loop-manager-br/tests/contract.rs`).

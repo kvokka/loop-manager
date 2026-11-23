@@ -10,21 +10,108 @@ mod parse;
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Change, Commented, Issue, Lineage, Tracker, TrackerError, Wait},
+    config::{Project, TrackerLink},
+    driver::Check,
+    tracker::{Adapter, Change, Commented, Issue, Lineage, OnChange, Tracker, TrackerError, Wait, Watch},
 };
 use parse::{bead, commented, field};
-use serde_json::Value;
-use std::path::{Path, PathBuf};
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-/// The br versions the adapter is tested on, oldest and newest; the daemon warns outside them.
-pub const TESTED: [(u32, u32, u32); 2] = [(0, 7, 6), (0, 7, 6)];
+/// br as a tracker adapter: the tracker of a project with a `.beads` directory.
+pub const ADAPTER: Adapter = Adapter {
+    name: "br",
+    tested: [(0, 7, 6), (0, 7, 6)],
+    link,
+    new: |binary, dir| Arc::new(Br::new(binary.to_owned(), dir.join(".beads"))),
+    watch,
+    start: bv_workspace,
+    doctor,
+};
 /// How long a call (and a read of `events`) waits for br's write lock before it is `Unavailable`.
 const LOCK_TIMEOUT_MS: u64 = 10_000;
 /// The actor of the daemon's own reads.
 const READER: &str = "loop-manager";
 
+/// br is the tracker of a project with a `.beads` directory, always named by an explicit path: its own search would
+/// climb to another project's (docs/design/tracker-br.md).
+fn link(project: &Path) -> TrackerLink {
+    let dir = project.join(".beads");
+    TrackerLink {
+        present: dir.is_dir(),
+        env: BTreeMap::from([
+            ("BEADS_DIR".to_owned(), dir.to_string_lossy().into_owned()),
+            ("BR_OUTPUT_FORMAT".to_owned(), "toon".to_owned()),
+        ]),
+        actor: Some("BD_ACTOR".to_owned()),
+        prefix: Some("BD_ISSUE_PREFIX".to_owned()),
+        agent: Some("BR_AGENT_NAME".to_owned()),
+        harness: Some("BR_HARNESS".to_owned()),
+        model: Some("BR_MODEL".to_owned()),
+    }
+}
+
+/// The checks of `loop-manager doctor` beyond br's version: its license, and a rig with the prefix of the root's issues.
+fn doctor(binary: &Path, projects: &[&Project]) -> Vec<Check> {
+    let mut found = vec![Check::new(
+        "br license",
+        "warning",
+        "br is MIT with an OpenAI/Anthropic rider, not an OSI license; loop-manager only runs the installed binary — \
+         check that the rider fits your use",
+    )];
+    // A rig's issues must not share the prefix of the root's (docs/design/tracker-br.md).
+    for p in projects {
+        let Some(db) = issue_prefix(binary, &p.dir.join(".beads")) else {
+            continue;
+        };
+        for (rig, _) in p.rigs.iter().filter(|(_, r)| r.prefix.as_deref() == Some(db.as_str())) {
+            found.push(Check::new(
+                "br prefix",
+                "warning",
+                format!(
+                    "rig `{rig}` of project `{}` has the prefix `{db}` of the br database, so the root's issues read \
+                     as its own; set `prefix` in `[rigs.{rig}]`",
+                    p.name
+                ),
+            ));
+        }
+    }
+    found
+}
+
+/// Writes `.bv/workspace.yaml` next to the orchestrator config `config`: one repository per project with br, so `bv`
+/// run there (or with `--workspace`) shows every project's issues (docs/design/tracker-br.md). The trackers are fixed
+/// for the daemon's life (a reload changing them is refused), so the file is written at start only.
+fn bv_workspace(binary: &Path, config: &Path, projects: &[&Project]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let mut yaml =
+        "# Written by loop-manager at daemon start from the project configs; edits are lost.\nname: loop-manager\nrepos:\n".to_owned();
+    for Project { name, dir, .. } in projects {
+        // JSON strings are YAML double-quoted scalars.
+        yaml.push_str(&format!("  - name: {}\n    path: {}\n", json!(name), json!(dir)));
+        // The id prefix br was initialized with; without it bv assumes `<name>-`.
+        match issue_prefix(binary, &dir.join(".beads")) {
+            Some(prefix) => yaml.push_str(&format!("    prefix: {}\n", json!(format!("{prefix}-")))),
+            None => warnings.push(format!("no br id prefix of `{name}`; bv assumes `{name}-`")),
+        }
+    }
+    let dir = config.parent().unwrap_or(Path::new(".")).join(".bv");
+    let file = dir.join("workspace.yaml");
+    let written = std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))
+        .and_then(|()| std::fs::write(&file, yaml).map_err(|e| format!("{}: {e}", file.display())));
+    if let Err(e) = written {
+        warnings.push(format!("the bv workspace file: {e}"));
+    }
+    warnings
+}
+
 /// The id prefix the database in the `.beads` directory `dir` was initialized with; none when br does not say.
-pub fn issue_prefix(binary: &Path, dir: &Path) -> Option<String> {
+fn issue_prefix(binary: &Path, dir: &Path) -> Option<String> {
     let mut command = std::process::Command::new(binary);
     command.args(["config", "get", "issue_prefix"]).env("BEADS_DIR", dir);
     let out = loop_manager_contract::orphans::output_std(&mut command).ok()?;
@@ -454,10 +541,11 @@ fn sql(e: rusqlite::Error) -> TrackerError {
     unavailable(format!("br database: {e}"))
 }
 
-/// Watches the `.beads` directory (not the file: br replaces `issues.jsonl` by a rename, once per write) and calls
-/// `on_change` for each such rename; a lost or extra call costs nothing, the reader goes by its cursor. The watch
-/// lasts as long as the returned watcher.
-pub fn watch(dir: &Path, on_change: impl Fn() + Send + 'static) -> Result<notify::RecommendedWatcher, String> {
+/// Watches the `.beads` directory of the project in `project` (not the file: br replaces `issues.jsonl` by a rename,
+/// once per write) and calls `on_change` for each such rename; a lost or extra call costs nothing, the reader goes by
+/// its cursor. The watch lasts as long as the returned watcher.
+fn watch(project: &Path, on_change: OnChange) -> Result<Watch, String> {
+    let dir = project.join(".beads");
     use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if let Ok(e) = event
@@ -469,7 +557,7 @@ pub fn watch(dir: &Path, on_change: impl Fn() + Send + 'static) -> Result<notify
     })
     .map_err(|e| e.to_string())?;
     watcher
-        .watch(dir, RecursiveMode::NonRecursive)
+        .watch(&dir, RecursiveMode::NonRecursive)
         .map_err(|e| format!("{}: {e}", dir.display()))?;
-    Ok(watcher)
+    Ok(Box::new(watcher))
 }

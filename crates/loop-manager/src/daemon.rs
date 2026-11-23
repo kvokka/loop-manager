@@ -2,14 +2,13 @@
 //! SIGINT.
 
 use crate::harness::{binary, driver, load, minimum};
-use loop_manager_br::Br;
 use loop_manager_core::{
     Clock, CoreHandle, Journal,
     config::Config,
     driver::Driver,
     open,
     run::{self, ExecHooks, Msg, Reader},
-    tracker::Tracker,
+    tracker::{Adapter, Tracker},
 };
 use loop_manager_front::{
     api::{self, Api},
@@ -112,7 +111,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         drivers.push(driver);
     }
     let issues = issues(&config);
-    let trackers = trackers(&paths.config, &issues);
+    let trackers = trackers(&paths.config, &config);
     let config = Arc::new(config);
     let (core, mut task) = run::start(
         conn,
@@ -210,45 +209,43 @@ async fn bind_tcp(config: &mut Config, state: &Path) -> Result<Option<TcpListene
         .map_err(|e| format!("api_tcp {addr}: {e}"))
 }
 
-/// The projects with a `.beads` directory, which have br as their tracker (docs/design/tracker-br.md), and that directory.
-fn issues(config: &Config) -> Vec<(String, PathBuf)> {
+/// The projects with a tracker: their name, their directory and the adapter of their tracker.
+fn issues(config: &Config) -> Vec<(String, PathBuf, &'static Adapter)> {
     (config.projects.iter())
-        .map(|p| (p.name.clone(), p.dir.join(".beads")))
-        .filter(|(_, dir)| dir.is_dir())
+        .filter_map(|p| Some((p.name.clone(), p.dir.clone(), crate::tracker::of(&p.dir)?)))
         .collect()
 }
 
-fn trackers(config_file: &Path, issues: &[(String, PathBuf)]) -> BTreeMap<String, Arc<dyn Tracker>> {
-    let br = binary("br", None).0;
-    let trackers = issues
-        .iter()
-        .map(|(name, dir)| {
-            (
-                name.clone(),
-                Arc::new(Br::new(br.clone(), dir.clone())) as Arc<dyn Tracker>,
-            )
-        })
-        .collect();
-    if let Some(why) = (!issues.is_empty())
-        .then(|| loop_manager_core::tested_version(&br, loop_manager_br::TESTED).err())
-        .flatten()
-    {
-        eprintln!("loop-manager daemon: warning: {why}");
-    }
-    if let Err(e) = bv_workspace(config_file, &br, issues) {
-        eprintln!("loop-manager daemon: warning: the bv workspace file: {e}");
+fn trackers(config_file: &Path, config: &Config) -> BTreeMap<String, Arc<dyn Tracker>> {
+    let mut trackers = BTreeMap::new();
+    for adapter in crate::tracker::TRACKERS {
+        let projects = crate::tracker::projects(config, adapter);
+        if projects.is_empty() {
+            continue;
+        }
+        let binary = binary(adapter.name, None).0;
+        for p in &projects {
+            trackers.insert(p.name.clone(), (adapter.new)(&binary, &p.dir));
+        }
+        let version = loop_manager_core::tested_version(&binary, adapter.tested).err();
+        for why in version
+            .into_iter()
+            .chain((adapter.start)(&binary, config_file, &projects))
+        {
+            eprintln!("loop-manager daemon: warning: {why}");
+        }
     }
     trackers
 }
 
 /// Keeps filesystem watches active until the daemon drops the returned guard.
-async fn watch_trackers(core: CoreHandle<Msg>, issues: Vec<(String, PathBuf)>) -> impl Drop {
+async fn watch_trackers(core: CoreHandle<Msg>, issues: Vec<(String, PathBuf, &'static Adapter)>) -> impl Drop {
     // Each watched write tells the core to read its project's tracker; a burst of writes is one read.
     let (changed, mut changes) = mpsc::unbounded_channel::<String>();
     let mut watchers = Vec::new();
-    for (name, dir) in issues {
+    for (name, dir, adapter) in issues {
         let (changed, project) = (changed.clone(), name.clone());
-        match loop_manager_br::watch(&dir, move || drop(changed.send(project.clone()))) {
+        match (adapter.watch)(&dir, Box::new(move || drop(changed.send(project.clone())))) {
             Ok(w) => watchers.push(w),
             Err(e) => {
                 eprintln!("loop-manager daemon: warning: tracker of `{name}` is not watched: {e}");
@@ -328,31 +325,6 @@ fn stop_signal() -> io::Result<impl Future<Output = ()> + Send + 'static> {
             _ = int.recv() => {}
         }
     })
-}
-
-/// Writes `.bv/workspace.yaml` next to the orchestrator config: one repository per project with a tracker, so `bv`
-/// run there (or with `--workspace`) shows every project's issues (docs/design/tracker-br.md). The trackers are fixed
-/// for the daemon's life (a reload changing them is refused), so the file is written at start only.
-fn bv_workspace(config: &Path, br: &Path, issues: &[(String, PathBuf)]) -> Result<(), String> {
-    if issues.is_empty() {
-        return Ok(());
-    }
-    let mut yaml =
-        "# Written by loop-manager at daemon start from the project configs; edits are lost.\nname: loop-manager\nrepos:\n".to_owned();
-    for (name, dir) in issues {
-        let root = dir.parent().unwrap_or(dir);
-        // JSON strings are YAML double-quoted scalars.
-        yaml.push_str(&format!("  - name: {}\n    path: {}\n", json!(name), json!(root)));
-        // The id prefix br was initialized with; without it bv assumes `<name>-`.
-        match loop_manager_br::issue_prefix(br, dir) {
-            Some(prefix) => yaml.push_str(&format!("    prefix: {}\n", json!(format!("{prefix}-")))),
-            None => eprintln!("loop-manager daemon: warning: no br id prefix of `{name}`; bv assumes `{name}-`"),
-        }
-    }
-    let dir = config.parent().unwrap_or(Path::new(".")).join(".bv");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let file = dir.join("workspace.yaml");
-    std::fs::write(&file, yaml).map_err(|e| format!("{}: {e}", file.display()))
 }
 
 #[cfg(test)]

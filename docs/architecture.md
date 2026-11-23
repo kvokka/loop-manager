@@ -30,6 +30,11 @@ These are checked by the build, not kept by agreement.
   `loop-manager-addons`) build without `loop-manager-core`.
 - A harness is an abstraction to the core. The root of the build holds the one table of adapters
   (`crates/loop-manager/src/harness.rs`), the only place that names a harness.
+- So is a tracker. Everything of br — where a project keeps it, its session environment, its `doctor` checks, the bv
+  workspace file — lives in `loop-manager-br`; the root holds the one table of tracker adapters
+  (`crates/loop-manager/src/tracker.rs`), and `scripts/core-boundary.sh` checks that no other Rust code outside tests
+  names br, bv, `.beads` or a `BR_`/`BD_`/`BEADS_` variable. Adding a tracker is adding a crate and its row
+  ([adapters](design/adapters.md#adding-a-tracker)).
 - Adapters and frontends only translate protocols.
 - Policy (retry, park, refuse) lives in addons and config, judgement ("is the work done well") in prompts and the
   checks of addons; the core keeps only mechanisms
@@ -46,7 +51,7 @@ These are checked by the build, not kept by agreement.
 | `loop-manager-br` | the br tracker adapter: every call is one `br` process on the project's database | [tracker](design/tracker-br.md) |
 | `loop-manager-front` | the frontends: the HTTP API on the daemon's unix socket, the CLI and its client, the MCP server and the read-only ACPv2 command | [frontends](api/frontends.md), [MCP](api/mcp.md), [OpenAPI](api/openapi.json) |
 | `loop-manager-addons` | the bundled addons `default-policy` and `worktree`, in-process executors of the hook contract | [config: bundled addons](design/config.md#bundled-addons-builtinname), [contracts 10](design/contracts.md#10-default-policy-as-decisions) |
-| `loop-manager` | the binary: the daemon, the adapter table, `doctor`, the git cache of packs and addons, the stdio→HTTP MCP bridge | [install](guide/install.md) |
+| `loop-manager` | the binary: the daemon, the tables of harness and tracker adapters, `doctor`, the git cache of packs and addons, the stdio→HTTP MCP bridge | [install](guide/install.md) |
 | `loop-manager-testkit` | test doubles: the scripted driver, fake providers, a test MCP service. Nothing of it runs in the product | [development](guide/development.md) |
 | `loop-manager-acceptance` | end-to-end scenarios on a real daemon and real binaries, run on request | [acceptance](acceptance.md) |
 

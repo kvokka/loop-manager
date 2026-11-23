@@ -1,5 +1,5 @@
 //! The checks of `loop-manager doctor` (docs/guide/install.md), made by the daemon (`GET /v1/doctor`) or, for a file named with
-//! `--config`, by the CLI without one: the harness and br binaries with their versions and logins, the private
+//! `--config`, by the CLI without one: the harness and tracker binaries with their versions and logins, the private
 //! directories, the state and its outbox; and `loop-manager daemon --service`, the service file that runs the daemon.
 
 use crate::{
@@ -47,35 +47,17 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
                 let checks = (adapter.doctor)(&agents(&config, name));
                 found.extend(checks.into_iter().map(|c| check(c.check, c.level, c.detail)));
             }
-            if config.projects.iter().any(|p| p.dir.join(".beads").is_dir()) {
-                let (path, source) = binary("br", None);
-                found.push(binary_check("br", &path, source, |p| {
-                    loop_manager_core::tested_version(p, loop_manager_br::TESTED)
-                }));
-                found.push(check(
-                    "br license",
-                    "warning",
-                    "br is MIT with an OpenAI/Anthropic rider, not an OSI license; loop-manager only runs the installed \
-                     binary — check that the rider fits your use",
-                ));
-                // A rig's issues must not share the prefix of the root's (docs/design/tracker-br.md); the core does not
-                // know br.
-                for p in config.projects.iter().filter(|p| p.dir.join(".beads").is_dir()) {
-                    let Some(db) = loop_manager_br::issue_prefix(&path, &p.dir.join(".beads")) else {
-                        continue;
-                    };
-                    for (rig, _) in p.rigs.iter().filter(|(_, r)| r.prefix.as_deref() == Some(db.as_str())) {
-                        found.push(check(
-                            "br prefix",
-                            "warning",
-                            format!(
-                                "rig `{rig}` of project `{}` has the prefix `{db}` of the br database, so the root's \
-                                 issues read as its own; set `prefix` in `[rigs.{rig}]`",
-                                p.name
-                            ),
-                        ));
-                    }
+            for adapter in crate::tracker::TRACKERS {
+                let projects = crate::tracker::projects(&config, adapter);
+                if projects.is_empty() {
+                    continue;
                 }
+                let (path, source) = binary(adapter.name, None);
+                found.push(binary_check(adapter.name, &path, source, |p| {
+                    loop_manager_core::tested_version(p, adapter.tested)
+                }));
+                let checks = (adapter.doctor)(&path, &projects);
+                found.extend(checks.into_iter().map(|c| check(c.check, c.level, c.detail)));
             }
         }
     }

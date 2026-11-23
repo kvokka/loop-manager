@@ -7,6 +7,7 @@ mod daemon;
 mod doctor;
 mod git_cache;
 mod harness;
+mod tracker;
 
 use clap::Parser;
 use loop_manager_front::cli::{self, CacheCommand, Cli, Command, ConfigCommand};

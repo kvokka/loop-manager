@@ -2,9 +2,41 @@
 //! tracker of a project. The daemon is the only claimer (invariant 3); the state of the orchestrator is the truth of
 //! ownership and the assignee in the tracker mirrors it (docs/design/contracts.md 5).
 
-use crate::BoxFuture;
+use crate::{
+    BoxFuture,
+    config::{Project, TrackerLink},
+    driver::Check,
+};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, path::Path, sync::Arc};
+
+/// A watch of a tracker: it lasts as long as this value.
+pub type Watch = Box<dyn Send>;
+/// What a watch calls at a write to its tracker.
+pub type OnChange = Box<dyn Fn() + Send>;
+
+/// A tracker adapter (docs/design/adapters.md "Adding a tracker"): everything the root of the build knows of one
+/// tracker. The tracker of a project is that of the first adapter of the build whose `link` finds it in the project.
+pub struct Adapter {
+    /// The tracker's name: the binary mise resolves.
+    pub name: &'static str,
+    /// The versions of the binary the adapter is tested on, oldest and newest, inclusive; the daemon and `doctor` warn
+    /// outside them.
+    pub tested: [(u32, u32, u32); 2],
+    /// How the sessions and commands of the project in the directory `dir` reach this tracker; `present` when the
+    /// project has it.
+    pub link: fn(dir: &Path) -> TrackerLink,
+    /// The tracker of the project in `dir`, through `binary`.
+    pub new: fn(binary: &Path, dir: &Path) -> Arc<dyn Tracker>,
+    /// Calls `on_change` at writes to the tracker of the project in `dir` as long as the returned watch lives; a lost
+    /// or extra call costs nothing, the reader goes by its cursor.
+    pub watch: fn(dir: &Path, on_change: OnChange) -> Result<Watch, String>,
+    /// The daemon's start, with the orchestrator config file `config` and the `projects` that have this tracker: the
+    /// files it writes for the tracker's own tools; its warnings.
+    pub start: fn(binary: &Path, config: &Path, projects: &[&Project]) -> Vec<String>,
+    /// The checks of `loop-manager doctor` for the `projects` that have this tracker, beyond the binary's version.
+    pub doctor: fn(binary: &Path, projects: &[&Project]) -> Vec<Check>,
+}
 
 /// An issue (contracts 5.2); `epic` is computed by the adapter, the rig of an issue is the prefix of its id.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

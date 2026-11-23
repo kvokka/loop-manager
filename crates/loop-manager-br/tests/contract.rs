@@ -352,10 +352,10 @@ async fn the_lineage_of_a_bead_is_its_fields_its_comments_and_its_parents_from_t
 async fn each_command_is_one_change_with_its_actor_and_the_watcher_signals_it() {
     let (dir, t) = tracker();
     let (tx, rx) = mpsc::channel();
-    let _watch = loop_manager_br::watch(&dir.path().join(".beads"), move || {
+    let on_change = Box::new(move || {
         let _ = tx.send(());
-    })
-    .unwrap();
+    });
+    let _watch = (loop_manager_br::ADAPTER.watch)(dir.path(), on_change).unwrap();
     let id = create(dir.path(), "Three", &["-l", "agent:coder"]);
     assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok(), "a write is signalled");
     t.claim("loop-manager:run_1:1", &id).await.unwrap();

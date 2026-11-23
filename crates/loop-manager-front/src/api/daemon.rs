@@ -30,7 +30,7 @@ pub(crate) async fn status(state: State) -> Reply {
     Ok(Json(daemon))
 }
 
-/// The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and br
+/// The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and tracker
 /// binaries it would run with their versions and logins, its private directories and its state. A check failing is an
 /// `error` level in the reply, not an error reply.
 #[utoipa::path(get, path = "/v1/doctor", responses((status = OK, body = [Finding])))]

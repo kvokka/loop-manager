@@ -50,7 +50,7 @@ pub(crate) struct ParentAttempt {
 }
 
 /// Starts a run of a formula; the reply is `{"run": "<id>"}`, or `{"nothing_ready": true}` when a task input
-/// `{ next_ready = true }` finds no ready issue to take (docs/design/tracker-br.md). With `parent`, a stale token or a
+/// `{ next_ready = true }` finds no ready issue to take (docs/design/contracts.md 2.3). With `parent`, a stale token or a
 /// chain deeper than 10 is `rejected`.
 #[utoipa::path(post, path = "/v1/runs", request_body = CreateRun,
     params(("Idempotency-Key" = Option<String>, Header, description = "Repeats return the first reply")),

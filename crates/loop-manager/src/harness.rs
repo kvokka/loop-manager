@@ -83,18 +83,8 @@ pub(crate) fn load(paths: &Paths) -> Result<config::Config, Vec<String>> {
     let checkouts = crate::git_cache::checkouts(&paths.cache, file);
     let mut config = config::load_for(file, ADAPTERS, checkouts)
         .map_err(|errors| errors.iter().map(ToString::to_string).collect::<Vec<_>>())?;
-    // br is the tracker of a project with a `.beads` directory, always named by an explicit path: its own search
-    // would climb to another project's (docs/design/tracker-br.md).
     for p in &mut config.projects {
-        let dir = p.dir.join(".beads");
-        p.tracker.present = dir.is_dir();
-        (p.tracker.env).insert("BEADS_DIR".to_owned(), dir.to_string_lossy().into_owned());
-        p.tracker.env.insert("BR_OUTPUT_FORMAT".to_owned(), "toon".to_owned());
-        p.tracker.actor = Some("BD_ACTOR".to_owned());
-        p.tracker.prefix = Some("BD_ISSUE_PREFIX".to_owned());
-        p.tracker.agent = Some("BR_AGENT_NAME".to_owned());
-        p.tracker.harness = Some("BR_HARNESS".to_owned());
-        p.tracker.model = Some("BR_MODEL".to_owned());
+        p.tracker = crate::tracker::link(&p.dir);
     }
     config.addon_data = Some(paths.state.join("addons"));
     #[cfg(target_os = "linux")]

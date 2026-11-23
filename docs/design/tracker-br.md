@@ -3,8 +3,8 @@
 How loop-manager uses [br](https://github.com/Dicklesworthstone/beads_rust) (beads_rust) as the tracker of a project.
 br calls an issue a bead; loop-manager and this document say issue.
 The tracker interface and its errors are in [contracts.md, section 5](contracts.md#5-tracker-interface); the issue and
-run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-manager-br` (the adapter), `crates/loop-manager-core/src/run/issues.rs` and
-`run/issue_events.rs` (the core side), `crates/loop-manager/src/daemon.rs` (the bv workspace file).
+run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-manager-br` (the adapter, the bv workspace file and the br checks of `doctor`),
+`crates/loop-manager-core/src/run/issues.rs` and `run/issue_events.rs` (the core side).
 
 ## An external binary, and its license
 
@@ -205,7 +205,7 @@ applied), so the state is read again before a repeat.
 ## Versions
 
 - Development and tests use the br pinned in `mise.toml`. The adapter declares the versions it was tested on
-  (`loop_manager_br::TESTED`); the daemon at start and `loop-manager doctor` warn about a version outside them.
+  (`tested` of `loop_manager_br::ADAPTER`); the daemon at start and `loop-manager doctor` warn about a version outside them.
 - br has had regressions between patch versions, so the adapter has its own contract tests on the pinned br
   (`crates/loop-manager-br/tests/contract.rs`): claim under concurrency, conditional release, close, ready in an epic,
   the ready issues under a root, the changes of each command, the watcher, creation once per key, the close of a parent
