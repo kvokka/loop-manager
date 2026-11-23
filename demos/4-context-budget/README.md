@@ -74,7 +74,7 @@ with the layer that set it.
 ## What to check
 
 - The comments on the issue of `glossarist`, in `RESULT.md`: the agent's summary of its work, written when it wrapped
-  up. The tracker stays in `root/` after the run, its daemon stopped: [issue trackers](../../docs/guide/issue-trackers.md)
-  says how to look into it directly.
+  up. The tracker stays in `root/` after the run, its daemon stopped:
+  [issue trackers](../../docs/guide/issue-trackers.md) says how to look into it directly.
 - `.loop-manager/state/loop-manager/addons/context-budget/`: the files the addon keeps for each session,
   `<session>.*`.
