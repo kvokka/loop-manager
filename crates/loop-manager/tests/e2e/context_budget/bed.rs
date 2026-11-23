@@ -1,12 +1,12 @@
-//! The bed of the hook tests: a tracker with one bead, a stand-in `loop-manager`, transcripts and the hook run on them.
+//! The bed of the hook tests: a stand-in `loop-manager`, a `br` that fails, transcripts and the hook run on them.
 
 use super::*;
 
-/// A hook test bed: a `br` tracker with one bead, a stand-in `loop-manager` and the addon's data directory, with a
+/// A hook test bed: a stand-in `loop-manager` that records the outcomes and the comments it is given, a `br` that
+/// fails, so that a comment can reach the bead only through `loop-manager`, and the addon's data directory, with a
 /// budget of 1000 soft, 7000 hard and a note every 500.
 pub(super) struct Bed {
     dir: tempfile::TempDir,
-    bead: String,
     /// What the hooks printed, to look for the hard limit in.
     said: std::cell::RefCell<String>,
     /// Whether the run has a bead: `LOOP_MANAGER_BEAD` is set for the hook.
@@ -17,22 +17,24 @@ impl Bed {
     pub(super) fn new(cut: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
-        let br = |args: &[&str]| br(d, args);
-        br(&["init", "-q"]);
-        let created: Value = serde_json::from_str(&br(&["create", "task", "--json"])).unwrap();
         fs::create_dir_all(d.join("bin")).unwrap();
         fs::create_dir_all(d.join("data")).unwrap();
         fs::create_dir_all(d.join("work")).unwrap();
         git(&d.join("work"), &["init", "-q"]);
         commit(&d.join("work"), "start");
         fs::write(d.join("work/notes.md"), "half done").unwrap();
-        let fake = "#!/bin/sh\necho \"$*\" >>\"$(dirname \"$0\")/finished\"\necho accepted\n";
-        fs::write(d.join("bin/loop-manager"), fake).unwrap();
-        fs::set_permissions(d.join("bin/loop-manager"), fs::Permissions::from_mode(0o755)).unwrap();
+        // A comment's text is one JSON string per line of `comments`; any other call is one line of `finished`.
+        let fake = "#!/bin/sh\nbin=$(dirname \"$0\")\ncase $1 in\n\
+                    comment) [ \"$2\" = --file ] && jq -Rs . \"$3\" >>\"$bin/comments\" || exit 2 ;;\n\
+                    *) echo \"$*\" >>\"$bin/finished\" ;;\nesac\necho accepted\n";
+        let br = "#!/bin/sh\necho \"$*\" >>\"$(dirname \"$0\")/br-called\"\nexit 127\n";
+        for (name, text) in [("loop-manager", fake), ("br", br)] {
+            fs::write(d.join("bin").join(name), text).unwrap();
+            fs::set_permissions(d.join("bin").join(name), fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::write(d.join("cut"), cut).unwrap();
         Bed {
             dir,
-            bead: created["id"].as_str().unwrap().to_owned(),
             said: Default::default(),
             with_bead: std::cell::Cell::new(true),
         }
@@ -79,7 +81,6 @@ impl Bed {
         let mut command = common::program(addon().join("hooks/budget"));
         command
             .args([data.to_str().unwrap(), "1000", "7000", "500", &cut])
-            .env("BEADS_DIR", d.join(".beads"))
             .env("LOOP_MANAGER_RUN", "r1")
             .env("RUST_LOG", "error")
             .env(
@@ -87,7 +88,7 @@ impl Bed {
                 format!("{}:{}", d.join("bin").display(), std::env::var("PATH").unwrap()),
             );
         if self.with_bead.get() {
-            command.env("LOOP_MANAGER_BEAD", &self.bead);
+            command.env("LOOP_MANAGER_BEAD", "t-1");
         }
         let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         child
@@ -111,10 +112,12 @@ impl Bed {
         self.hook(json!({ "hook_event_name": event, "tool_name": tool }))
     }
 
+    /// The texts of the comments the hooks left with `loop-manager comment`, oldest first; no hook called `br`.
     pub(super) fn comments(&self) -> Vec<String> {
-        let out = br(self.path(), &["comments", "list", &self.bead, "--json"]);
-        let list: Vec<Value> = serde_json::from_str(&out).unwrap();
-        list.iter().map(|c| c["text"].as_str().unwrap().to_owned()).collect()
+        let br = fs::read_to_string(self.path().join("bin/br-called")).unwrap_or_default();
+        assert_eq!(br, "", "br was called");
+        let out = fs::read_to_string(self.path().join("bin/comments")).unwrap_or_default();
+        out.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
     }
 
     pub(super) fn finished(&self) -> String {
@@ -139,18 +142,6 @@ pub(super) fn commit(dir: &Path, message: &str) {
         dir,
         &[&id[..], &["commit", "-q", "--allow-empty", "-m", message]].concat(),
     );
-}
-
-fn br(dir: &Path, args: &[&str]) -> String {
-    let out = common::program("br")
-        .args(args)
-        .current_dir(dir)
-        .env("BEADS_DIR", dir.join(".beads"))
-        .env("RUST_LOG", "error")
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "br {args:?}");
-    String::from_utf8(out.stdout).unwrap()
 }
 
 pub(super) fn note(answer: &Value) -> &str {

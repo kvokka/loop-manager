@@ -125,7 +125,7 @@ fn past_soft_a_codex_session_is_told_to_wrap_up_by_the_last_count_and_may_spawn_
     );
     for part in [
         "call no subagents",
-        "br comments add \"$LOOP_MANAGER_BEAD\"",
+        "loop-manager comment --file <file>",
         "loop-manager finish",
     ] {
         assert!(text.contains(part), "{part}: {text}");

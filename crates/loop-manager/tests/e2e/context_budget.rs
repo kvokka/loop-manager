@@ -115,7 +115,7 @@ fn past_soft_the_agent_is_told_to_wrap_up_again_every_warn_step_and_may_call_no_
     );
     for part in [
         "call no subagents",
-        "br comments add \"$LOOP_MANAGER_BEAD\"",
+        "loop-manager comment --file <file>",
         "loop-manager finish",
     ] {
         assert!(text.contains(part), "{part}: {text}");
@@ -224,7 +224,7 @@ fn a_run_without_a_bead_is_told_to_put_its_summary_in_finish() {
     bed.transcript("s1.jsonl", 1200);
     let text = note(&bed.tool("PostToolUse", "Bash")).to_owned();
     assert!(text.contains("your summary in `--summary`"), "{text}");
-    assert!(!text.contains("br comments add"), "{text}");
+    assert!(!text.contains("loop-manager comment"), "{text}");
 }
 
 #[test]

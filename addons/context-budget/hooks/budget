@@ -109,7 +109,7 @@ cut_off() {
     if [ ! -f "$stop" ]; then
         dump "$1" >"$me.dump.md"
         if [ -n "${LOOP_MANAGER_BEAD:-}" ]; then
-            br comments add "$LOOP_MANAGER_BEAD" --file "$me.dump.md" >/dev/null ||
+            loop-manager comment --file "$me.dump.md" >/dev/null ||
                 echo "context-budget: the dump is not on $LOOP_MANAGER_BEAD" >&2
         fi
         # A subagent's stop is its own: the session goes on, and its agent declares the outcome.
@@ -178,7 +178,7 @@ PostToolUse)
     if [ -n "$agent" ]; then
         context "$wrap; then return your summary to your caller: $summary."
     elif [ -n "${LOOP_MANAGER_BEAD:-}" ]; then
-        context "$wrap; commit what is done; leave your summary on the bead with \`br comments add \"\$LOOP_MANAGER_BEAD\" \"...\"\`: $summary; then end with \`loop-manager finish\`."
+        context "$wrap; commit what is done; write your summary to a file and leave it on the bead with \`loop-manager comment --file <file>\`: $summary; then end with \`loop-manager finish\`."
     else
         context "$wrap; commit what is done; then end with \`loop-manager finish\`, your summary in \`--summary\`: $summary."
     fi

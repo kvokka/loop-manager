@@ -1,5 +1,5 @@
 name = "lessons"
-version = "0.1.0"
+version = "0.2.0"
 harnesses = ["claude", "codex"]
 
 # The turn in which the agent declared its outcome ends: the hook asks the same session for its lessons once, and

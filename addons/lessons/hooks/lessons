@@ -22,10 +22,8 @@ if [ -f "$me.asked" ]; then
     # An empty answer or NONE: nothing to publish.
     word=$(printf '%s' "$notes" | tr -d '[:space:].`*_' | tr '[:lower:]' '[:upper:]')
     case $word in "" | NONE) exit 0 ;; esac
-    cwd=$(field .cwd)
-    [ -z "$cwd" ] || cd "$cwd"
     printf 'LESSONS: %s\n\n%s' "$LOOP_MANAGER_RUN" "$notes" >"$me.lessons.md"
-    br comments add "$LOOP_MANAGER_BEAD" --file "$me.lessons.md" >/dev/null ||
+    loop-manager comment --file "$me.lessons.md" >/dev/null ||
         echo "lessons: the lessons of $session are not on $LOOP_MANAGER_BEAD" >&2
     exit 0
 fi

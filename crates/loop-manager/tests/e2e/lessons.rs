@@ -1,6 +1,7 @@
 //! The addon `addons/lessons` of this repository on a real daemon, with the real `claude` on the fake Anthropic API and
 //! the real `codex app-server` on the fake Responses API: once the agent declared its outcome, the same session is asked
-//! for its lessons, and a useful answer goes on the run's bead once, an empty one nowhere (addons/lessons/README.md).
+//! for its lessons, and a useful answer goes on the run's bead once, through `loop-manager comment`, an empty one
+//! nowhere (addons/lessons/README.md).
 
 use crate::common::{self, Daemon};
 use loop_manager_testkit::{anthropic, openai};
@@ -16,7 +17,10 @@ const ASKED: &str = "ASD-STE100 Simplified Technical English";
 const NOTE: &str = "- When `cargo test` cannot find the fixture, run it from the crate directory.";
 
 /// A daemon whose formula `fix` is a run of the agent `dev` on a bead, `agent` its harness settings, with the addon
-/// attached and `loop-manager` on the `PATH` of its sessions.
+/// attached and `loop-manager` on the `PATH` of its sessions. The `br` there makes br unusable for the sessions, so a
+/// comment can reach the bead only through `loop-manager`: called with `LOOP_MANAGER_RUN` set, as in a session, it
+/// records the call and fails ([`br_unused`]); called by the daemon's own tracker adapter, it runs the real `br` of the
+/// rest of the `PATH`.
 async fn daemon(agent: &str) -> Daemon {
     daemon_with("[{ name = \"lessons\" }]", agent).await
 }
@@ -57,6 +61,13 @@ async fn daemon_with(addons: &str, agent: &str) -> Daemon {
         }
         fs::create_dir_all(dir.join("path")).unwrap();
         std::os::unix::fs::symlink(common::EXE, dir.join("path/loop-manager")).unwrap();
+        let fails = format!(
+            "#!/bin/sh\nif [ -n \"${{LOOP_MANAGER_RUN:-}}\" ]; then echo \"$*\" >>'{}'; exit 127; fi\n\
+             PATH=${{PATH#*:}} exec br \"$@\"\n",
+            dir.join("br-called").display()
+        );
+        fs::write(dir.join("path/br"), fails).unwrap();
+        fs::set_permissions(dir.join("path/br"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         br(&shop, &["init", "--prefix", "t", "-q"]);
     })
     .await
@@ -109,6 +120,26 @@ fn comments(project: &Path, id: &str) -> Vec<String> {
         .collect()
 }
 
+/// The texts of the comments on a bead once it has any: the daemon takes a comment of `loop-manager comment` into its
+/// queue and puts it on the bead later, possibly after the run ended.
+async fn until_comments(project: &Path, id: &str) -> Vec<String> {
+    let deadline = std::time::Instant::now() + common::WAIT;
+    loop {
+        let listed = comments(project, id);
+        if !listed.is_empty() {
+            return listed;
+        }
+        assert!(std::time::Instant::now() < deadline, "no comment on {id}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// No session of the daemon called the failing `br` of its `PATH`.
+fn br_unused(d: &Daemon) {
+    let called = fs::read_to_string(d.dir.path().join("br-called")).unwrap_or_default();
+    assert_eq!(called, "", "a session called br");
+}
+
 /// The run of `fix` on a new bead, beside another bead, until it passes: the project, the two beads and the run.
 async fn fix(d: &Daemon) -> (std::path::PathBuf, String, String, String) {
     let project = d.dir.path().join("config/loop-manager/shop");
@@ -150,8 +181,10 @@ async fn a_claude_agent_is_asked_in_its_session_and_its_lessons_reach_its_bead_o
     for part in [format!("Fix {id}."), "tool_result".into(), "Done.".into(), ASKED.into()] {
         assert!(messages.contains(&part), "{part}: {messages}");
     }
-    assert_eq!(comments(&project, &id), [format!("LESSONS: {run}\n\n{NOTE}")]);
+    let lessons = until_comments(&project, &id).await;
+    assert_eq!(lessons, [format!("LESSONS: {run}\n\n{NOTE}")]);
     assert!(comments(&project, &other).is_empty());
+    br_unused(&d);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -188,12 +221,13 @@ async fn stopped_and_not_asked(d: &Daemon, requests: impl Fn() -> Vec<String>) {
     assert_eq!(view["outcome"]["summary"], cut, "{view}");
     let requests = requests();
     assert!(requests.iter().all(|r| !r.contains(ASKED)), "{requests:?}");
-    let comments = comments(&project, &id);
+    let comments = until_comments(&project, &id).await;
     assert_eq!(comments.len(), 1, "{comments:?}");
     assert!(
         comments[0].starts_with("# context-budget: the session was stopped"),
         "{comments:?}"
     );
+    br_unused(d);
     let data = d.dir.path().join("state/loop-manager/addons/lessons");
     assert_eq!(fs::read_dir(data).unwrap().count(), 0);
 }
@@ -257,8 +291,10 @@ async fn a_codex_agent_is_asked_in_its_thread_and_its_lessons_reach_its_bead_onc
     ] {
         assert!(input.contains(&part), "{part}: {input}");
     }
-    assert_eq!(comments(&project, &id), [format!("LESSONS: {run}\n\n{NOTE}")]);
+    let lessons = until_comments(&project, &id).await;
+    assert_eq!(lessons, [format!("LESSONS: {run}\n\n{NOTE}")]);
     assert!(comments(&project, &other).is_empty());
+    br_unused(&d);
 }
 
 /// The hook by hand, with `stand-ins` first on its `PATH`, in a session of run `r1` on bead `t-1`: its stdout.
@@ -309,12 +345,20 @@ fn the_hook_asks_once_per_session_and_publishes_only_the_answer_to_its_request()
         fs::write(&file, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     };
-    stand_in("loop-manager", format!("cat '{}'", outcome.display()));
-    // The comment's text, with the bead it went on.
+    // The run's view, or the comment's text with the bead of the session it came from; br must not be called.
     stand_in(
-        "br",
-        format!("echo \"$3\" >>'{0}'; cat \"$5\" >>'{0}'", posted.display()),
+        "loop-manager",
+        format!(
+            "case $1 in\nrun) cat '{0}' ;;\n\
+             comment) [ \"$2\" = --file ] || exit 2; echo \"$LOOP_MANAGER_BEAD\" >>'{1}'; cat \"$3\" >>'{1}'; \
+             echo accepted ;;\n\
+             *) exit 2 ;;\nesac",
+            outcome.display(),
+            posted.display()
+        ),
     );
+    let br_called = tmp.path().join("br-called");
+    stand_in("br", format!("echo \"$*\" >>'{}'; exit 127", br_called.display()));
     let stop = |session: &str, active: bool, message: &str| {
         json!({ "hook_event_name": "Stop", "session_id": session, "stop_hook_active": active,
                 "last_assistant_message": message })
@@ -358,4 +402,5 @@ fn the_hook_asks_once_per_session_and_publishes_only_the_answer_to_its_request()
     // A run on no bead is not asked, outcome or not.
     assert_eq!(hook_on(None, &data, &stand_ins, &stop("s6", false, "Done.")), "");
     assert!(!data.join("s6.asked").exists());
+    assert!(!br_called.exists(), "the hook called br");
 }

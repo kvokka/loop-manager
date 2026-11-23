@@ -13,7 +13,7 @@ If you already have a `[settings]` table, append the attachment to its `addons` 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/context-budget/0.3.0"
+rev = "addons/context-budget/0.4.0"
 dir = "addons/context-budget"
 
 [settings]
@@ -50,17 +50,18 @@ it).
 - `SessionStart` and `SubagentStart`: the agent learns its budget, `soft`, and that a note will tell it to wrap up.
   The session's first start in a run keeps the commit it starts on, for the dump.
 - `PostToolUse`, past `soft`: a note joins the agent's context: its context and budget, then what to do. Start
-  nothing new and call no subagents; finish the step at hand or roll it back; commit; leave the summary on the bead
-  (`br comments add "$LOOP_MANAGER_BEAD"`: what is done, what did not work, what is started and not finished); end
-  with `loop-manager finish`. A run without a bead puts the summary in `--summary`. A subagent is told to return its
-  summary to its caller instead. The note comes again each time the context grows by `warn_step`.
+  nothing new and call no subagents; finish the step at hand or roll it back; commit; write the summary to a file and
+  leave it on the bead with `loop-manager comment --file <file>` (what is done, what did not work, what is started
+  and not finished); end with `loop-manager finish`. A run without a bead puts the summary in `--summary`. A subagent
+  is told to return its summary to its caller instead. The note comes again each time the context grows by
+  `warn_step`.
 - `PreToolUse`, past `soft`: a call of a subagent (the tool `Agent`) is denied.
-- Past `hard`, on either tool hook: the state of the work goes on the bead as a comment: `git status --short`, the
-  commits since the run's first session started, `git diff --stat`, the agent's last tool calls and last texts. The
-  session declares the outcome `cut` (`loop-manager finish <cut>`) and stops: every tool call is denied from then on
-  and the turn ends. Neither claude nor codex runs a `Stop` hook after that stop, so no `Stop` hook of another addon,
-  as `lessons`, takes the session on. A subagent past its own `hard` stops alone, with the dump and no outcome: the
-  session goes on, and its agent declares the outcome.
+- Past `hard`, on either tool hook: the state of the work goes on the bead as a comment, with `loop-manager comment`:
+  `git status --short`, the commits since the run's first session started, `git diff --stat`, the agent's last tool
+  calls and last texts. The session declares the outcome `cut` (`loop-manager finish <cut>`) and stops: every tool
+  call is denied from then on and the turn ends. Neither claude nor codex runs a `Stop` hook after that stop, so no
+  `Stop` hook of another addon, as `lessons`, takes the session on. A subagent past its own `hard` stops alone, with
+  the dump and no outcome: the session goes on, and its agent declares the outcome.
 - `PreCompact`: blocked, so claude never compacts. The addon sets claude's `autoCompactWindow` to 1000000, the most
   claude takes, so that the window stays past `hard`.
 
@@ -100,7 +101,8 @@ its own, named by its input's `transcript_path`, and its tool is `spawn_agent`. 
 
 ## Needs on the host
 
-`jq`, `git`, `br` (the comments; it finds the tracker by the session's `BEADS_DIR`, as the agent's own calls do) and
-`loop-manager` (the finisher) on the `PATH` of the harness's hooks.
+`jq`, `git` and `loop-manager` (the comments and the finisher) on the `PATH` of the harness's hooks. A comment goes
+through the daemon to the run's bead, whatever the tracker of the project: the addon does not call `br`, and needs a
+loop-manager with the `comment` command.
 
 See the [changelog](CHANGELOG.md) for version history.

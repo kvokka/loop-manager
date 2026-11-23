@@ -80,8 +80,15 @@ value is a variable of the daemon's environment, resolved when the session start
 Harness hooks use the Claude Code dialect (`event`, `matcher`, `command`, `timeout`); claude and codex take them in
 the same form, with differences listed in [settings](../design/config.md#settings-any-layer). A hook runs in the
 session's environment, which has `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the
-run has a bead, `LOOP_MANAGER_BEAD`, so it can call `loop-manager` (`loop-manager finish`, for one) and `br` on the
-run's behalf. What `hooks/remind` prints on `UserPromptSubmit` joins the prompt:
+run has a bead, `LOOP_MANAGER_BEAD`, so it can call `loop-manager` on the run's behalf: `loop-manager finish` declares
+the outcome, `loop-manager comment --file <file>` leaves a comment on the run's bead.
+
+An addon depends on no tool it does not bring or adapt. It talks to loop-manager through the CLI and the environment
+it is given, never to the tracker, a harness or another tool it assumes is on the host: a comment on the bead is
+`loop-manager comment`, not `br comments add`, so the addon works whatever the project's tracker. An addon that
+adapts a tool, as `dcg` does, names the tool among its needs on the host.
+
+What `hooks/remind` prints on `UserPromptSubmit` joins the prompt:
 
 ```sh
 #!/bin/sh
@@ -170,7 +177,7 @@ session, and it keeps the harness from compacting. It is all agent side:
 ```toml
 # addons/context-budget/addon.toml
 name = "context-budget"
-version = "0.3.0"
+version = "0.4.0"
 harnesses = ["claude", "codex"]
 
 [params]
@@ -217,8 +224,9 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
   subagent past `soft` gets a `PreToolUse` deny with the reason.
 - **State in the data directory.** The context of the last note, the dump and the stop are files of
   `${LOOP_MANAGER_ADDON_DATA}`, by the input's `session_id`.
-- **The bead.** With `LOOP_MANAGER_BEAD` set, the dump past `hard` is a comment on it, written with `br` as the
-  session's tracker actor.
+- **The bead.** With `LOOP_MANAGER_BEAD` set, the dump past `hard` is a comment on it, left with
+  `loop-manager comment --file <dump>`: the daemon writes it as the actor of the session's attempt, whatever the
+  tracker, so the addon needs no `br`.
 - **Stopping.** Past `hard` it declares the outcome with `loop-manager finish <cut>` and answers `{"continue":
   false}`; the `PreToolUse` hook denies every later tool call of the session. On claude the turn ends there. A codex
   tool hook cannot end a turn, so codex compacts at `hard` (`model_auto_compact_token_limit`) and the stop is the
@@ -238,8 +246,8 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
 
 The tests of `context-budget` do both: `crates/loop-manager/tests/e2e/context_budget.rs` checks with `config explain`
 that the params reach the settings and hooks of claude and codex, and drives `hooks/budget` with the hook inputs of
-both harnesses, fake transcripts and rollouts, a stand-in `loop-manager` and a real `br` tracker
-(`context_budget/codex.rs` for codex).
+both harnesses, fake transcripts and rollouts, a stand-in `loop-manager` that records the outcomes and comments, and a
+`br` that fails (`context_budget/codex.rs` for codex).
 
 ## Moving it to its own repository
 
