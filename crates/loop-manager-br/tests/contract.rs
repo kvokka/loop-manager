@@ -3,7 +3,7 @@
 //! beads, the comments and parents of a bead, the writes as changes, the watcher.
 
 use loop_manager_br::Br;
-use loop_manager_contract::tracker::{Tracker, TrackerError};
+use loop_manager_contract::tracker::{Tracker, TrackerError, Wait};
 use std::{path::Path, process::Command, sync::mpsc, time::Duration};
 
 /// A fresh tracker in a temporary directory.
@@ -232,6 +232,67 @@ async fn under_gives_the_ready_beads_at_any_depth_and_an_epic_once_its_children_
     br(dir.path(), &["close", &kids[0], &kids[1]]);
     assert_eq!(t.under(&root).await.unwrap(), [epic]);
     assert_eq!(t.under("t-none").await, Err(TrackerError::NotFound));
+}
+
+/// A hold of `bead` by `blocker` in `status`, as `waiting` gives it.
+fn wait(bead: &str, blocker: &str, kind: &str, status: &str, under: bool) -> Wait {
+    Wait {
+        bead: bead.to_owned(),
+        blocker: blocker.to_owned(),
+        kind: kind.to_owned(),
+        status: status.to_owned(),
+        under,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_holds_every_bead_below_a_blocked_parent_up_past_the_root() {
+    let (dir, t) = tracker();
+    let above = create(dir.path(), "Above", &["-t", "epic"]);
+    let root = create(dir.path(), "Root", &["-t", "epic", "--parent", &above]);
+    let epic = create(dir.path(), "Epic", &["-t", "epic", "--parent", &root]);
+    let inner = create(dir.path(), "Inner", &["-t", "epic", "--parent", &epic]);
+    let leaf = create(dir.path(), "Leaf", &["--parent", &inner]);
+    let free = create(dir.path(), "Free", &["--parent", &root]);
+    let (outside, far) = (create(dir.path(), "Outside", &[]), create(dir.path(), "Far", &[]));
+    br(dir.path(), &["dep", "add", &epic, &outside]);
+    br(dir.path(), &["dep", "add", &above, &far]);
+    let held = [&epic, &inner, &leaf].map(|b| wait(b, &outside, "blocks", "open", false));
+    let mut expected: Vec<Wait> = [&epic, &inner, &leaf, &free]
+        .map(|b| wait(b, &far, "blocks", "open", false))
+        .into_iter()
+        .chain(held)
+        .collect();
+    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
+    assert_eq!(t.waiting(&root).await.unwrap(), expected);
+    assert_eq!(t.waiting("t-none").await, Err(TrackerError::NotFound));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_takes_open_blockers_and_a_blocked_status_and_tells_those_under_the_root() {
+    let (dir, t) = tracker();
+    let root = create(dir.path(), "Root", &["-t", "epic"]);
+    let kids = [1, 2, 3, 4, 5].map(|_| create(dir.path(), "Kid", &["--parent", &root]));
+    let [deferred, in_progress, closed] = ["Deferred", "Working", "Done"].map(|title| create(dir.path(), title, &[]));
+    br(dir.path(), &["update", &deferred, "-s", "deferred"]);
+    br(dir.path(), &["update", &in_progress, "-s", "in_progress"]);
+    br(dir.path(), &["dep", "add", &kids[0], &deferred]);
+    br(
+        dir.path(),
+        &["dep", "add", &kids[1], &in_progress, "-t", "conditional-blocks"],
+    );
+    br(dir.path(), &["dep", "add", &kids[2], &closed]);
+    br(dir.path(), &["close", &closed]);
+    br(dir.path(), &["dep", "add", &kids[3], &kids[4], "-t", "waits-for"]);
+    br(dir.path(), &["update", &kids[4], "-s", "blocked"]);
+    let mut expected = vec![
+        wait(&kids[0], &deferred, "blocks", "deferred", false),
+        wait(&kids[1], &in_progress, "conditional-blocks", "in_progress", false),
+        wait(&kids[3], &kids[4], "waits-for", "blocked", true),
+        wait(&kids[4], &kids[4], "status", "blocked", true),
+    ];
+    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
+    assert_eq!(t.waiting(&root).await.unwrap(), expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]

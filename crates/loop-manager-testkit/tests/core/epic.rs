@@ -6,7 +6,7 @@ use crate::common;
 use loop_manager_core::{
     BoxFuture, Clock, Journal, config, open,
     run::{self, ExecHooks, Msg},
-    tracker::{Bead, Change, Lineage, Tracker, TrackerError},
+    tracker::{Bead, Change, Lineage, Tracker, TrackerError, Wait},
 };
 use loop_manager_testkit::MemoryTracker;
 use serde_json::Value;
@@ -43,6 +43,9 @@ impl Tracker for Chain {
     }
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>> {
         self.0.under(root)
+    }
+    fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>> {
+        self.0.waiting(root)
     }
     fn changes(&self, after: i64) -> BoxFuture<'_, Result<Vec<Change>, TrackerError>> {
         self.0.changes(after)

@@ -81,6 +81,16 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
 - The ready beads under a root, at any depth (`under`, for `drain`), are one command:
   `br ready --unassigned --limit 0 --parent <root> --recursive`. br does not call an epic with open children ready,
   so an inner epic joins that list only once its own children are closed. A root br does not have is exit 3.
+- What holds the beads under a root (`waiting`, [contracts 5.1](contracts.md#51-operations)) is one recursive query
+  on br's database, read-only under `.write.lock` held shared, as for `events` (below). It walks the `dependencies`
+  table (`issue_id` depends on `depends_on_id`, by `type`): `parent-child` rows down from the root give the subtree,
+  the same rows up from each open bead give its parents, and a `blocks`, `conditional-blocks` or `waits-for` row of
+  the bead or of a parent whose target in `issues` has a status other than `closed` or `tombstone` holds it, as does
+  a `blocked` status of the bead or a parent. A target that has no row in `issues` (an external reference) holds
+  nothing. `br delete` leaves a `tombstone` row and drops the links to it, so a deleted bead neither waits nor holds.
+  br's commands do not give this answer: `br blocked` lists the blocked beads of the whole database, with no option
+  for a subtree, and does not count a parent in `blocked` as holding its children (nor does `br ready`); `br graph`
+  and `br dep tree` mix the types of links; `br show` costs one process per bead.
 - A task input holds a string or `{ next_ready = true, epic }`. A string the core knows as a bead (in the last ready
   set, or one a run owned) is that bead at once. Any other string goes to the tracker when the run leaves `queued`,
   as an effect on the queue `tracker:<project>`: the adapter returns the bead whose id is exactly the string (looked
@@ -154,7 +164,8 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   one bead and one actor in a row are one change while no kind repeats, so `br create` followed by `br label add`
   read together is a creation with the label: the bead was filed with it, and `bead.labeled` does not tell it
   ([contracts 5.1](contracts.md#51-operations)). A row says which field changed, not the value: a gained label is
-  told by the core from the bead's labels when read.
+  told by the core from the bead's labels when read. `waiting` reads the `issues` and `dependencies` tables the same
+  way, and depends on their schema too.
 - Every br command costs time linear in the size of the database: `close` takes 81 ms on 100 beads, 311 ms on
   5 thousand, 3.2–4.4 s on 50 thousand (br 0.7.6).
   <!-- MEASURE id=br-close-latency date=2026-11-10 ver=br-0.7.6 env=linux-arm64-orbstack,9vcpu,12gb src=reports/11 note="medians, synthetic database: 2 % epics, 60 % closed; measure again on every br update" -->

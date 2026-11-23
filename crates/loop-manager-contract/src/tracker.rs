@@ -62,6 +62,24 @@ pub struct Change {
     pub bead: Bead,
 }
 
+/// An open bead under a root and what holds it (contracts 5.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wait {
+    /// The waiting bead: under the root at any depth (not the root), with any status but `closed` and `tombstone`.
+    pub bead: String,
+    /// What holds it: an open blocker (any status but `closed` and `tombstone`) of a blocking dependency of the bead or
+    /// of one of its parents at any height, the root and the beads above it included; or the bead itself or one of
+    /// its parents when its status is `blocked`.
+    pub blocker: String,
+    /// The type of that dependency, `blocks`, `conditional-blocks` or `waits-for`; `status` when a `blocked` status
+    /// holds it.
+    pub kind: String,
+    /// The status of the blocker.
+    pub status: String,
+    /// Whether the blocker is the root or under it.
+    pub under: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackerError {
     NotFound,
@@ -106,6 +124,9 @@ pub trait Tracker: Send + Sync {
     fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>>;
     /// The ids of the ready beads under `root`, at any depth, in the tracker's order; `NotFound` with no `root`.
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>>;
+    /// The open beads under `root` that wait, each with what holds it: one entry per bead, blocker and kind, ordered
+    /// by them; `NotFound` with no `root`.
+    fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>>;
     /// The writes after `after` (a `seq`, 0 for all), oldest first.
     fn changes(&self, after: i64) -> BoxFuture<'_, Result<Vec<Change>, TrackerError>>;
     /// The root bead of a task (docs/design/contracts.md 5): the bead whose id is exactly `description`, else an open

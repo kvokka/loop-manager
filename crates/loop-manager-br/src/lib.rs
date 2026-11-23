@@ -1,7 +1,8 @@
 //! The br tracker adapter (docs/design/tracker-br.md, docs/design/contracts.md 5): every call is one `br` process
 //! (0.7.6) on the project's database named explicitly by `BEADS_DIR`, with the caller's actor; the writes come from
-//! br's `events` table, read-only, and a watcher on `.beads/` says when to read them (docs/design/experiments.md,
-//! experiment 3). A created bead is an epic whose `external_ref` is its key.
+//! br's `events` table and what holds the beads under a root from its `issues` and `dependencies`, read-only, and a
+//! watcher on `.beads/` says when to read the writes (docs/design/experiments.md, experiment 3). A created bead is an
+//! epic whose `external_ref` is its key.
 
 #![deny(clippy::disallowed_methods)]
 
@@ -9,7 +10,7 @@ mod parse;
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Bead, Change, Commented, Lineage, Tracker, TrackerError},
+    tracker::{Bead, Change, Commented, Lineage, Tracker, TrackerError, Wait},
 };
 use parse::{bead, commented, field};
 use serde_json::Value;
@@ -111,11 +112,14 @@ impl Br {
         }
     }
 
-    /// The rows of br's `events` after `after`, read-only, the database closed again at once (a reader left open
-    /// stops br's WAL checkpoints). The read holds br's writer lock `.write.lock` shared: br's own SQLite does not
-    /// hold the stock WAL index locks, so a stock reader that thinks it is alone resets `beads.db-shm`, and a br
-    /// write opening at that moment fails with `SHM changed identity or length` (br's reads are not affected).
-    async fn rows(&self, after: i64) -> Result<Vec<Row>, TrackerError> {
+    /// Runs `query` on br's database opened read-only, closed again at once (a reader left open stops br's WAL
+    /// checkpoints). The read holds br's writer lock `.write.lock` shared: br's own SQLite does not hold the stock WAL
+    /// index locks, so a stock reader that thinks it is alone resets `beads.db-shm`, and a br write opening at that
+    /// moment fails with `SHM changed identity or length` (br's reads are not affected).
+    async fn read<T>(
+        &self,
+        query: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, TrackerError> {
         let lock = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -134,20 +138,25 @@ impl Br {
         }
         let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let db = rusqlite::Connection::open_with_flags(self.dir.join("beads.db"), flags).map_err(sql)?;
-        let mut stmt = db
-            .prepare("SELECT id, issue_id, event_type, actor FROM events WHERE id > ?1 ORDER BY id")
-            .map_err(sql)?;
-        let rows = stmt
-            .query_map([after], |r| {
+        query(&db).map_err(sql)
+    }
+
+    /// The rows of br's `events` after `after`.
+    async fn rows(&self, after: i64) -> Result<Vec<Row>, TrackerError> {
+        self.read(|db| {
+            let mut stmt =
+                db.prepare("SELECT id, issue_id, event_type, actor FROM events WHERE id > ?1 ORDER BY id")?;
+            let rows = stmt.query_map([after], |r| {
                 Ok(Row {
                     seq: r.get(0)?,
                     bead: r.get(1)?,
                     kind: r.get(2)?,
                     actor: r.get(3)?,
                 })
-            })
-            .map_err(sql)?;
-        rows.collect::<Result<_, _>>().map_err(sql)
+            })?;
+            rows.collect()
+        })
+        .await
     }
 }
 
@@ -159,6 +168,35 @@ impl From<Fail> for TrackerError {
         e
     }
 }
+
+/// The beads waiting under the root `?1` (`Tracker::waiting`), in one read of br's tables: `under` is the subtree by
+/// `parent-child` links (a child's row depends on its parent), `line` pairs each open bead of it with itself and its
+/// parents at any height; a blocking dependency of the line on an open bead, or a line bead in `blocked`, holds the
+/// bead. `UNION` keeps a cycle of links finite. A dependency on an id br has no bead for (an external reference) holds
+/// nothing. A deleted bead is a `tombstone`, and its links are gone.
+const WAITING: &str = "
+WITH RECURSIVE
+under(id) AS (
+    SELECT ?1
+    UNION
+    SELECT d.issue_id FROM dependencies d JOIN under u ON d.depends_on_id = u.id WHERE d.type = 'parent-child'
+),
+line(bead, up) AS (
+    SELECT i.id, i.id FROM issues i JOIN under u ON u.id = i.id
+    WHERE i.id <> ?1 AND i.status NOT IN ('closed', 'tombstone')
+    UNION
+    SELECT l.bead, d.depends_on_id FROM line l JOIN dependencies d ON d.issue_id = l.up WHERE d.type = 'parent-child'
+),
+held(bead, blocker, kind, status) AS (
+    SELECT l.bead, b.id, d.type, b.status FROM line l
+    JOIN dependencies d ON d.issue_id = l.up AND d.type IN ('blocks', 'conditional-blocks', 'waits-for')
+    JOIN issues b ON b.id = d.depends_on_id
+    WHERE b.status NOT IN ('closed', 'tombstone')
+    UNION
+    SELECT l.bead, a.id, 'status', a.status FROM line l JOIN issues a ON a.id = l.up WHERE a.status = 'blocked'
+)
+SELECT h.bead, h.blocker, h.kind, h.status, h.blocker IN (SELECT id FROM under) FROM held h
+ORDER BY h.bead, h.blocker, h.kind";
 
 struct Row {
     seq: i64,
@@ -252,6 +290,30 @@ impl Tracker for Br {
                 .flatten()
                 .filter_map(|b| b["id"].as_str().map(str::to_owned))
                 .collect())
+        })
+    }
+
+    fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>> {
+        Box::pin(async move {
+            self.read(|db| {
+                let found = "SELECT count(*) FROM issues WHERE id = ?1 AND status <> 'tombstone'";
+                if db.query_row(found, [root], |r| r.get::<_, i64>(0))? == 0 {
+                    return Ok(None);
+                }
+                let mut stmt = db.prepare(WAITING)?;
+                let rows = stmt.query_map([root], |r| {
+                    Ok(Wait {
+                        bead: r.get(0)?,
+                        blocker: r.get(1)?,
+                        kind: r.get(2)?,
+                        status: r.get(3)?,
+                        under: r.get(4)?,
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>().map(Some)
+            })
+            .await?
+            .ok_or(TrackerError::NotFound)
         })
     }
 
@@ -360,7 +422,7 @@ fn unavailable(text: String) -> TrackerError {
 }
 
 fn sql(e: rusqlite::Error) -> TrackerError {
-    unavailable(format!("br events: {e}"))
+    unavailable(format!("br database: {e}"))
 }
 
 /// Watches the `.beads` directory (not the file: br replaces `issues.jsonl` by a rename, once per write) and calls

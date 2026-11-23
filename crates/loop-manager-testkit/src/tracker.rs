@@ -1,10 +1,11 @@
 //! A tracker in memory (contracts 5) for core tests: claims, conditional release and close, the ready set in
-//! creation order, creation once per key, and an outage switch. As in br, a parent with open children is not ready
-//! and is released, not closed.
+//! creation order, creation once per key, blocking dependencies, and an outage switch. As in br, a parent with open
+//! children is not ready and is released, not closed, and a bead held by a dependency of its own or of a parent is not
+//! ready.
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Bead, Change, Comment, Commented, Lineage, Tracker, TrackerError},
+    tracker::{Bead, Change, Comment, Commented, Lineage, Tracker, TrackerError, Wait},
 };
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -21,6 +22,8 @@ struct State {
     keys: Vec<(String, String)>,
     /// The comments, oldest first, by bead id.
     comments: Vec<(String, Comment)>,
+    /// The blocking dependencies: the bead, its blocker and the type.
+    deps: Vec<(String, String, String)>,
     down: bool,
     /// The last write the next read of the writes sees; set by `lag`.
     lag: Option<i64>,
@@ -95,6 +98,19 @@ impl MemoryTracker {
             f(b);
             state.record(id, "updated", "human", changed);
         }
+    }
+
+    /// A human sets the status of `id`, as `br update -s` does.
+    pub fn set_status(&self, id: &str, status: &str) {
+        self.edit(id, &["status"], |b| status.clone_into(&mut b.status));
+    }
+
+    /// A human makes `id` depend on `blocker` with the blocking type `kind` (`blocks`, `conditional-blocks`,
+    /// `waits-for`), as `br dep add -t` does.
+    pub fn depend(&self, id: &str, blocker: &str, kind: &str) {
+        let mut state = self.lock();
+        state.deps.push((id.to_owned(), blocker.to_owned(), kind.to_owned()));
+        state.record(id, "updated", "human", &["dependencies"]);
     }
 
     /// Deletes `id`, as a human does with `br delete`; its children keep it as their parent.
@@ -182,6 +198,29 @@ impl State {
             .any(|c| c.epic.as_deref() == Some(id) && c.status != "closed")
     }
 
+    /// The parents of `id` at any height, nearest first; a loop of parents ends at its repeat.
+    fn parents(&self, id: &str) -> Vec<String> {
+        let mut line: Vec<String> = Vec::new();
+        let mut next = self.beads.iter().find(|b| b.id == id).and_then(|b| b.epic.clone());
+        while let Some(parent) = next.filter(|p| p != id && !line.contains(p)) {
+            next = self.beads.iter().find(|b| b.id == parent).and_then(|b| b.epic.clone());
+            line.push(parent);
+        }
+        line
+    }
+
+    /// What holds `id` (contracts 5.1), as `(blocker, kind, status)`: an open blocker of a blocking dependency of the
+    /// bead or of a parent, and the bead or a parent in `blocked`.
+    fn holds(&self, id: &str) -> Vec<(String, String, String)> {
+        let line: Vec<String> = std::iter::once(id.to_owned()).chain(self.parents(id)).collect();
+        let open = |id: &str| self.beads.iter().find(|b| b.id == id && b.status != "closed");
+        let deps = self.deps.iter().filter(|(of, _, _)| line.contains(of));
+        let deps = deps.filter_map(|(_, on, kind)| Some((on.clone(), kind.clone(), open(on)?.status.clone())));
+        let blocked = line.iter().filter_map(|id| open(id)).filter(|b| b.status == "blocked");
+        deps.chain(blocked.map(|b| (b.id.clone(), "status".to_owned(), b.status.clone())))
+            .collect()
+    }
+
     fn record(&mut self, id: &str, kind: &str, actor: &str, changed: &[&str]) {
         let Some(bead) = self.beads.iter().find(|b| b.id == id).cloned() else {
             return;
@@ -261,7 +300,9 @@ impl Tracker for MemoryTracker {
             let open = state
                 .beads
                 .iter()
-                .filter(|b| b.status == "open" && b.assignee.is_none() && !state.has_open_children(&b.id));
+                .filter(|b| b.status == "open" && b.assignee.is_none() && !state.has_open_children(&b.id))
+                // As in br, a dependency holds a bead out of the ready set, a parent in `blocked` does not.
+                .filter(|b| state.holds(&b.id).iter().all(|(_, kind, _)| kind == "status"));
             Ok(open.cloned().collect())
         })
     }
@@ -278,6 +319,37 @@ impl Tracker for MemoryTracker {
             Ok(ids
                 .filter(|id| std::iter::successors(parent(id), parent).any(|e| e == root))
                 .collect())
+        })
+    }
+
+    fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>> {
+        Box::pin(async move {
+            let state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            if !state.beads.iter().any(|b| b.id == root) {
+                return Err(TrackerError::NotFound);
+            }
+            let under = |id: &str| state.parents(id).iter().any(|p| p == root);
+            let open = state.beads.iter().filter(|b| b.status != "closed" && under(&b.id));
+            let mut waits: Vec<Wait> = open
+                .flat_map(|b| {
+                    let holds = state.holds(&b.id).into_iter();
+                    holds.map(|(blocker, kind, status)| Wait {
+                        bead: b.id.clone(),
+                        under: blocker == root || under(&blocker),
+                        blocker,
+                        kind,
+                        status,
+                    })
+                })
+                .collect();
+            waits.sort_by(|a, b| (&a.bead, &a.blocker, &a.kind).cmp(&(&b.bead, &b.blocker, &b.kind)));
+            waits.dedup();
+            Ok(waits)
         })
     }
 

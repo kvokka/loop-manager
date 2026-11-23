@@ -25,3 +25,45 @@ async fn under_gives_the_ready_beads_at_any_depth_below_the_root() {
     assert_eq!(t.under(&other).await.unwrap(), [outside]);
     assert_eq!(t.under("b-404").await, Err(TrackerError::NotFound));
 }
+
+#[tokio::test]
+async fn waiting_gives_the_open_beads_under_the_root_held_by_a_blocker_of_their_line() {
+    let t = MemoryTracker::new();
+    let (above, outside) = (t.add(&[], None), t.add(&[], None));
+    let root = t.add(&[], Some(&above));
+    let (epic, sibling) = (t.add(&[], Some(&root)), t.add(&[], Some(&root)));
+    let (kid, done) = (t.add(&[], Some(&epic)), t.add(&[], Some(&epic)));
+    t.depend(&epic, &outside, "blocks");
+    t.depend(&sibling, &kid, "waits-for");
+    t.set_status(&done, "closed");
+    let wait = |bead: &str, blocker: &str, kind: &str, under: bool| Wait {
+        bead: bead.to_owned(),
+        blocker: blocker.to_owned(),
+        kind: kind.to_owned(),
+        status: "open".to_owned(),
+        under,
+    };
+    let expected = [
+        wait(&epic, &outside, "blocks", false),
+        wait(&sibling, &kid, "waits-for", true),
+        wait(&kid, &outside, "blocks", false),
+    ];
+    assert_eq!(t.waiting(&root).await.unwrap(), expected);
+    assert!(t.ready().await.unwrap().iter().all(|b| b.id != kid && b.id != sibling));
+    t.set_status(&above, "blocked");
+    let held = t.waiting(&root).await.unwrap();
+    let by_status: Vec<(&str, &str)> = (held.iter().filter(|w| w.kind == "status"))
+        .map(|w| (w.bead.as_str(), w.status.as_str()))
+        .collect();
+    assert_eq!(
+        by_status,
+        [
+            (epic.as_str(), "blocked"),
+            (sibling.as_str(), "blocked"),
+            (kid.as_str(), "blocked")
+        ]
+    );
+    t.set_status(&outside, "closed");
+    assert!(t.waiting(&root).await.unwrap().iter().all(|w| w.blocker != outside));
+    assert_eq!(t.waiting("b-404").await, Err(TrackerError::NotFound));
+}

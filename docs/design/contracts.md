@@ -625,7 +625,7 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 
 ### 5.1 Operations
 
-The trait has the eight operations the core calls; an operation is added only when a caller needs it.
+The trait has the nine operations the core calls; an operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
 the daemon's own reads. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
 in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)). An actor of any other form is a
@@ -638,6 +638,7 @@ trait Tracker: Send + Sync {
     fn close(&self, owner: &str, id: &str, reason: &str) -> BoxFuture<Result<(), TrackerError>>; // conditional
     fn ready(&self) -> BoxFuture<Result<Vec<Bead>, TrackerError>>;          // every ready bead, tracker order
     fn under(&self, root: &str) -> BoxFuture<Result<Vec<String>, TrackerError>>;     // ready ids below root
+    fn waiting(&self, root: &str) -> BoxFuture<Result<Vec<Wait>, TrackerError>>;     // what holds the beads below root
     fn changes(&self, after: i64) -> BoxFuture<Result<Vec<Change>, TrackerError>>;           // after a seq
     fn create(&self, actor: &str, key: &str, title: &str, description: &str)
         -> BoxFuture<Result<Bead, TrackerError>>;                               // once per key
@@ -658,6 +659,15 @@ again after a restart) returns the bead of the first call, never a second bead.
 gives out (`config.md`, "Formula"). A bead's `epic` names only its parent, and an epic with open children is not ready, so the
 ancestors of a grandchild cannot be told from `ready()`; the tracker answers for the whole subtree. An epic becomes a
 member once its own children are closed and it is ready itself. A `root` the tracker does not have is `NotFound`.
+
+`waiting` gives what holds the open beads below `root`: the beads of a `drain` step that are not ready and why. A bead
+below `root` at any depth, the root itself left out, with any status but `closed` and `tombstone`, is held by each
+blocker of a blocking dependency (`blocks`, `conditional-blocks`, `waits-for`) of the bead or of one of its parents at
+any height, the root and the beads above it included, whose status is not `closed` or `tombstone` (`open`,
+`in_progress`, `deferred` and `blocked` all hold); and by itself or a parent whose status is `blocked` (kind
+`status`). A blocked epic therefore holds every bead below it. Parents follow `parent-child` links upward. The answer
+has one `Wait` per bead, blocker and kind, ordered by them; `under` tells whether the blocker is the root or below it,
+so the core tells a blocker outside the subtree from one inside it. A `root` the tracker does not have is `NotFound`.
 
 `lineage` gives the bead `id` with its comments, oldest first, and its parents with theirs, from the root down to its
 own parent: what a prompt shows of a bead beyond its fields (2.3). It is a read, made as `loop-manager`. A parent the
@@ -698,6 +708,9 @@ the adapter in the session plan.
   [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of a bead is the prefix of its id (no label).
 - `Comment`: `{author, created_at, text}`. `Lineage`: the fields of `Bead`, `comments: [Comment]` and `parents`, each
   the fields of `Bead` and its `comments`. Comments are no part of `Bead`: a bead event carries none.
+- `Wait`: `{bead, blocker, kind: "blocks"|"conditional-blocks"|"waits-for"|"status", status, under}`: an open bead
+  below the root of `waiting` and one thing that holds it (5.1); `status` is the blocker's, `under` whether the
+  blocker is the root or below it.
 - `Change`: `{seq, kind: "created"|"updated"|"closed", actor, changed: [field], bead: Bead}`; `seq` orders the writes
   and is the cursor of `changes(after)`, `bead` is the bead when the change is read; the core maps it to `bead.created`,
   `bead.updated`, `bead.closed`, derives `bead.labeled` by comparing its `labels` with those it kept (5.1), and derives
