@@ -179,13 +179,6 @@ loop-manager config explain --project hello --formula summarize-checked
 # step `check` of `summarize-checked`: exec `test -s SUMMARY.md`
 ```
 
-## A worktree per run
-
-With `worktree = true` next to `name` in the formula, each run works in its own git worktree of the rig, on the
-branch `loop-manager/<run>`, so runs of one rig do not step on each other. loop-manager makes it before the run starts
-and removes it when the run ends, unless it holds uncommitted changes or commits no ref reaches; the branch goes only
-once merged. The rig must be a git repository. Without the key a run works in the rig itself.
-
 ## Runs over a tracker
 
 A project with a `.beads` directory uses [br](../../README.md#the-br-tracker-and-its-license) as its task
@@ -218,7 +211,7 @@ name = "work"
 kind = "drain"
 formula = "implement"                 # takes one `task` input; one run per bead, on the rig of its id prefix
 pool = 2                              # two beads given at once (default 1); with no `worktree = true`
-                                      # in `implement` they share the rig and work one after the other
+                                      # here or in `implement` both work in the rig's own directory
 on_item_failure = "continue"          # a failed bead stops nothing; soft_stop / hard_stop stop the step
 
 [[step]]
@@ -252,5 +245,57 @@ kind = "formula"
 formula = "review"                    # with `internal = true` in review.toml it starts only from a step
 inputs = { focus = "{{ steps.write.summary }}" }
 ```
+
+## A worktree per run
+
+With `worktree = true` next to `name` in the formula, each run works in its own git worktree of its place, on the
+branch `loop-manager/<run>` from the HEAD of the checkout, so runs of one rig do not step on each other. loop-manager
+makes it before the run starts and removes it when the run ends, unless it holds uncommitted changes or commits no ref
+reaches; the branch goes only once merged. A place that is no git repository gets no worktree: the run works in the
+directory itself, and keeping runs apart there is yours. Without the key a run works in the rig itself.
+
+The key also goes on a `drain` step. Each child then gets a worktree of its own on the branch `loop-manager/<child>`,
+from the base of its rig, whatever its own formula says. On the `pass` of its last step loop-manager merges that branch
+back into the base with `git merge --no-ff` and the subject `chore(merge): <bead title> [<bead id>]`. The bead closes
+after the merge, so the next ready bead branches from a base that holds the work of the ones before it. With the key
+on both the formula and its `drain` step, a run of the root coordinates the rigs:
+
+```toml
+name = "deliver"
+worktree = true                       # in each rig a base of this run, on the branch loop-manager/<run>
+[inputs]
+task = { type = "task", required = true }
+
+[[step]]
+name = "plan"
+kind = "ai"
+agent = "planner"
+
+[[step]]
+name = "work"
+kind = "drain"
+formula = "implement"                 # no `if` on its last step: the merge comes with the pass of that step
+pool = 2
+worktree = true                       # each child on a branch of its own, merged back into the base of its rig
+```
+
+```sh
+loop-manager run start shop deliver --input 'task=Add a dark mode'   # no rig: the run works in the root
+```
+
+The run works in the root, which need not be a git repository. The first child in a rig makes the run's base there: a
+worktree on the branch `loop-manager/<run>` from the HEAD of the rig's checkout. The children of that rig branch from
+the base and merge into it, and the checkouts keep their branches as they were. loop-manager merges nothing into
+`main`: bringing `loop-manager/<run>` there (a merge, a pull request) is a step of your formula. Without the key on the
+formula the base in each rig is its checkout on its current branch, and the merges go there; leave that branch alone
+while the run goes. The bases are in no prompt: `loop-manager run show <run>` lists them under `bases`, by place, and
+an agent of the run reads them the same way (`loop-manager run show $LOOP_MANAGER_RUN`).
+
+A merge can send the work back to the agent. Uncommitted changes in the child's worktree, untracked files among them,
+are a remark to commit them. A conflict is aborted and is a remark that names the files and the base's branch: merge
+that branch into yours or rebase on it, resolve, commit, finish again. A git hook of the project that refuses the
+merge (`pre-merge-commit`, `commit-msg`) fails the child with a veto that carries the hook's output. A child that
+failed leaves its branch unmerged ([what a worktree leaves behind](recovery.md#what-a-worktree-leaves-behind)). The
+details are in [config: Formula](../design/config.md#formula-formulasfiletoml).
 
 Next: [using addons](addons.md) and [writing an addon](addon-development.md).

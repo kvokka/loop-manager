@@ -24,6 +24,10 @@ async fn a_run_started_over_the_api_passes_and_its_events_stream_from_a_seq() {
     assert_eq!(d.get("/v1/runs").await.as_array().unwrap().len(), 1);
     let view = d.until_state(&run, "passed").await;
     assert_eq!((&view["project"], &view["step_kind"]), (&json!("shop"), &json!("exec")));
+    // A run with no children has one base: its workdir in its own place. A list does not give them.
+    let place = view["rig"].as_str().unwrap();
+    assert_eq!(view["bases"], json!({ place: view["workdir"] }), "{view}");
+    assert!(d.get("/v1/runs").await[0].get("bases").is_none());
     let passed = loop {
         let event = next_event(&mut events).await;
         let envelope: Value = serde_json::from_str(&event.data).unwrap();

@@ -22,8 +22,8 @@ pub(super) const NULL: &str = "Done; the body is JSON `null`";
 pub(super) const BAD_QUERY: &str = "`bad_request`: the query is malformed";
 const BAD_PATH: &str = "`bad_request`: the path is malformed";
 const RUN_VIEW: &str = "The run: `RunView` (docs/design/contracts.md 1.3) with `project`, `rig`, `correlation`, \
-    `inputs`, `waiting_for`, `outcome` and `attempts`";
-const RUN_VIEWS: &str = "Run views as `GET /v1/runs/{id}` gives them";
+    `inputs`, `waiting_for`, `outcome`, `attempts` and `bases`";
+const RUN_VIEWS: &str = "Run views as `GET /v1/runs/{id}` gives them, without `bases`";
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateRun {
@@ -143,6 +143,12 @@ pub(crate) async fn get(
     if all {
         sessions::identify(&mut run);
     }
+    // `tree` runs git: off the executor.
+    let api = state.0.clone();
+    let bases = tokio::task::spawn_blocking(move || api.reader.bases(&api.config(), &id, api.tree))
+        .await
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))??;
+    run["bases"] = serde_json::json!(bases);
     Ok(Json(run))
 }
 

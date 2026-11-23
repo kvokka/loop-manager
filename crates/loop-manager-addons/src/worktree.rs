@@ -211,6 +211,15 @@ fn base_of(common: &Path, place: &Place) -> PathBuf {
     }
 }
 
+/// The worktree of run `run` in the repository of directory `place`: `<git common dir>/loop-manager/worktrees/<run>`,
+/// `None` when `place` is in no repository, git fails or that worktree is not there. The read API gives it as the base
+/// there of a run with `worktree = true` (`bases` of `GET /v1/runs/{id}`).
+pub fn tree(place: &Path, run: &str) -> Option<PathBuf> {
+    let common = common_dir(place, Instant::now() + TIMEOUT).ok()??;
+    let tree = common.join(DIR).join(run);
+    tree.join(".git").exists().then_some(tree)
+}
+
 /// The git common dir of the repository of `dir`, `None` when `dir` is in none.
 fn common_dir(dir: &Path, until: Instant) -> Result<Option<PathBuf>, String> {
     if !dir.ancestors().any(|d| d.join(".git").exists()) {

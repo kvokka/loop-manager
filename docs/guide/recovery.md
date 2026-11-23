@@ -90,6 +90,26 @@ loop-manager run start shop web refix --input task=<bead> \
   --input 'note=This task was started before by run <run>; its state is unknown. Find out what was done, then finish it.'
 ```
 
+## What a worktree leaves behind
+
+A run with a worktree of its own ([a worktree per run](first-formula.md#a-worktree-per-run)) that failed keeps its
+branch `loop-manager/<run>` unless the branch was merged. Its worktree, `<git common dir>/loop-manager/worktrees/<run>`,
+is removed when the run ends, but stays while it holds uncommitted changes or commits no ref reaches; the run's
+`addon.hook_failed` event says which. `git worktree list` shows what stayed: take the work you want into a branch,
+then remove the worktree with `git worktree remove <path>` and the branch once it is merged.
+`loop-manager run show <run>` gives the bases of a run under `bases`: the directories its children branched from and
+merged into.
+
+A bead whose child failed for good is taken up again by a later entry of its `drain` step, or by a run you start, on a
+new branch from the current tip of the base; the old branch stays beside it for you to compare, merge or delete.
+
+A merge cut short by a crash of the daemon leaves `MERGE_HEAD` in the base. Once the daemon is back the hook runs
+again: it aborts that merge and makes it again, and accepts a branch that is already merged, so the work merges once.
+A `git` killed in the middle (at the timeout of the hook, or with the daemon) may leave an `index.lock` in the base.
+Every later merge there then fails as a failed hook, and its `addon.hook_failed` names the file
+(`Unable to create '<path>/index.lock': File exists`): check that no `git` runs in that repository and remove the file
+by hand.
+
 ## Abandon it
 
 A run that is not over yet (in `queued`, `parked` or `interrupted`, say) is stopped with

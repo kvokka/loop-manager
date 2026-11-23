@@ -76,6 +76,8 @@ The behaviour itself is described in the document named under each heading; this
   the merge; its failure repeats the step, and the next merge adds the new commits. Untracked files of the child's
   worktree count as uncommitted changes. The bundled `worktree` has 300 s on `run.finishing` (waiting for the lock,
   the project's own hooks), 30 s on its other events.
+- `bases` of a run lists its own place and the places of its children; the path of a lazy base is found by a call of
+  git at the read, and the list of runs has no `bases`.
 - A child of a `formula` step whose formula has `worktree = true` gets a worktree of its own from the HEAD of the
   directory it inherited, and merges nothing.
 - A check script runs after the step did; the step's own failure is a failed attempt too; the path is relative to

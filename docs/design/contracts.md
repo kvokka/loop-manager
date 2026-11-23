@@ -78,7 +78,9 @@ Shared objects:
   oldest closure of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the
   formula's checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`
-  return sets 1; `attempt` stays the attempt of the session).
+  return sets 1; `attempt` stays the attempt of the session). `GET /v1/runs/{id}` alone adds `bases`: the directory of
+  the run's base in each place, its own (`workdir`) and each other place where it had children (config.md,
+  "Formula"); bases appear in no event and no prompt.
 - `Failure`: `{kind, text, scope, retry_at, retried_by_harness, source, raw, account, provider_model}`: `kind` from
   see 4.4, `text` set only for `unknown`, `scope` one of `session | instance | account | provider_model | run | rig`,
   `retry_at` time or null, `source` one of `harness | adapter | core`, `raw` the harness text cut to 4 KiB,

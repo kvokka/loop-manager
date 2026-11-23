@@ -157,6 +157,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
             let paths = paths.clone();
             move || crate::doctor::findings(&paths)
         }),
+        tree: loop_manager_addons::tree,
     };
     let stop = stop_signal().map_err(|e| format!("signals: {e}"))?;
     eprintln!("loop-manager daemon listening on {}", paths.socket.display());

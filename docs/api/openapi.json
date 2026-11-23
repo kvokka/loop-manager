@@ -1307,7 +1307,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Run views as `GET /v1/runs/{id}` gives them",
+            "description": "Run views as `GET /v1/runs/{id}` gives them, without `bases`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1486,7 +1486,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The run: `RunView` (docs/design/contracts.md 1.3) with `project`, `rig`, `correlation`, `inputs`, `waiting_for`, `outcome` and `attempts`",
+            "description": "The run: `RunView` (docs/design/contracts.md 1.3) with `project`, `rig`, `correlation`, `inputs`, `waiting_for`, `outcome`, `attempts` and `bases`",
             "content": {
               "application/json": {
                 "schema": {
@@ -3376,6 +3376,19 @@
               "type": "string"
             },
             "description": "Checks that sent the run into its current round, empty in the first round."
+          },
+          "bases": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "`GET /v1/runs/{id}` only: by place (a rig, or the root's name), the directory of the run's base there\n(docs/design/config.md \"Formula\"): in its own place its `workdir`; in each other place it had children in,\nits worktree there when its formula has `worktree = true` and that worktree exists, else the place's directory.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "bead": {
             "type": [

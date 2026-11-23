@@ -59,6 +59,10 @@ pub(crate) struct Run {
     attempts: Vec<Attempt>,
     /// The tokens of every attempt of the run.
     usage: Usage,
+    /// `GET /v1/runs/{id}` only: by place (a rig, or the root's name), the directory of the run's base there
+    /// (docs/design/config.md "Formula"): in its own place its `workdir`; in each other place it had children in,
+    /// its worktree there when its formula has `worktree = true` and that worktree exists, else the place's directory.
+    bases: Option<BTreeMap<String, String>>,
 }
 
 /// The tokens the harness reported (docs/design/contracts.md 4.3 `usage`).

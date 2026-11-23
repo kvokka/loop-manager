@@ -8,6 +8,8 @@
 mod policy;
 mod worktree;
 
+pub use worktree::tree;
+
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 

@@ -3,9 +3,13 @@
 
 use super::{RunHandler, gates::closures, row, row::Row};
 use crate::{driver::SessionRef, writer::Error};
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::{Value, json};
-use std::{path::Path, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 pub struct Reader(Mutex<Connection>);
 
@@ -96,6 +100,48 @@ impl Reader {
         view["steps"] = json!(super::render::step_results(&conn, id, &row.step)?);
         view["usage"] = row::usage(&conn, id)?;
         Ok(Some(view))
+    }
+
+    /// The bases of run `id` (docs/design/config.md "Formula"), by place: in its own place its `workdir`; in each other
+    /// place it had children in, its lazy worktree there as `tree` finds it (`tree(<place's directory>, id)`) when its
+    /// formula has `worktree = true`, else the place's directory. `None` if there is no such run. Nothing of it is
+    /// stored: `tree` runs git, after the read and outside the lock of the connection, on the caller's thread.
+    pub fn bases(
+        &self,
+        config: &crate::config::Config,
+        id: &str,
+        tree: impl Fn(&Path, &str) -> Option<PathBuf>,
+    ) -> Result<Option<BTreeMap<String, PathBuf>>, Error> {
+        let (run, children) = {
+            let conn = self.conn();
+            let run: Option<(String, String, String, String)> = conn
+                .query_row(
+                    "SELECT project, rig, workdir, formula FROM runs WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .optional()?;
+            let mut stmt = conn.prepare("SELECT DISTINCT rig FROM runs WHERE parent_run = ?1")?;
+            let children: Vec<String> = stmt.query_map([id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            (run, children)
+        };
+        let Some((project, rig, workdir, formula)) = run else {
+            return Ok(None);
+        };
+        let mut bases = BTreeMap::new();
+        // A project a reload removed leaves only the run's own place.
+        if let Some(project) = config.projects.iter().find(|p| p.name == project) {
+            let keyed = super::bases::keyed(project, &formula);
+            for place in children.iter().filter(|c| **c != rig) {
+                let Some(dir) = project.place(place).map(|p| &p.path) else {
+                    continue;
+                };
+                let base = keyed.then(|| tree(dir, id)).flatten();
+                bases.insert(place.clone(), base.unwrap_or_else(|| dir.clone()));
+            }
+        }
+        bases.insert(rig, PathBuf::from(workdir));
+        Ok(Some(bases))
     }
 
     /// The runs `filter` selects, newest first (at most 100 unless the filter says otherwise).

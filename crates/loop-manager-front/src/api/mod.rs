@@ -62,6 +62,9 @@ pub struct Api {
     pub drivers: Vec<Arc<dyn Driver>>,
     /// The checks of `loop-manager doctor`, made from the daemon's process: one `{check, level, detail}` object each.
     pub doctor: Box<dyn Fn() -> Vec<Value> + Send + Sync>,
+    /// The worktree of a run in the repository of a place, for the `bases` of a run (`Reader::bases`): the bundled
+    /// `worktree`'s, which the core does not link.
+    pub tree: fn(&std::path::Path, &str) -> Option<std::path::PathBuf>,
 }
 
 impl Api {

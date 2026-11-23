@@ -143,6 +143,6 @@ fn home(project: &Project, rig: &str) -> PathBuf {
 }
 
 /// Whether `formula` has `worktree = true`; a formula that does not resolve has not.
-fn keyed(project: &Project, formula: &str) -> bool {
+pub(super) fn keyed(project: &Project, formula: &str) -> bool {
     project.formula(formula).is_ok_and(|(_, f)| f.worktree)
 }

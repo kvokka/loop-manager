@@ -57,18 +57,22 @@ fn plain(files: &[(&str, &str)]) -> World {
 /// own config: the git of the addon runs with the environment of the test.
 fn world(files: &[(&str, &str)]) -> World {
     let w = plain(files);
-    let rig = w.dir.path().join("shop/web");
-    git(&rig, &["init", "-q", "-b", "main"]);
+    repo(&w.dir.path().join("shop/web"));
+    w
+}
+
+/// Makes `rig` a git repository with one commit, its committer and signing set in its own config.
+fn repo(rig: &Path) {
+    git(rig, &["init", "-q", "-b", "main"]);
     for (key, value) in [
         ("user.email", "t@example.com"),
         ("user.name", "t"),
         ("commit.gpgsign", "false"),
     ] {
-        git(&rig, &["config", key, value]);
+        git(rig, &["config", key, value]);
     }
-    git(&rig, &["add", "-A"]);
-    git(&rig, &["commit", "-q", "-m", "base"]);
-    w
+    git(rig, &["add", "-A"]);
+    git(rig, &["commit", "-q", "-m", "base"]);
 }
 
 /// A turn that holds until `go` is notified.
@@ -373,4 +377,61 @@ async fn the_children_of_a_root_run_with_a_worktree_work_in_its_base_of_their_ri
     // The base goes with the run that owns it, and its branch, merged, with it.
     gone(&base).await;
     branch_gone(&rig, &format!("loop-manager/{parent}")).await;
+}
+
+#[tokio::test]
+async fn the_bases_of_a_root_run_are_its_workdir_and_its_worktree_in_each_rig_of_its_children() {
+    let places = (
+        "shop/loop-manager.toml",
+        "[rigs.web]\npath = \"web\"\n[rigs.api]\npath = \"api\"\n",
+    );
+    let epic = (
+        "shop/formulas/epic.toml",
+        "name = \"epic\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
+         [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\n",
+    );
+    let w = world(&[places, ("shop/api/.keep", ""), epic, WORK]);
+    repo(&w.dir.path().join("shop/api"));
+    let root = w.tracker.add(&[], None);
+    w.tracker.add_in("w", &[], Some(&root));
+    w.tracker.add_in("a", &[], Some(&root));
+    let go = Arc::new(Notify::new());
+    w.driver.script(held_turn(&go));
+    w.driver.script(held_turn(&go));
+    let reply = w.start_bead("epic", None, json!(root)).await.unwrap();
+    let parent = reply["run"].as_str().unwrap().to_owned();
+    let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let mut expected = std::collections::BTreeMap::new();
+    for n in 0..2 {
+        // A child without a worktree of its own works in the base of its parent in its rig.
+        let kid = w.child(&parent, n).await;
+        let workdir = w.session_in(&kid, 1).await;
+        let rig = reader.run(&kid).unwrap().unwrap()["rig"].as_str().unwrap().to_owned();
+        expected.insert(rig, workdir);
+    }
+    let config = loop_manager_core::config::load(&w.dir.path().join("config.toml")).unwrap();
+    let view = reader.run(&parent).unwrap().unwrap();
+    expected.insert(
+        view["rig"].as_str().unwrap().to_owned(),
+        PathBuf::from(view["workdir"].as_str().unwrap()),
+    );
+    let bases = reader
+        .bases(&config, &parent, loop_manager_addons::tree)
+        .unwrap()
+        .unwrap();
+    assert_eq!(bases, expected);
+    assert_eq!(bases.len(), 3, "{bases:?}");
+    for rig in ["web", "api"] {
+        let tree = w
+            .dir
+            .path()
+            .join("shop")
+            .join(rig)
+            .join(".git/loop-manager/worktrees")
+            .join(&parent);
+        assert_eq!(bases[rig], tree);
+    }
+    // Without its worktree there a place's base is its directory.
+    let none = reader.bases(&config, &parent, |_, _| None).unwrap().unwrap();
+    assert_eq!(none["api"], w.dir.path().join("shop/api"));
 }
