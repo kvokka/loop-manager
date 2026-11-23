@@ -260,7 +260,7 @@ new ResizeObserver(() => {
   drawEdges();
   send("ui/notifications/size-changed",{height:Math.ceil(document.body.getBoundingClientRect().height)});
 }).observe(document.body);
-request("ui/initialize",{appInfo:{name:"t3-run-card",version:"0.2.1"},appCapabilities:{},protocolVersion:"2026-01-26"})
+request("ui/initialize",{appInfo:{name:"t3-run-card",version:"0.3.0"},appCapabilities:{},protocolVersion:"2026-01-26"})
   .then(result => {context(result.hostContext);send("ui/notifications/initialized",{});})
   .catch(error => el("notice").textContent = error.message);
 </script></html>

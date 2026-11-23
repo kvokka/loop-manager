@@ -1,5 +1,7 @@
 //! Runs: start a formula, list, state, cancel, the finisher (docs/api/frontends.md, contracts 6).
 
+mod sessions;
+
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
     replies::{Failed, Finished, Keyed, Run, Started},
@@ -133,11 +135,15 @@ pub(crate) async fn get(
     Param(Path(id)): Param<Path<String>>,
     Param(Query(query)): Param<Query<HistoryQuery>>,
 ) -> Reply {
-    let run = state
+    let all = query.all_attempts.unwrap_or(false);
+    let mut run = state
         .reader
-        .run_with_attempts(&id, query.all_attempts.unwrap_or(false))?;
-    run.map(Json)
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", format!("no run `{id}`")))
+        .run_with_attempts(&id, all)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", format!("no run `{id}`")))?;
+    if all {
+        sessions::identify(&mut run);
+    }
+    Ok(Json(run))
 }
 
 #[derive(Deserialize, ToSchema)]

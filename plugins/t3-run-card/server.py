@@ -1,6 +1,5 @@
 """Interactive T3 Code card for sessions of a local loop-manager run."""
 
-import hashlib
 import http.client
 import json
 import os
@@ -144,27 +143,12 @@ def recorded_agents(path, run, watermark):
 
 
 def working_sessions(state):
-    """Index the first attempt for each distinct session in a step and round."""
-    seen = set()
-    for a in state["attempts"]:
-        if a["session"] is None:
-            continue
-        if "round" not in a:
-            raise ValueError("Update LM to a version with per-round attempt history")
-        ref = json.dumps(a["session"], sort_keys=True)
-        key = (a["round"], a["step"], a["harness"], ref)
-        if key in seen:
-            continue
-        seen.add(key)
-        # T3 persists these native IDs for both bead-backed and beadless runs.
-        project = state["project"]
-        suffix = f'#t:{state["id"]}.{a["n"]}'
-        if state.get("bead"):
-            native = f'lm-agent/{project}/{state["bead"]}{suffix}'
-        else:
-            digest = hashlib.sha256(ref.encode()).hexdigest()[:24]
-            native = f'lm-run/{project}/{digest}{suffix}'
-        yield a, native
+    """Recorded sessions in this run, identified by the LM daemon."""
+    for attempt in state["attempts"]:
+        if attempt["session"] is not None and "acp_session_id" not in attempt:
+            raise ValueError("Update the LM daemon to expose working session IDs")
+        if native := attempt.get("acp_session_id"):
+            yield attempt, native
 
 
 def snapshot(path, run, existing_links=False):
@@ -353,7 +337,7 @@ def dispatch(method, params):
         version = params.get("protocolVersion")
         return {"protocolVersion": version if version in supported else supported[-1],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "t3-run-card", "version": "0.2.1"}}
+                "serverInfo": {"name": "t3-run-card", "version": "0.3.0"}}
     if method in ("ping", "resources/templates/list"):
         return {"resourceTemplates": []} if method.startswith("resources") else {}
     if method == "tools/list":

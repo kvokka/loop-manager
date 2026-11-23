@@ -70,7 +70,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | pi and other harnesses | Not planned |
 | ACP as the transport "down" | Native protocols; the driver interface follows the semantics of ACP v2, so an ACP driver can be one more implementation |
 | A human joining a live session, handover of control | A later release: no operations, states or stubs for it now. A human sees the session reference in the run's state and opens the conversation with the harness's own tools after the run ([frontends](api/frontends.md)) |
-| Prompting or controlling work from an editor over ACP | The optional [T3 Code run card](../plugins/README.md#follow-a-run-in-t3-code) provides read-only access to recorded agent sessions |
+| Prompting or controlling work from an editor over ACP | [loop-manager acp](api/frontends.md#read-working-sessions-over-acpv2) provides read-only access to recorded agent sessions |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
 | A web interface, a dashboard | The task board is `bv`; observation is the CLI and the event stream |
 | Alerting a human about a failure | Only the event journal and the logs; a notice addon is on the [roadmap](roadmap.md) |

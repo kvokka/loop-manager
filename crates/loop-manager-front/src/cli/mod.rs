@@ -2,6 +2,7 @@
 //! Local commands include `format`, `daemon`, `cache clear`, `--version`, and `doctor` and `config check|explain`
 //! on a file named with `--config`.
 
+mod acp;
 mod chat;
 mod commands;
 mod config;
@@ -139,6 +140,8 @@ pub enum Command {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Serve read-only ACPv2 access to recorded working sessions over stdio.
+    Acp,
     /// The daemon's state.
     Status,
     /// Stop the daemon once the runs in a turn are done (no run starts meanwhile).
@@ -269,6 +272,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Addon(command) => config::list(client, json, "addons", command).await?,
         Command::Events { from } => follow(client.events(from).await?, json).await?,
         Command::Finish { result, summary, data } => return finish(client, json, result, summary, data).await,
+        Command::Acp => acp::serve(client).await?,
         Command::Status => print(json, &client.request("GET", "/v1/daemon", None, None).await?),
         Command::Drain { timeout, key } => print(
             json,

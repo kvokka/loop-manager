@@ -80,6 +80,8 @@ pub(crate) struct Outcome {
 
 #[derive(ToSchema)]
 pub(crate) struct Attempt {
+    /// Stable ACP session ID on the first attempt of a session in its step and round, with all_attempts=true.
+    acp_session_id: Option<String>,
     round: Option<u32>,
     result: Option<String>,
     summary: Option<String>,

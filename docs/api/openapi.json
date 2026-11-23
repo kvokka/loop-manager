@@ -2495,6 +2495,13 @@
           "output_tokens"
         ],
         "properties": {
+          "acp_session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable ACP session ID on the first attempt of a session in its step and round, with all_attempts=true."
+          },
           "ended_at": {
             "type": [
               "string",

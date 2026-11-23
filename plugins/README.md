@@ -52,13 +52,16 @@ thread reuses its history.
 ### Enable native thread links
 
 On the T3 host, install Node.js 22.4 or newer and the `t3` CLI on the plugin process's PATH. In
-**Settings → Providers → Add provider → Show more → Local ACP command**, use the executable
-`sessions.py` in the installed `t3-run-card` directory. Give it two literal argument rows, `--socket`
-and the absolute LM socket path. Register one instance per daemon. If upgrading an existing LM
-working-session provider, keep its instance ID and change its command. When using a versioned
-installation, update the provider path after upgrading. Add the LM project root to T3 once
-(`t3 project add /path/to/project`). The card finds the provider by executable and socket, and finds
-the project by workspace directory. It uses the local T3 runtime in `T3CODE_HOME` (default `~/.t3`).
+**Settings → Providers → Add provider → Show more → Local ACP command**, set the executable to
+`loop-manager` (or its stable absolute path) and add one argument row, `acp`. LM finds the default
+daemon socket with the same rules as `loop-manager status`. For a dev daemon add two more rows,
+`--socket` and its absolute socket path. Register one instance per daemon.
+
+When moving an existing provider from the plugin's `sessions.py`, edit the command and arguments on
+the same provider instance to keep imported thread links. The executable is installed with LM.
+Updating the card or switching between Claude and Codex uses the same T3 registration. Add the LM
+project root to T3 once (`t3 project add /path/to/project`). The card uses the local T3 runtime in
+`T3CODE_HOME` (default `~/.t3`).
 
 The provider exposes recorded harness sessions over ACPv2. Skipped steps and steps without a harness session
 have no working-session link. When another round or run continues the same harness session, the provider

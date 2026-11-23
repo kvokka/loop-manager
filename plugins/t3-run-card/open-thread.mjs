@@ -3,8 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, isAbsolute, join } from "node:path";
 
 const home = process.env.T3CODE_HOME || join(homedir(), ".t3");
 const data = join(home, "userdata");
@@ -18,31 +17,44 @@ const cli = (args) =>
 const segment = (s) =>
   encodeURIComponent(s).replace(/[.!~*'()]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
 
-async function registeredProvider(socket) {
+function providerSocket(instance) {
+  const config = instance.config ?? {};
+  if (
+    instance.driver !== "acpRegistry" || instance.enabled === false ||
+    config.source !== "local" || basename(config.commandPath ?? "") !== "loop-manager"
+  ) return null;
+  const args = [...(config.commandArgs ?? [])];
+  const acp = args.indexOf("acp");
+  if (acp < 0) return null;
+  args.splice(acp, 1);
+  if (args.length === 2 && args[0] === "--socket") return args[1];
+  if (args.length === 1 && args[0].startsWith("--socket=")) return args[0].slice("--socket=".length);
+  if (args.length) return null;
+
+  const env = { ...process.env };
+  for (const item of instance.environment ?? []) {
+    if (!["HOME", "LOOP_MANAGER_SOCKET", "XDG_RUNTIME_DIR", "XDG_STATE_HOME"].includes(item.name)) continue;
+    if (item.secret || item.valueRedacted) return null;
+    env[item.name] = item.value;
+  }
+  if (env.LOOP_MANAGER_SOCKET) return env.LOOP_MANAGER_SOCKET;
+  const base = [env.XDG_RUNTIME_DIR, env.XDG_STATE_HOME].find((dir) => dir && isAbsolute(dir));
+  return join(base || join(env.HOME || homedir(), ".local/state"), "loop-manager", "loop-manager.sock");
+}
+
+async function registeredProvider(input) {
+  const socket = await realpath(input.socket);
   const settings = await readJson("settings.json");
-  const script = await readFile(fileURLToPath(new URL("sessions.py", import.meta.url)));
-  for (const [id, p] of Object.entries(settings.providerInstances ?? {})) {
-    const config = p.config ?? {},
-      args = config.commandArgs ?? [];
-    if (
-      p.driver !== "acpRegistry" ||
-      p.enabled === false ||
-      config.source !== "local" ||
-      args.length !== 2 ||
-      args[0] !== "--socket" ||
-      !config.commandPath?.endsWith("/sessions.py")
-    )
-      continue;
+  for (const [id, instance] of Object.entries(settings.providerInstances ?? {})) {
+    const path = providerSocket(instance);
+    if (!path) continue;
     try {
-      if ((await realpath(args[1])) === socket && (await readFile(config.commandPath)).equals(script))
-        return id;
+      if ((await realpath(path)) === socket) return id;
     } catch {
       /* Another provider may belong to an offline daemon. */
     }
   }
-  throw Error(
-    "Configure the T3 Local ACP command sessions.py for this LM socket (see the T3 run card installation guide).",
-  );
+  throw Error("Configure a T3 Local ACP command for loop-manager acp on this daemon (see the T3 run card guide).");
 }
 
 function hostedLink(environment, thread) {
@@ -50,7 +62,7 @@ function hostedLink(environment, thread) {
 }
 
 async function existingLinks(input) {
-  const instance = await registeredProvider(await realpath(input.socket));
+  const instance = await registeredProvider(input);
   const environment = (await readFile(join(data, "environment-id"), "utf8")).trim();
   const threads = JSON.parse(cli(["thread", "list", "--project", input.root, "--json"]));
   const existing = new Set(
@@ -69,7 +81,7 @@ async function existingLinks(input) {
 }
 
 async function importThread(input) {
-  const instanceId = await registeredProvider(await realpath(input.socket));
+  const instanceId = await registeredProvider(input);
   const origin = new URL((await readJson("server-runtime.json")).origin);
   if (
     !["127.0.0.1", "[::1]", "localhost"].includes(origin.hostname) ||

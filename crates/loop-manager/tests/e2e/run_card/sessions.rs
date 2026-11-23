@@ -1,4 +1,4 @@
-//! The T3 card and its local ACPv2 provider against isolated daemons and harness transcripts.
+//! The T3 card and the LM binary’s ACPv2 interface against isolated daemons and harness transcripts.
 
 use super::{
     super::{claude, codex, tracker::br_in},
@@ -27,13 +27,15 @@ struct CardProvider {
 }
 
 impl CardProvider {
-    async fn start(d: &Daemon) -> Self {
-        let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/sessions.py");
-        let mut child = tokio::process::Command::new("python3")
-            .arg("-B")
-            .arg(program)
-            .arg("--socket")
-            .arg(d.socket())
+    async fn start(d: &Daemon, explicit_socket: bool) -> Self {
+        let mut command = common::loop_manager();
+        command.arg("acp").env_remove("LOOP_MANAGER_SOCKET");
+        if explicit_socket {
+            command.arg("--socket").arg(d.socket());
+        } else {
+            command.env("XDG_RUNTIME_DIR", d.dir.path().join("run"));
+        }
+        let mut child = tokio::process::Command::from(command)
             .kill_on_drop(true)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -43,6 +45,9 @@ impl CardProvider {
         let mut provider = Self { child, lines };
         let (_, init) = provider.call("initialize", json!({"protocolVersion": 2})).await;
         assert_eq!(init["result"]["protocolVersion"], 2, "{init}");
+        assert_eq!(init["result"]["info"]["name"], "loop-manager");
+        let (_, refused) = provider.call("session/new", json!({})).await;
+        assert_eq!(refused["error"]["code"], 1);
         provider
     }
 
@@ -176,7 +181,7 @@ async fn resumed_and_continued_sessions_replay_only_the_selected_work() {
     let url = |run: &str| format!("/v1/runs/{run}/live?chat=true&attempt=1");
     assert_eq!(d.get(&url(&second)).await["live"], true);
     assert_eq!(d.get(&url(&first)).await["live"], false);
-    let mut provider = CardProvider::start(&d).await;
+    let mut provider = CardProvider::start(&d, true).await;
     let native = format!("lm-agent/shop/{bead}#t:{second}.1");
     let (updates, response) = provider.resume(&native).await;
     assert_eq!(response["result"], json!({}));
@@ -292,7 +297,7 @@ async fn a_beadless_codex_session_opens_by_its_listed_id() {
     let d = codex::daemon(&provider).await;
     let run = d.create("build", None).await;
     d.until_state(&run, "passed").await;
-    let mut provider = CardProvider::start(&d).await;
+    let mut provider = CardProvider::start(&d, false).await;
     let (_, list) = provider.call("session/list", json!({})).await;
     let sessions = list["result"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1);
