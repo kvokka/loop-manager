@@ -2,7 +2,7 @@
 
 use super::{RunHandler, row::Row};
 use crate::{
-    config::{EffectiveConfig, Scope, StepKind},
+    config::{EffectiveConfig, Project, Rig, Scope, StepKind},
     writer::Tx,
 };
 use rusqlite::Connection;
@@ -23,7 +23,6 @@ impl RunHandler {
     /// The prompt, the step timeout and the config snapshot of a run, from the config of now: the effective config
     /// of an ai step; `{"command", "env"}` of an exec step; `{"drain", "pool", "on_item_failure", "worktree"}` of a
     /// drain step. `None`: the step's `if` does not hold, the run skips it (docs/design/config.md).
-    #[expect(clippy::too_many_lines, reason = "one match over the step kinds, an arm each")]
     pub(super) fn render(&self, tx: &Tx<'_>, row: &Row) -> Result<Option<(Option<String>, i64, Value)>, String> {
         let project = self.config.projects.iter().find(|p| p.name == row.project);
         let project = project.ok_or(format!("project `{}` is gone from the config", row.project))?;
@@ -52,17 +51,7 @@ impl RunHandler {
         if row.step_attempt == 1 && !step.condition.matches(&context) {
             return Ok(None);
         }
-        // The environment of an exec step or a check script (docs/design/config.md): the tracker by name, as in a
-        // session, then `[exec]`, its values as written (decision 137).
-        let exec = match &step.kind {
-            StepKind::Exec { env, .. } => env,
-            _ => &project.exec,
-        };
-        let mut env: serde_json::Map<String, Value> = (project.tracker_env(Some(rig)))
-            .map(|(name, value)| (name.clone(), json!({ "value": value })))
-            .collect();
-        env.extend((exec.env.iter()).map(|(name, value)| (name.clone(), json!(value))));
-        let inherit_env = exec.inherit_env.as_ref().is_some_and(|i| i.value);
+        let (env, inherit_env) = step_env(project, rig, &step.kind);
         let (timeout, last_comments) = match (&step.kind, row.step_kind.as_str()) {
             (StepKind::Exec { command, timeout, .. }, "exec") => {
                 let config = json!({ "command": command, "env": env, "inherit_env": inherit_env });
@@ -134,7 +123,23 @@ impl RunHandler {
         config["exec"] = json!({ "env": env, "inherit_env": inherit_env });
         Ok(Some((Some(text), timeout_ms(timeout, AI_STEP_TIMEOUT_MS), config)))
     }
+}
 
+/// The environment of an exec step or a check script (docs/design/config.md): the tracker by name, as in a session,
+/// then `[exec]` of the step or the project, its values as written (decision 137); and its `inherit_env`.
+fn step_env(project: &Project, rig: &Rig, kind: &StepKind) -> (Map<String, Value>, bool) {
+    let exec = match kind {
+        StepKind::Exec { env, .. } => env,
+        _ => &project.exec,
+    };
+    let mut env: Map<String, Value> = (project.tracker_env(Some(rig)))
+        .map(|(name, value)| (name.clone(), json!({ "value": value })))
+        .collect();
+    env.extend((exec.env.iter()).map(|(name, value)| (name.clone(), json!(value))));
+    (env, exec.inherit_env.as_ref().is_some_and(|i| i.value))
+}
+
+impl RunHandler {
     fn render_prompt(
         &self,
         tx: &Tx<'_>,
