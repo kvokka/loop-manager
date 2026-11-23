@@ -3,9 +3,10 @@
 
 use crate::common;
 
-use common::{World, beads::slow_turn, last, world};
+use common::{World, beads::slow_turn, hollow_turn, last, world};
 use loop_manager_core::run::{Msg, Verdict};
 use loop_manager_core::tracker::Tracker;
+use loop_manager_testkit::Step;
 use serde_json::json;
 use std::time::Duration;
 
@@ -185,4 +186,38 @@ async fn a_run_waiting_for_the_comments_survives_a_restart_and_fails_once_the_tr
     tokio::time::sleep(Duration::from_secs(121)).await;
     let events = w.events(&run, Duration::ZERO).await;
     assert_eq!(last(&events, "run.failed")["reason"], "tracker_unavailable");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_comment_accepted_before_the_finish_is_in_the_prompt_of_the_next_step_after_a_tracker_outage() {
+    let w = comments_world("");
+    let bead = w.tracker.add(&[], None);
+    w.driver.script(slow_turn());
+    // The review's turn ends a few seconds after its finish; the next `code` works on.
+    for wait in [15, 3600] {
+        let mut turn = hollow_turn();
+        turn.insert(1, Step::Wait(Duration::from_secs(wait)));
+        w.driver.script(turn);
+    }
+    let run = w.run_on(json!(bead)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    w.finish_attempt(&run, 1, Verdict::Pass, "coded").await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    let token = w.driver.token(&run, 2).unwrap();
+    w.tracker.set_down(true);
+    assert_eq!(w.comment(&run, &token, "the review's summary").await, "accepted");
+    // The comment fails a few times before the read of the next step is asked.
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    w.finish_attempt(&run, 2, Verdict::Fail, "redo").await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    w.tracker.set_down(false);
+    let mut third = String::new();
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        third = last_prompt(&w, &run, 3);
+        if third.starts_with("Fix ") {
+            break;
+        }
+    }
+    assert!(third.contains("the review's summary"), "{third}");
 }

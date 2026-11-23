@@ -338,11 +338,12 @@ pub(super) fn tracker_key(project: &str) -> String {
     format!("tracker:{project}")
 }
 
-/// The queue of the tracker call `call` of `project`: the records of the audit trail and the comments of attempts have
-/// one of their own, so a record the tracker refuses for a while holds up no claim, read or release.
+/// The queue of the tracker call `call` of `project`: the records of the audit trail have one of their own, so a
+/// record the tracker refuses for a while holds up no claim, read or release. A comment stays on the project's queue,
+/// before the read of the bead that the next step's prompt shows.
 pub(super) fn queue(project: &str, call: &str) -> String {
     match call {
-        "attempt_ended" | "comment" => format!("tracker:{project}:audit"),
+        "attempt_ended" => format!("tracker:{project}:audit"),
         _ => tracker_key(project),
     }
 }

@@ -70,8 +70,8 @@ impl RunHandler {
         answer("accepted")
     }
 
-    /// A comment of the attempt whose token is `token` on the bead of its run: an effect on the tracker's queue of
-    /// records, as the attempt's actor, while the token is valid (contracts 6.3).
+    /// A comment of the attempt whose token is `token` on the bead of its run: an effect on the queue of the project's
+    /// tracker, as the attempt's actor, while the token is valid (contracts 6.3).
     pub(super) fn comment(tx: &mut Tx<'_>, run: &str, token: &str, text: &str) -> Result<Value, Error> {
         let answer = |a: &str| Ok(json!({ "answer": a }));
         let row = match Row::load(tx, run) {

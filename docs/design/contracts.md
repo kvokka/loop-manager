@@ -709,8 +709,10 @@ the attempt has none). A repeated effect (a restart between the call and its rep
 
 `comment` adds a comment to the bead `id` as the attempt's actor `loop-manager:<run id>:<attempt n>`: the comment
 of a session through `loop-manager comment` (6.3), so an addon or an agent comments on its bead without knowing the
-tracker. The core adds an effect for it on the queue `tracker:<project>:audit`, with the records of `attempt_ended`.
-A repeated effect may add the comment twice. An `Unavailable` tracker is tried again and an `Invalid` answer dropped,
+tracker. The core adds an effect for it on the queue `tracker:<project>`, so it reaches the bead before the read of
+the bead that a later step's prompt shows (`lineage`): a comment accepted before `finish` is in that prompt, even
+after a tracker outage. The same text from the same attempt, while the first is still queued, is one comment. A
+repeated effect may add the comment twice. An `Unavailable` tracker is tried again and an `Invalid` answer dropped,
 both reported as `tracker.sync_failed{op: "comment"}`; a bead the tracker no longer has drops it. br adds it with
 `br comments add <id> --file /dev/stdin` ([tracker-br](tracker-br.md#one-database-per-project)).
 
@@ -918,7 +920,7 @@ of a run whose gate the operator closed parks it instead (invariant 18).
   key, a hash of the request, so a retry after a lost reply gets the first answer.
 - CLI: `loop-manager comment --file <file>` → `POST /v1/runs/{id}/comment` of `{token, text}`: the text, up to 64
   KiB, goes on the run's bead as a comment of the attempt (`comment`, 5.1). Answers: `accepted` (the comment is queued
-  for the tracker and reaches the bead shortly after); `no_bead` (the run has none); `stale_attempt` (not the run's
+  for the tracker and reaches the bead shortly after, before the prompt of the run's next step reads the bead); `no_bead` (the run has none); `stale_attempt` (not the run's
   current attempt); `run_terminal`; `invalid` (unknown token or run, text over 64 KiB). The command exits 1 on any
   answer but `accepted` and does not retry an unreachable daemon.
 - The finisher is the agent's word on the outcome: `pass` or `fail`, a short summary, optional data. A failure of

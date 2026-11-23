@@ -529,7 +529,7 @@ async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_se
 
 impl common::World {
     /// A comment of the attempt whose token is `token` on the bead of `run`: the core's answer.
-    async fn comment(&self, run: &str, token: &str, text: &str) -> Value {
+    pub(crate) async fn comment(&self, run: &str, token: &str, text: &str) -> Value {
         let msg = Msg::Comment {
             run: run.into(),
             token: token.into(),
