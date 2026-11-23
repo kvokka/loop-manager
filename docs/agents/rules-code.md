@@ -49,6 +49,11 @@ is for the review to catch.
   codex a release line (`2.1`, `0`); there is no `mise.lock`. No update without a reason; an update is a commit of
   its own. A harness or br update is accepted by the contract tests ([harness updates](../harness-updates.md)).
 - Dependencies have MIT-compatible licenses (`cargo deny`). No code of br or bv enters the tree.
+- No implicit dependency on a tool. An addon or a crate does not call a concrete tracker, harness or other tool it is
+  not the adapter of: it goes through loop-manager's interfaces, the contract traits, the CLI (`loop-manager comment`,
+  `loop-manager finish`, `loop-manager run show`) and the environment it is given. Only the adapter of a tool runs it
+  (`loop-manager-br` runs br, `loop-manager-claude` runs claude); a part that needs more of a tool asks for it through
+  an interface of loop-manager. The devloop pack is exempt: it belongs to a br project by design.
 - mise is a convenience, not a requirement. A command that is not found: `mise exec -- <command>`.
 - Structural search in Rust is `ast-grep`: `ast-grep -l rust -p '$X.unwrap()' crates/`.
 

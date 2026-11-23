@@ -33,7 +33,7 @@ conversion pipeline, use `set -o pipefail` in bash or zsh to see producer failur
    replaced only with a `NOTE` comment on the epic and an edit of that file.
 4. The rules of code (`docs/agents/rules-code.md`): the workspace Clippy lints, no `todo!` or
    `unimplemented!`, no stubs and no code for later, a `MEASURE` marker at every measurement, no mechanism without a
-   use.
+   use, no implicit dependency of an addon or a crate on a tracker, harness or other tool it is not the adapter of.
 5. Dependencies: new ones are the latest released versions, `Cargo.lock` is in git, the licenses fit MIT.
 6. Language: everything of the product (code, comments, rustdoc, `docs/`, the texts of the CLI, commit messages) is
    in English. Russian in the product is a mandatory item.
