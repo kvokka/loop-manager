@@ -7,6 +7,7 @@ use loop_manager_contract::{
     BoxFuture,
     tracker::{Bead, Change, Comment, Commented, Lineage, Tracker, TrackerError, Wait},
 };
+use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Clone, Default)]
@@ -24,6 +25,8 @@ struct State {
     comments: Vec<(String, Comment)>,
     /// The blocking dependencies: the bead, its blocker and the type.
     deps: Vec<(String, String, String)>,
+    /// The entries of `attempt_ended`: the actor, the bead and the entry, in order.
+    attempts: Vec<(String, String, Value)>,
     down: bool,
     /// The last write the next read of the writes sees; set by `lag`.
     lag: Option<i64>,
@@ -126,6 +129,11 @@ impl MemoryTracker {
             text: text.to_owned(),
         };
         self.lock().comments.push((id.to_owned(), comment));
+    }
+
+    /// The ends of attempts recorded so far, oldest first: the actor, the bead and the entry.
+    pub fn attempts(&self) -> Vec<(String, String, Value)> {
+        self.lock().attempts.clone()
     }
 
     /// While down, every call fails as `Unavailable`.
@@ -432,6 +440,24 @@ impl Tracker for MemoryTracker {
                 .find(|b| b.id == id)
                 .cloned()
                 .ok_or(TrackerError::NotFound)
+        })
+    }
+
+    fn attempt_ended<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        entry: &'a Value,
+    ) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            let mut state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            (state.attempts).push((actor.to_owned(), id.to_owned(), entry.clone()));
+            Ok(())
         })
     }
 }

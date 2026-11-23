@@ -27,7 +27,17 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   3 confirmed both: `--actor X` and `BD_ACTOR=X` land in br's `events.actor`. A claim repeated by the same actor
   succeeds (exit 0), which makes the claim effect safe to repeat after a restart; without an actor every caller is
   `unknown` and two claims of one bead both succeed.
-- Nothing of the orchestrator is written to the tracker: no runs, steps or sessions.
+- A session also gets `BR_AGENT_NAME` (the agent of its step), `BR_HARNESS` (`claude` or `codex`) and `BR_MODEL`
+  (the model of its effective config; absent when the config sets none). br records the three on every event of
+  `br update` (with `--claim` and `--status`), `close`, `defer` and `undefer`, not on `create`: `br audit log <id>`
+  shows them beside the actor. The names are br's, set by the daemon's tracker integration as `BD_ACTOR` is; the core
+  knows only that the tracker names them.
+- The orchestrator writes no runs, steps or sessions into the beads. It appends the end of each attempt of a run with a
+  bead to br's audit trail (`attempt_ended`, [contracts 5.1](contracts.md#51-operations)): `br audit record --stdin`
+  as the attempt's actor `loop-manager:<run>:<n>`, one line of `.beads/interactions.jsonl`
+  (`{"kind": "attempt_ended", "issue_id": <bead>, "actor": ..., "extra": {...}}`). It adds no row to `events` and does
+  not rewrite `issues.jsonl`, so the watcher sees nothing and no `bead.*` event follows. The entries are read in
+  `.beads/interactions.jsonl` itself: `br audit log` shows only `events`.
 
 ## Beads and runs
 

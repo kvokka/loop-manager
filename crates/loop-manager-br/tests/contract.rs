@@ -1,6 +1,7 @@
 //! Contract tests of the br adapter on the pinned br (docs/design/tracker-br.md): claim under concurrency, conditional
 //! release and close, a status a project policy declares, the ready set with epics and labels, the prefix of a rig's
-//! beads, the comments and parents of a bead, the writes as changes, the watcher.
+//! beads, the comments and parents of a bead, the writes as changes, the watcher, the end of an attempt in the audit
+//! trail.
 
 use loop_manager_br::Br;
 use loop_manager_contract::tracker::{Tracker, TrackerError, Wait};
@@ -444,4 +445,32 @@ async fn a_task_naming_a_bead_gives_it_and_a_text_files_a_root_of_the_database_p
     let listed = br(dir.path(), &["list", "-a", "--limit", "0", "--json"]);
     let listed: serde_json::Value = serde_json::from_str(&listed).unwrap();
     assert_eq!(listed["issues"].as_array().unwrap().len(), 2, "one bead filed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_end_of_an_attempt_lands_in_the_interactions_as_its_actor_and_writes_nothing_else() {
+    let (dir, t) = tracker();
+    let id = create(dir.path(), "Four", &[]);
+    let (changes, bead) = (t.changes(0).await.unwrap(), br(dir.path(), &["show", &id, "--json"]));
+    let entry = serde_json::json!({ "run": "run_1", "attempt": 2, "outcome": { "result": "pass" } });
+    t.attempt_ended("loop-manager:run_1:2", &id, &entry).await.unwrap();
+    let log = std::fs::read_to_string(dir.path().join(".beads/interactions.jsonl")).unwrap();
+    let lines: Vec<serde_json::Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines.len(), 1, "{log}");
+    assert_eq!(
+        (
+            &lines[0]["kind"],
+            &lines[0]["actor"],
+            &lines[0]["issue_id"],
+            &lines[0]["extra"]
+        ),
+        (
+            &serde_json::json!("attempt_ended"),
+            &serde_json::json!("loop-manager:run_1:2"),
+            &serde_json::json!(id),
+            &entry
+        )
+    );
+    assert_eq!(t.changes(0).await.unwrap(), changes, "no event");
+    assert_eq!(br(dir.path(), &["show", &id, "--json"]), bead, "the bead is as it was");
 }

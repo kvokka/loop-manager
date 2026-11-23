@@ -55,17 +55,21 @@ pub fn spawn_std(command: &mut std::process::Command) -> io::Result<(std::proces
     Ok((child, Own(Some(id))))
 }
 
-/// `command.output()` with the child the daemon's own while it runs.
-pub async fn output(command: &mut Command) -> io::Result<Output> {
-    let child = spawn(
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()),
-    )?;
+/// `command.output()` with `input` on its stdin (none: no stdin), with the child the daemon's own while it runs.
+pub async fn output(command: &mut Command, input: Option<&[u8]>) -> io::Result<Output> {
+    let stdin = if input.is_some() { Stdio::piped() } else { Stdio::null() };
+    let mut child = spawn(command.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped()))?;
     // Dropped after the wait, or with it when the caller gives up and the child is reaped by whoever comes first.
     let _own = Own(child.id());
-    child.wait_with_output().await
+    let stdin = child.stdin.take();
+    let write = async move {
+        if let (Some(mut stdin), Some(input)) = (stdin, input) {
+            // Closed once written, so the child sees its end; a child that stops reading says why by its exit.
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut stdin, input).await;
+        }
+    };
+    let (_, output) = tokio::join!(write, child.wait_with_output());
+    output
 }
 
 /// `command.output()` for a `std` command, with the child the daemon's own while it runs.

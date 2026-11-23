@@ -351,3 +351,56 @@ async fn a_bead_names_the_agent_of_its_run_and_the_harness_it_is_for() {
     assert_eq!(last(&events, "run.queued")["run"]["agent"], "shop.qa");
     assert_eq!(last(&events, "run.passed")["run"]["agent"], "shop.qa", "step two");
 }
+
+#[tokio::test(start_paused = true)]
+async fn each_ended_attempt_of_a_run_with_a_bead_is_recorded_on_it_once_and_a_run_without_one_records_none() {
+    let w = world(FIX);
+    let bead = w.tracker.add(&[], None);
+    w.driver.script(hollow_turn());
+    let failed = w.run_on(json!(bead)).await;
+    let states = w.states(&failed).await;
+    assert_eq!(states.last().unwrap(), "failed");
+    let tried = states.iter().filter(|s| *s == "starting").count();
+    w.driver.script(slow_turn());
+    let passed = w.run_on(json!(bead)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    w.finish_bead(&passed, Verdict::Pass, "fixed").await;
+    w.driver.script(hollow_turn());
+    let plain = w.create().await;
+    assert_eq!(w.states(&plain).await.last().unwrap(), "failed");
+    tokio::time::sleep(Duration::from_secs(20)).await;
+    let records = w.tracker.attempts();
+    let of = |run: &str| -> Vec<(String, Value)> {
+        let mine = records.iter().filter(|(_, _, e)| e["run"] == run);
+        (mine.map(|(actor, id, e)| (actor.clone(), json!([id, e["attempt"], e["outcome"]])))).collect()
+    };
+    let failures = of(&failed);
+    assert_eq!(failures.len(), tried, "one record per attempt: {records:?}");
+    for (n, (actor, record)) in failures.iter().enumerate() {
+        assert_eq!(actor, &format!("loop-manager:{failed}:{}", n + 1));
+        assert_eq!(record, &json!([bead, n + 1, null]), "an attempt with no outcome");
+    }
+    let pass = &records.iter().find(|(_, _, e)| e["run"] == passed.as_str()).unwrap().2;
+    assert_eq!(
+        of(&passed),
+        [(format!("loop-manager:{passed}:1"), json!([bead, 1, "pass"]))]
+    );
+    assert_eq!(
+        (
+            &pass["summary"],
+            &pass["step"],
+            &pass["agent"],
+            &pass["harness"],
+            &pass["round"]
+        ),
+        (
+            &json!("fixed"),
+            &json!("1"),
+            &json!("shop.fixer"),
+            &json!("scripted"),
+            &json!(1)
+        ),
+        "{pass}"
+    );
+    assert!(of(&plain).is_empty(), "a run without a bead records nothing");
+}

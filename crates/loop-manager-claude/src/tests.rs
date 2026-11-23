@@ -179,6 +179,16 @@ fn a_config_the_adapter_cannot_deliver_is_a_config_error() {
     );
 }
 
+/// The tracker variables br gives a session at a step of `p.coder`.
+fn actor() -> loop_manager_contract::driver::Actor {
+    loop_manager_contract::driver::Actor {
+        actor: ("BD_ACTOR".into(), "loop-manager:r:1".into()),
+        agent: Some(("BR_AGENT_NAME".into(), "p.coder".into())),
+        harness: Some("BR_HARNESS".into()),
+        model: Some("BR_MODEL".into()),
+    }
+}
+
 fn new_plan() -> SessionPlan {
     SessionPlan::New {
         workdir: "/w".into(),

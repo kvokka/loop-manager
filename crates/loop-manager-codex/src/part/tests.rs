@@ -4,9 +4,22 @@ use crate::{
     Codex, part,
     tests::{agent, config},
 };
-use loop_manager_contract::driver::{Driver, FailureKind, SessionPlan};
+use loop_manager_contract::{
+    config::EffectiveConfig,
+    driver::{Actor, Driver, FailureKind, SessionPlan},
+};
 use serde_json::{Value, json};
 use std::path::Path;
+
+/// The tracker variables br gives a session at a step of `p.coder`.
+fn actor() -> Actor {
+    Actor {
+        actor: ("BD_ACTOR".into(), "loop-manager:r:1".into()),
+        agent: Some(("BR_AGENT_NAME".into(), "p.coder".into())),
+        harness: Some("BR_HARNESS".into()),
+        model: Some("BR_MODEL".into()),
+    }
+}
 
 #[test]
 fn the_app_server_takes_headless_defaults_before_native_overrides() {
@@ -45,7 +58,7 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
         run: "r".into(),
         attempt: 1,
         token: "tok".into(),
-        actor: Some(("BD_ACTOR".into(), "loop-manager:r:1".into())),
+        actor: Some(actor()),
         bead: Some("bd-1".into()),
     };
     let driver = Codex::new("codex".into(), "/state".into(), None, 8);
@@ -76,10 +89,20 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
     );
     assert_eq!(
         s["config"]["shell_environment_policy"]["set"],
-        json!({ "LOOP_MANAGER_RUN": "r", "LOOP_MANAGER_ATTEMPT_TOKEN": "tok", "BD_ACTOR": "loop-manager:r:1", "LOOP_MANAGER_BEAD": "bd-1" })
+        json!({ "LOOP_MANAGER_RUN": "r", "LOOP_MANAGER_ATTEMPT_TOKEN": "tok", "BD_ACTOR": "loop-manager:r:1",
+            "BR_AGENT_NAME": "p.coder", "BR_HARNESS": "codex", "BR_MODEL": "gpt-fake", "LOOP_MANAGER_BEAD": "bd-1" })
+    );
+    let no_model = EffectiveConfig {
+        model: None,
+        ..config.clone()
+    };
+    let set = &driver.split(&no_model, &plan).unwrap().session.0["config"]["shell_environment_policy"]["set"];
+    assert!(
+        set["BR_MODEL"].is_null() && set["BR_HARNESS"] == "codex",
+        "no model, no model variable: {set}"
     );
     // A hook runs with the process environment: the attempt's goes on its command line.
-    let exports = "export BD_ACTOR='loop-manager:r:1' LOOP_MANAGER_ATTEMPT_TOKEN='tok' LOOP_MANAGER_BEAD='bd-1' LOOP_MANAGER_RUN='r'; true";
+    let exports = "export BD_ACTOR='loop-manager:r:1' BR_AGENT_NAME='p.coder' BR_HARNESS='codex' BR_MODEL='gpt-fake' LOOP_MANAGER_ATTEMPT_TOKEN='tok' LOOP_MANAGER_BEAD='bd-1' LOOP_MANAGER_RUN='r'; true";
     assert_eq!(s["config"]["hooks"]["Stop"][0]["hooks"][0]["command"], exports);
     assert_eq!(s["config"]["bypass_hook_trust"], true);
     assert_eq!(s["config"]["model_reasoning_effort"], "low");

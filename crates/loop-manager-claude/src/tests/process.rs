@@ -68,7 +68,7 @@ fn hooks_join_the_native_settings_and_mcp_servers_take_claude_form() {
         run: "r".into(),
         attempt: 1,
         token: "t".into(),
-        actor: Some(("BD_ACTOR".into(), "loop-manager:r:1".into())),
+        actor: Some(actor()),
         bead: Some("bd-1".into()),
     };
     let p = part::process(&config, &plan, Path::new("/state")).unwrap();
@@ -311,4 +311,38 @@ fn the_process_part_keeps_the_reference_and_the_process_gets_the_value() {
     let p = key(&mut config, "${LOOP_MANAGER_TEST_NO_SUCH_VARIABLE}");
     let failure = part::env(&p, "i1", None, Path::new("/state")).unwrap_err();
     assert_eq!(failure.kind, FailureKind::ConfigError, "{}", failure.raw);
+}
+
+#[test]
+fn a_session_gets_the_tracker_variables_and_the_model_only_when_its_config_sets_one() {
+    let plan = SessionPlan::New {
+        workdir: "/w".into(),
+        run: "r".into(),
+        attempt: 1,
+        token: "t".into(),
+        actor: Some(actor()),
+        bead: None,
+    };
+    let env_of = |config: &EffectiveConfig| {
+        let p = part::process(config, &plan, Path::new("/state")).unwrap();
+        part::env(&p, "i1", None, Path::new("/state")).unwrap()
+    };
+    let env = env_of(&config(None));
+    for (name, value) in [
+        ("BD_ACTOR", "loop-manager:r:1"),
+        ("BR_AGENT_NAME", "p.coder"),
+        ("BR_HARNESS", "claude"),
+    ] {
+        assert!(env.contains(&(name.to_owned(), value.to_owned())), "{name}: {env:?}");
+    }
+    assert!(
+        !env.iter().any(|(name, _)| name == "BR_MODEL"),
+        "no model, no model variable"
+    );
+    let with_model = EffectiveConfig {
+        model: Some(agent("claude-haiku-5-5".into())),
+        ..config(None)
+    };
+    let env = env_of(&with_model);
+    assert!(env.contains(&("BR_MODEL".to_owned(), "claude-haiku-5-5".to_owned())));
 }

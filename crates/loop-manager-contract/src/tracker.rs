@@ -141,4 +141,13 @@ pub trait Tracker: Send + Sync {
     /// The bead `id` with its comments and its parents with theirs (contracts 5.1); a parent the tracker no longer
     /// has ends the line, `NotFound` with no `id`.
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>>;
+    /// Appends the end of an attempt on the bead `id` to the tracker's audit trail as `actor`
+    /// (`loop-manager:<run>:<attempt>`), with `entry`, a JSON object of what the attempt did (contracts 5.1). No write
+    /// of the bead: `changes` sees nothing of it. Not idempotent: a repeated call appends the entry again.
+    fn attempt_ended<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        entry: &'a serde_json::Value,
+    ) -> BoxFuture<'a, Result<(), TrackerError>>;
 }

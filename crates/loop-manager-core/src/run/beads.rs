@@ -206,7 +206,7 @@ impl RunHandler {
                     .sql()
                     .query_row(
                         "SELECT attempts FROM effects WHERE key = ?1 ORDER BY id LIMIT 1",
-                        [tracker_key(&project)],
+                        [queue(&project, &call)],
                         |r| r.get(0),
                     )
                     .optional()?;
@@ -308,8 +308,43 @@ impl RunHandler {
     }
 }
 
+/// The attempt of `row` ended: what it did goes to the audit trail of the run's bead (docs/design/contracts.md 5.1),
+/// once per attempt; a repeated effect may append it twice.
+pub(super) fn attempt_ended(tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
+    let Some(bead) = &row.bead else { return Ok(()) };
+    let entry: String = tx.sql().query_row(
+        "SELECT json_object('run', run, 'attempt', n, 'step', step, 'round', round, 'harness', harness, \
+         'session', json(session), 'outcome', json_extract(outcome, '$.result'), \
+         'summary', json_extract(outcome, '$.summary'), 'failure', json(failure), \
+         'input_tokens', input_tokens, 'output_tokens', output_tokens) FROM attempts WHERE run = ?1 AND n = ?2",
+        params![row.id, row.attempt],
+        |r| r.get(0),
+    )?;
+    // SQLite's own JSON always parses.
+    let mut entry: Value = serde_json::from_str(&entry).unwrap_or_default();
+    let config: Option<Value> = row.config.as_deref().and_then(|c| serde_json::from_str(c).ok());
+    entry["agent"] = json!(Some(&row.agent).filter(|a| !a.is_empty()));
+    entry["model"] = config.map(|c| c["model"]["value"].clone()).unwrap_or_default();
+    let payload = json!({ "op": "tracker", "call": "attempt_ended", "project": row.project, "bead": bead,
+        "run": row.id, "attempt": row.attempt, "entry": entry });
+    tx.effect(
+        &queue(&row.project, "attempt_ended"),
+        &format!("attempt_ended:{}:{}", row.id, row.attempt),
+        &payload,
+    )
+}
+
 pub(super) fn tracker_key(project: &str) -> String {
     format!("tracker:{project}")
+}
+
+/// The queue of the tracker call `call` of `project`: the records of the audit trail have one of their own, so a
+/// record the tracker refuses for a while holds up no claim, read or release.
+fn queue(project: &str, call: &str) -> String {
+    match call {
+        "attempt_ended" => format!("tracker:{project}:audit"),
+        _ => tracker_key(project),
+    }
 }
 
 /// Runs one tracker call of an effect and reports it; `false` retries it (the tracker was unavailable).
@@ -327,6 +362,13 @@ pub(super) async fn execute(trackers: &Trackers, core: &CoreHandle<Msg>, payload
             .map(Some),
         "close" => tracker.close(&owner, bead, text("reason")).await.map(|()| None),
         "release" => tracker.release(&owner, bead).await.map(|()| None),
+        "attempt_ended" => {
+            let actor = format!("{owner}:{}", payload["attempt"]);
+            tracker
+                .attempt_ended(&actor, bead, &payload["entry"])
+                .await
+                .map(|()| None)
+        }
         "lineage" => return super::lineage::read(tracker.as_ref(), core, payload).await,
         _ => {
             let read = async {

@@ -114,13 +114,14 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
         } => (workdir, run, token, actor, bead),
     };
     let value = |s: &Option<loop_manager_contract::config::Sourced<String>>| s.as_ref().map(|s| s.value.clone());
-    // The attempt environment and the tracker actor of the attempt, as the core planned it (contracts 5.1); the
+    // The attempt environment and the tracker variables of the attempt, as the core planned it (contracts 5.1); the
     // thread's, not the shared process's.
     let mut attempt = Map::from_iter([
         ("LOOP_MANAGER_RUN".to_owned(), json!(run)),
         ("LOOP_MANAGER_ATTEMPT_TOKEN".to_owned(), json!(token)),
     ]);
-    attempt.extend(actor.iter().map(|(name, actor)| (name.clone(), json!(actor))));
+    let tracker = actor.iter().flat_map(|a| a.env("codex", config));
+    attempt.extend(tracker.map(|(name, value)| (name, json!(value))));
     attempt.extend(bead.iter().map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), json!(bead))));
     let mut thread_config = json!({ "shell_environment_policy": { "set": attempt } });
     if let Some(effort) = value(&config.effort) {

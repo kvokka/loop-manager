@@ -62,6 +62,15 @@ impl Tracker for Chain {
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>> {
         self.0.lineage(id)
     }
+
+    fn attempt_ended<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        entry: &'a serde_json::Value,
+    ) -> BoxFuture<'a, Result<(), TrackerError>> {
+        self.0.attempt_ended(actor, id, entry)
+    }
 }
 
 #[tokio::test]

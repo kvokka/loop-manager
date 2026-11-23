@@ -278,7 +278,8 @@ impl RunHandler {
         resume: Option<SessionRef>,
     ) -> SessionPlan {
         let (run, attempt, workdir) = (row.id.clone(), row.attempt + 1, self.session_dir(row, config));
-        let (actor, bead) = (self.config.actor(&row.project, &run, attempt), row.bead.clone());
+        let actor = self.config.session_actor(&row.project, &run, attempt, &row.agent);
+        let bead = row.bead.clone();
         match resume {
             Some(session) => SessionPlan::Resume {
                 session,
@@ -369,6 +370,7 @@ impl RunHandler {
             "UPDATE attempts SET ended_ms = ?3, failure = ?4 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, tx.now_ms(), failure.map(Value::to_string)],
         )?;
+        super::beads::attempt_ended(tx, row)?;
         if let Some(handle) = handle {
             let session: Value = session.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let handle: Value = serde_json::from_str(&handle).unwrap_or_default();

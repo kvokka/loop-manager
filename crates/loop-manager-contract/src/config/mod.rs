@@ -20,7 +20,10 @@ mod sources;
 mod subagents;
 mod variants;
 
-use crate::template::{Filter, Inputs};
+use crate::{
+    driver::Actor,
+    template::{Filter, Inputs},
+};
 pub use assemble::{Attached, EffectiveConfig, Layer, Sourced};
 pub use env::{ExecEnv, env_literal, env_value};
 pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, Settings, Skill};
@@ -182,6 +185,10 @@ pub struct TrackerLink {
     /// The variable that gives the beads a session or command files on a rig that rig's prefix
     /// (docs/design/config.md).
     pub prefix: Option<String>,
+    /// The variables that tell the tracker the agent of the step, the harness and the model of a session.
+    pub agent: Option<String>,
+    pub harness: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -317,6 +324,18 @@ impl Config {
     pub fn actor(&self, project: &str, run: &str, attempt: u32) -> Option<(String, String)> {
         let p = self.projects.iter().find(|p| p.name == project)?;
         Some((p.tracker.actor.clone()?, format!("loop-manager:{run}:{attempt}")))
+    }
+
+    /// The tracker variables of a session of attempt `attempt` of run `run` in `project`, at a step of `agent`
+    /// (contracts 5.1); none when the project has no actor variable.
+    pub fn session_actor(&self, project: &str, run: &str, attempt: u32, agent: &str) -> Option<Actor> {
+        let tracker = &self.projects.iter().find(|p| p.name == project)?.tracker;
+        Some(Actor {
+            actor: self.actor(project, run, attempt)?,
+            agent: tracker.agent.clone().map(|name| (name, agent.to_owned())),
+            harness: tracker.harness.clone(),
+            model: tracker.model.clone(),
+        })
     }
 }
 

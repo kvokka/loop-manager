@@ -46,6 +46,11 @@ impl Br {
 
     /// Runs `br <args> --json` as `actor`; the parsed stdout, or the failure with br's exit code.
     async fn br(&self, actor: &str, args: &[&str]) -> Result<Value, Fail> {
+        self.br_with(actor, args, None).await
+    }
+
+    /// [`Self::br`] with `input` on br's stdin.
+    async fn br_with(&self, actor: &str, args: &[&str], input: Option<&[u8]>) -> Result<Value, Fail> {
         let mut command = tokio::process::Command::new(&self.binary);
         command
             // A rig's prefix in the daemon's environment would give the root's beads its ids.
@@ -61,7 +66,7 @@ impl Br {
             .env("BEADS_DIR", &self.dir)
             .env("RUST_LOG", "error")
             .kill_on_drop(true);
-        let out = loop_manager_contract::orphans::output(&mut command)
+        let out = loop_manager_contract::orphans::output(&mut command, input)
             .await
             .map_err(|e| Fail(None, unavailable(format!("br: {e}"))))?;
         let body: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
@@ -413,6 +418,24 @@ impl Tracker for Br {
                 bead,
                 parents: line.rev().collect(),
             })
+        })
+    }
+
+    fn attempt_ended<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        entry: &'a Value,
+    ) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            // An interaction of br's audit log (`.beads/interactions.jsonl`): no event, no write of the bead.
+            let record = serde_json::json!({ "kind": "attempt_ended", "issue_id": id, "extra": entry });
+            let args = ["audit", "record", "--stdin"];
+            let input = record.to_string();
+            match self.br_with(actor, &args, Some(input.as_bytes())).await {
+                Ok(_) => Ok(()),
+                Err(Fail(_, e)) => Err(e),
+            }
         })
     }
 }

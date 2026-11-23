@@ -62,8 +62,8 @@ impl Split {
 }
 
 /// What the session of an attempt is; `run` and `attempt` name files in the state directory. The attempt environment:
-/// `run`, `token` (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, contracts 6.3), `actor` (the project's tracker actor, 5.1) and `bead`
-/// (`LOOP_MANAGER_BEAD`, the run's bead when it has one).
+/// `run`, `token` (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, contracts 6.3), `actor` (the project's tracker
+/// variables, 5.1) and `bead` (`LOOP_MANAGER_BEAD`, the run's bead when it has one).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionPlan {
     New {
@@ -71,7 +71,7 @@ pub enum SessionPlan {
         run: String,
         attempt: u32,
         token: String,
-        actor: Option<(String, String)>,
+        actor: Option<Actor>,
         bead: Option<String>,
     },
     Resume {
@@ -80,9 +80,40 @@ pub enum SessionPlan {
         run: String,
         attempt: u32,
         token: String,
-        actor: Option<(String, String)>,
+        actor: Option<Actor>,
         bead: Option<String>,
     },
+}
+
+/// The variables a session gives the project's tracker (contracts 5.1): the names are the tracker's, the values the
+/// core's but the harness and the model, which the adapter fills in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Actor {
+    /// The actor variable and `loop-manager:<run>:<attempt>`.
+    pub actor: (String, String),
+    /// The variable of the agent of the step, and that agent.
+    pub agent: Option<(String, String)>,
+    /// The variable of the harness name.
+    pub harness: Option<String>,
+    /// The variable of the model; the session gets it only when its config sets a model.
+    pub model: Option<String>,
+}
+
+impl Actor {
+    /// The variables of a session of `harness` started with `config`.
+    pub fn env(&self, harness: &str, config: &EffectiveConfig) -> Vec<(String, String)> {
+        let model = config.model.as_ref().map(|m| m.value.clone());
+        let harness = self.harness.clone().map(|name| (name, harness.to_owned()));
+        [
+            Some(self.actor.clone()),
+            self.agent.clone(),
+            harness,
+            self.model.clone().zip(model),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
 }
 
 /// Everything the adapter needs to resume a session; the core stores it and hands it back.

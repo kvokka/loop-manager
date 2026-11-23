@@ -145,9 +145,9 @@ impl Driver for ScriptedDriver {
             bead,
             ..
         }) = plan;
-        // The tracker actor and the run's bead join the session's environment, as a harness adapter sets them.
+        // The tracker variables and the run's bead join the session's environment, as a harness adapter sets them.
         let mut env: BTreeMap<_, _> = config.env.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect();
-        env.extend(actor.clone());
+        env.extend(actor.iter().flat_map(|a| a.env(self.harness, config)));
         env.extend(bead.clone().map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), bead)));
         let mcp: BTreeMap<_, _> = config.mcp.iter().map(|(n, m)| (n, &m.value)).collect();
         let servers = |c: &EffectiveConfig| -> BTreeMap<String, Value> {

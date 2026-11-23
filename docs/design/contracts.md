@@ -635,10 +635,12 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 
 ### 5.1 Operations
 
-The trait has the nine operations the core calls; an operation is added only when a caller needs it.
+The trait has the ten operations the core calls; an operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
 the daemon's own reads. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
-in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)). An actor of any other form is a
+in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
+of its step, its harness and its model (`BR_AGENT_NAME`, `BR_HARNESS`, `BR_MODEL`, the last only when its effective
+config sets a model), which br records on the bead's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
 human or an outside tool and starts a new correlation chain (`correlation`, 1.1).
 
 ```rust
@@ -653,6 +655,8 @@ trait Tracker: Send + Sync {
     fn create(&self, actor: &str, key: &str, title: &str, description: &str)
         -> BoxFuture<Result<Bead, TrackerError>>;                               // once per key
     fn lineage(&self, id: &str) -> BoxFuture<Result<Lineage, TrackerError>>;          // comments and parents
+    fn attempt_ended(&self, actor: &str, id: &str, entry: &Value)
+        -> BoxFuture<Result<(), TrackerError>>;                                 // audit trail, not idempotent
 }
 ```
 
@@ -688,6 +692,18 @@ snapshot of the bead and the prompt renders; an `Unavailable` tracker is tried a
 (`tracker.sync_failed{op: "lineage"}`) until `start_timeout` fails the run (`tracker_unavailable`), any other error
 fails it at once (`failed{infrastructure, bead_unreadable: <error>}`). An answer to another entry of a step, or to a
 run that prepares no more, is dropped.
+
+`attempt_ended` appends the end of an attempt to the audit trail of the bead `id` as the attempt's actor
+`loop-manager:<run id>:<attempt n>`, apart from the bead: no write `changes` reads, so no `bead.*` event follows. When an
+attempt of a run with a bead ends, the core adds an effect for it in the same transaction, on the queue
+`tracker:<project>:audit`, so a record the tracker refuses for a while holds up no claim, read or release: one entry
+per attempt, the object `{run, attempt, step, round, agent, harness, model, session, outcome, summary, failure,
+input_tokens, output_tokens}` from the state as the attempt ends (`outcome` is the declared `pass` or `fail`, also of a
+stop by the `context-budget` addon, and `summary` its text; `failure` is the attempt's failure; each is `null` when
+the attempt has none). A repeated effect (a restart between the call and its report) may append the entry twice. An
+`Unavailable` tracker is tried again and an `Invalid` answer dropped, both reported as
+`tracker.sync_failed{op: "attempt_ended"}`. br keeps it in `.beads/interactions.jsonl`
+([tracker-br](tracker-br.md#one-database-per-project)).
 
 `changes` is pull-only; the adapter also owns a watcher that sends a "changed" message to the core, and the core then
 calls `changes` from its stored cursor (and on start and after recovery without waiting for a signal). One effect on the
