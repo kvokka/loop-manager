@@ -14,7 +14,7 @@ How the parts of loop-manager fit together and where each lives. The terms are i
 │  exec hooks of addons · issue ownership · recovery and resync             │
 └──────┬─────────────────────┬─────────────────────┬───────────────────────┘
        │ driver interface    │ tracker interface   │ events → JSONL journal
-  harness adapters       br adapter            addons (exec hooks, services)
+  harness adapters       tracker adapters      addons (exec hooks, services)
   claude │ codex
 ```
 
@@ -24,17 +24,17 @@ These are checked by the build, not kept by agreement.
 
 - The core is two crates: `loop-manager-contract`, the contracts adapters, the tracker adapter, addons and test doubles
   are written against, and `loop-manager-core`, the engine over them. The core depends on no adapter, frontend or addon,
-  and neither crate names a harness or a tracker (`codex`, `br`, `max_sessions`, br's `bead`): what the core
-  needs comes through the driver's capabilities and the tracker interface, and `scripts/core-boundary.sh` checks the
-  sources of both in CI, and that the adapters (`loop-manager-claude`, `loop-manager-codex`, `loop-manager-br`,
-  `loop-manager-addons`) build without `loop-manager-core`.
+  and neither crate names a harness or a tracker (`codex`, `max_sessions`, a tracker's binary or its own word for an
+  issue): what the core needs comes through the driver's capabilities and the tracker interface, and
+  `scripts/core-boundary.sh` checks the sources of both in CI, and that the adapters (`loop-manager-claude`,
+  `loop-manager-codex`, `loop-manager-br`, `loop-manager-addons`) build without `loop-manager-core`.
 - A harness is an abstraction to the core. The root of the build holds the one table of adapters
   (`crates/loop-manager/src/harness.rs`), the only place that names a harness.
-- So is a tracker. Everything of br — where a project keeps it, its session environment, its `doctor` checks, the bv
-  workspace file — lives in `loop-manager-br`; the root holds the one table of tracker adapters
-  (`crates/loop-manager/src/tracker.rs`), and `scripts/core-boundary.sh` checks that no other Rust code outside tests
-  names br, bv, `.beads` or a `BR_`/`BD_`/`BEADS_` variable. Adding a tracker is adding a crate and its row
-  ([adapters](design/adapters.md#adding-a-tracker)).
+- So is a tracker. Everything of br ([tracker-br](design/tracker-br.md)) — where a project keeps it, its session
+  environment, its `doctor` checks, the bv workspace file — lives in `loop-manager-br`; the root holds the one table of
+  tracker adapters (`crates/loop-manager/src/tracker.rs`), and `scripts/core-boundary.sh` checks that no other Rust code
+  outside tests names br, bv, `.beads` or a `BR_`/`BD_`/`BEADS_` variable. Adding a tracker is adding a crate and its
+  row ([adapters](design/adapters.md#adding-a-tracker)).
 - Adapters and frontends only translate protocols.
 - Policy (retry, park, refuse) lives in addons and config, judgement ("is the work done well") in prompts and the
   checks of addons; the core keeps only mechanisms

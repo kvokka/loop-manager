@@ -49,7 +49,7 @@ Invariant 6 runs real marked processes (`loop-manager-testkit/tests/core/old_ins
 `process::tests::wait_gone_*`). The others are covered by the integration suites of `loop-manager-testkit/tests` and by
 the acceptance scenarios (criterion 8: 20 `kill -9` of the daemon mid-turn on the scripted driver and 5 on each real
 harness; criterion 24: a `kill -9` of the daemon in each step of a formula of `exec`, `drain` and `exec` steps on the
-real br, no step and no issue run twice).
+real br ([tracker-br](tracker-br.md)), no step and no issue run twice).
 
 ## Recovery
 

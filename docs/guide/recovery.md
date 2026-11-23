@@ -112,12 +112,12 @@ by hand.
 
 ## Abandon it
 
-A run that is not over yet (in `queued`, `parked` or `interrupted`, say) is stopped with
-`loop-manager run cancel <run> --reason <text>`: its session stops, its issue is released without counting a failure, and
-the runs its sessions started are cancelled too. Closing the issue of a live run with `br close` cancels the run as
-well, with reason `issue_closed`, and the issue stays closed. A run that already failed cannot be cancelled and needs
-nothing more; its issue is open again, so a trigger on `issue.ready` or a `next_ready` task may take it. To keep every run
-off it, close its gate:
+A run that is not over yet (in `queued`, `parked` or `interrupted`, say) is stopped with `loop-manager run cancel <run>
+--reason <text>`: its session stops, its issue is released without counting a failure, and the runs its sessions started
+are cancelled too. Closing the issue of a live run with `loop-manager issue close --project <project> --reason <text>
+<issue>` cancels the run as well, with reason `issue_closed`, and the issue stays closed. A run that already failed
+cannot be cancelled and needs nothing more; its issue is open again, so a trigger on `issue.ready` or a `next_ready`
+task may take it. To keep every run off it, close its gate:
 
 ```sh
 loop-manager gate close issue:shop/<issue> --reason "abandoned"

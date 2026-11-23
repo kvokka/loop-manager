@@ -746,18 +746,20 @@ in a `drain` step; the core turns the writes past the cursor into events, moves 
 never back) and diffs the ready set. The first read of a project's tracker takes its whole history as the starting
 cursor and raises no `issue.created|updated|closed` for it; every issue ready at that read is new to the set and raises
 `issue.ready`. A write whose actor is `loop-manager:<run id>[:<attempt n>]` carries that run and its correlation;
-`issue.ready` carries those of the last such write in the same read (the write that freed the issue is usually that one);
-the rig of an issue event is the one whose prefix is the issue's id up to its last `-`, absent for an issue of the root. The
-core keeps the labels of every issue as last read (table `issue_labels`): from each write it reads, the history of the
-first read included, and from a ready issue it has none of, whose write the read did not list yet. Each label that a
-write past the cursor shows and the issue's last read labels lack raises `issue.labeled` after the write's own event, with
-the write's actor, run and correlation. An issue the core never read gains nothing: an issue filed with a label, or labelled
-before the core first read it, is told by its `issue.created` and `issue.ready`. The core compares labels as read, not
-writes: a label removed and added again with no read seeing it removed is no gain, one added again after such a read is
-gained again. A read queued before the last one was made repeats writes already read: the cursor drops them, so a
-repeated observation raises nothing. The daemon gives a project a tracker when `<project>/.beads` exists, and every
-session and exec step of the project gets `BEADS_DIR` (layer: project) and `BD_ACTOR=loop-manager:<run id>:<attempt n>`;
-the core sets the actor of an exec step and hands that of a session to the adapter in the session plan.
+`issue.ready` carries those of the last such write in the same read (the write that freed the issue is usually that
+one); the rig of an issue event is the one whose prefix is the issue's id up to its last `-`, absent for an issue of the
+root. The core keeps the labels of every issue as last read (table `issue_labels`): from each write it reads, the
+history of the first read included, and from a ready issue it has none of, whose write the read did not list yet. Each
+label that a write past the cursor shows and the issue's last read labels lack raises `issue.labeled` after the write's
+own event, with the write's actor, run and correlation. An issue the core never read gains nothing: an issue filed with
+a label, or labelled before the core first read it, is told by its `issue.created` and `issue.ready`. The core compares
+labels as read, not writes: a label removed and added again with no read seeing it removed is no gain, one added again
+after such a read is gained again. A read queued before the last one was made repeats writes already read: the cursor
+drops them, so a repeated observation raises nothing. The daemon gives a project a tracker when an adapter finds one in
+its directory, and every session and exec step of the project gets the tracker's variables (layer: project) and its
+actor `loop-manager:<run id>:<attempt n>` (br: `BEADS_DIR`, `BD_ACTOR`,
+[tracker-br](tracker-br.md#one-database-per-project)); the core sets the actor of an exec step and hands that of a
+session to the adapter in the session plan.
 
 ### 5.2 Types and errors
 
@@ -781,13 +783,15 @@ the core sets the actor of an exec step and hands that of a session to the adapt
   found another owner, nothing changed); `Unavailable { text }` (transient: retried by the effect queue with
   backoff, `tracker.sync_failed` on every failure); `Invalid { text }` (permanent).
 - `release` and `close` are conditional on `assignee == owner`. A release clears the assignee and sets `open`, but a
-  closed issue keeps its status: a release never reopens an issue. br 0.7.6 has neither a conditional close nor a release,
-  so the adapter reads, compares and writes. A `close` of a parent with open children leaves it open: br refuses it, and
-  the adapter releases the issue instead, so it does not stay `in_progress` behind a terminal run. The window between
-  read and write is open only to humans (the daemon is the only claimer, invariant 3). An owner found changed before the
-  write is `OwnerMismatch`, reported as `resync.diverged`; a human write that lands inside the window shows up only as a
-  `issue.updated` of the next `changes` batch, until the resync of the tracker compares owners.
-- The state of the orchestrator is the truth of ownership; the assignee in br mirrors it (6.2).
+  closed issue keeps its status: a release never reopens an issue. br 0.7.6 has neither a conditional close nor a
+  release, so the adapter reads, compares and writes
+  ([tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). A `close` of a parent with open children leaves
+  it open: br refuses it, and the adapter releases the issue instead, so it does not stay `in_progress` behind a
+  terminal run. The window between read and write is open only to humans (the daemon is the only claimer, invariant 3).
+  An owner found changed before the write is `OwnerMismatch`, reported as `resync.diverged`; a human write that lands
+  inside the window shows up only as a `issue.updated` of the next `changes` batch, until the resync of the tracker
+  compares owners.
+- The state of the orchestrator is the truth of ownership; the tracker's assignee mirrors it (6.2).
 
 ## 6. Run
 

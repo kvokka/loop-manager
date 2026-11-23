@@ -1,7 +1,8 @@
 # The br tracker
 
 How loop-manager uses [br](https://github.com/Dicklesworthstone/beads_rust) (beads_rust) as the tracker of a project.
-br calls an issue a bead; loop-manager and this document say issue.
+br calls an issue a bead; loop-manager and this document say issue. What a user does with issues and with br, and
+how to inspect a br tracker by hand: [issue trackers](../guide/issue-trackers.md).
 The tracker interface and its errors are in [contracts.md, section 5](contracts.md#5-tracker-interface); the issue and
 run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-manager-br` (the adapter, the bv workspace file and the br checks of `doctor`),
 `crates/loop-manager-core/src/run/issues.rs` and `run/issue_events.rs` (the core side).
@@ -99,7 +100,9 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
   shown by an event (`tracker.sync_failed`, `resync.diverged`). A `.beads` directory the daemon cannot watch at start
   gives `tracker.sync_failed{op: "watch"}` with no retry: that tracker is then read only by the periodic resync (every 5
   min).
-- The agent uses `br` itself for the content of its work: child issues, comments, dependencies.
+- An agent files, lists, comments on and closes issues through loop-manager's commands
+  ([issue trackers](../guide/issue-trackers.md#the-commands)); what they do not cover, such as a `blocks` link, it
+  does with `br` itself.
 - The daemon creates one kind of issue: the root of a run started from the text of a task, an epic without labels whose
   `external_ref` is the key of the creation (`loop-manager-` and 16 hex digits); everything filed for that task goes
   under it. The adapter first looks the key up in
@@ -147,9 +150,10 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
   key ([config.md](config.md)). A session of a `rig`-scope agent on a rig and an `exec` step on a rig get
   `BD_ISSUE_PREFIX=<prefix>`, so `br create` there gives the rig's prefix. The daemon's own br calls drop it.
 - An agent of scope `root` files an issue for a rig with
-  `BD_ISSUE_PREFIX=<prefix> br create "<title>" --deps parent-child:<root issue> -l agent:<agent>,harness:<harness>`.
-  Not `--parent`: br's `--parent <root>` gives the id `<root>.<n>` and loses the rig prefix. A dependency on another
-  issue: `--deps "parent-child:<root>,blocks:<id>"`.
+  `loop-manager issue create --project <project> --rig <rig> --parent <root issue> --title "<title>"
+  --label agent:<agent> --label harness:<harness>`; the adapter runs `br create` with the rig's prefix in
+  `BD_ISSUE_PREFIX` and `--deps parent-child:<root issue>`. Not `--parent`: br's `--parent <root>` gives the id
+  `<root>.<n>` and loses the rig prefix.
 - `loop-manager doctor` warns when a rig's prefix equals the br database's own prefix: the root's issues would read as
   the rig's. Changing a rig's `prefix` makes its existing issues issues of the root.
 

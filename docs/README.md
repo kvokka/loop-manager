@@ -12,6 +12,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/install.md](guide/install.md) | installing, what loop-manager runs, the daemon as a service, upgrading |
 | [guide/first-project.md](guide/first-project.md) | a project, its root and rigs |
 | [guide/first-formula.md](guide/first-formula.md) | a formula with an agent, from the config to a passed run |
+| [guide/issue-trackers.md](guide/issue-trackers.md) | issues through loop-manager: what it does with them, the commands; the br tracker, how it is wired, inspecting and repairing it by hand |
 | [guide/recovery.md](guide/recovery.md) | a run that failed for good: what failed, continue the session, a new session with or without a note, abandon |
 | [T3 Code run card](../plugins/README.md#follow-a-run-in-t3-code) | browse executed rounds and open an agent’s working session |
 | [guide/addons.md](guide/addons.md) | using addons: declare, attach, parameters; an agent's subagents |

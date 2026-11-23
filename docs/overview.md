@@ -52,7 +52,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **addon** | an extension, a directory with `addon.toml`: what attaches to agents (skills, hooks, MCP, scripts, env), hooks on orchestrator events, services. Declared once, attached per agent or for all, with parameters ([guide](guide/addons.md)) |
 | **service** | a long-lived process the orchestrator supervises (a shared MCP server, for one) |
 | **issue gate** | a record "start no run by this key until a time, or until opened by hand" |
-| **tracker** | the task store behind an adapter interface; the first implementation is br |
+| **tracker** | the task store behind an adapter interface; the first implementation is br ([issue trackers](guide/issue-trackers.md)) |
 | **issue** | a task in the tracker. Real work only, no bookkeeping records |
 | **root issue** | the issue with the user's task; every issue filed for that task lies under it |
 | **event** | a record of what happened: a reason to re-read the state, not the truth |
@@ -72,7 +72,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | A human joining a live session, handover of control | A later release: no operations, states or stubs for it now. A human sees the session reference in the run's state and opens the conversation with the harness's own tools after the run ([frontends](api/frontends.md)) |
 | Prompting or controlling work from an editor over ACP | [loop-manager acp](api/frontends.md#read-working-sessions-over-acpv2) provides read-only access to recorded agent sessions |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
-| A web interface, a dashboard | The task board is `bv`; observation is the CLI and the event stream |
+| A web interface, a dashboard | The task board is the tracker's own ([bv for br](guide/issue-trackers.md#how-it-is-wired)); observation is the CLI and the event stream |
 | Alerting a human about a failure | Only the event journal and the logs; a notice addon is on the [roadmap](roadmap.md) |
 | Windows, several machines, several users | A local daemon of one user |
 | Checks on macOS and on x86_64 | The full suite runs on Linux arm64; release builds run `--version` on each supported platform |

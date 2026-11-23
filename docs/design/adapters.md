@@ -7,9 +7,10 @@ options, its model short names, its `doctor` checks — lives in its adapter. Ad
 `loop-manager` binary, not processes of their own: there is no adapter protocol between processes; the way to connect an
 outside harness later is a generic ACP v2 driver.
 
-A tracker is the store of a project's issues (br). The core treats every tracker as the `Tracker` trait
-([contracts 5](contracts.md#5-tracker-interface)); each tracker gets an adapter crate in the same way
-([Adding a tracker](#adding-a-tracker)).
+A tracker is the store of a project's issues (br: [tracker-br](tracker-br.md), [issue
+trackers](../guide/issue-trackers.md)). The core treats every tracker as the `Tracker` trait ([contracts
+5](contracts.md#5-tracker-interface)); each tracker gets an adapter crate in the same way ([Adding a
+tracker](#adding-a-tracker)).
 
 Where adapters stand among the other parts, and the boundaries the build checks, is in the
 [architecture](../architecture.md). The adapter never decides policy: retry, park and refuse live in addons and
@@ -140,10 +141,10 @@ Made for the two harnesses there are; none is changed before a harness needs it.
 
 ## Adding a tracker
 
-Everything known of one tracker — its calls, where a project keeps it, the environment its tools need in a session,
-the files its own tools read, its `doctor` checks — lives in its adapter crate; the rest of the build names none of it.
-`scripts/core-boundary.sh` checks this for br: outside `crates/loop-manager-br`, its tests and the test crates, no
-Rust code names br, bv, a bead, `.beads` or a `BR_`/`BD_`/`BEADS_` variable.
+Everything known of one tracker — its calls, where a project keeps it, the environment its tools need in a session, the
+files its own tools read, its `doctor` checks — lives in its adapter crate; the rest of the build names none of it.
+`scripts/core-boundary.sh` checks this for br ([tracker-br](tracker-br.md)): outside `crates/loop-manager-br`, its tests
+and the test crates, no Rust code names br, bv, a bead, `.beads` or a `BR_`/`BD_`/`BEADS_` variable.
 
 1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Tracker`.
 2. In it, one exported description of itself:
@@ -167,7 +168,8 @@ Rust code names br, bv, a bead, `.beads` or a `BR_`/`BD_`/`BEADS_` variable.
    is that of the first adapter whose `link` finds it; a project with none gets the first adapter's `link`. `new` is
    the tracker of a project, `watch` calls its callback at the tracker's writes as long as the returned value lives,
    so the core reads the changes. `start` runs once at the daemon's start with the projects that have the tracker and
-   writes the files the tracker's own tools read (br: `.bv/workspace.yaml` next to the orchestrator config); it
+   writes the files the tracker's own tools read (br: `.bv/workspace.yaml` next to the orchestrator config,
+   [tracker-br](tracker-br.md#generated-from-the-project-configs)); it
    returns warnings, not errors. `doctor` gives the checks beyond the binary's version, which the root makes from
    `tested`.
 3. One row in `TRACKERS` (`crates/loop-manager/src/tracker.rs`) and the crate in `crates/loop-manager/Cargo.toml`.

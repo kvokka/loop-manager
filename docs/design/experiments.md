@@ -170,6 +170,8 @@ subagent's steps out of a turn are no activity.
 
 ## br as an event source (experiment 3)
 
+The br adapter is built on these findings ([tracker-br](tracker-br.md)).
+
 Code: `experiments/05-br-events` (one scenario, fresh workspace with an isolated `HOME`, the `notify` crate on the
 `.beads/` directory, `rusqlite` read-only on `beads.db`), removed from the tree after recording; last in commit
 `1629c3a`. Output: `experiments/05-br-events/logs/run.txt`.

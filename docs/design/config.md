@@ -27,7 +27,7 @@ error in every file.
   sessions on its fingerprint (a changed MCP restarts only the instances it is part of). It emits `config.reloaded`
   with the generation (1 at daemon start), then goes through the queue again: a run waiting for a limit the reload
   lifts starts at once. A change of the set of harnesses, a harness `binary` or any adapter setting
-  such as `max_sessions` (a harness `model` is fine), or of which projects have a `.beads` tracker is refused: drivers
+  such as `max_sessions` (a harness `model` is fine), or of which projects have a tracker is refused: drivers
   and trackers are made at daemon start.
 
 ## Settings (any layer)
@@ -982,9 +982,9 @@ off fires neither on its schedule nor on events, only by hand, and stays off acr
   of the daemon neither loses nor doubles a firing ([contracts 3.5](contracts.md#35-outbox-lifetime)).
 - Overlap: while a run started by the same trigger with the same inputs is alive, a new firing is skipped with
   `trigger.skipped{overlap}`.
-- A run started by a trigger inherits the correlation of its event. A tracker event carries the correlation of the
-  run whose attempt made the write, known from the br actor `loop-manager:<run>[:<attempt>]`; a write by a human starts
-  a new chain ([contracts 5](contracts.md#5-tracker-interface)).
+- A run started by a trigger inherits the correlation of its event. A tracker event carries the correlation of the run
+  whose attempt made the write, known from the actor of the write, `loop-manager:<run>[:<attempt>]`; a write by a human
+  starts a new chain ([contracts 5](contracts.md#5-tracker-interface)).
 - Tracker events are `issue.created`, `issue.updated`, `issue.closed`, `issue.labeled` and `issue.ready`; `issue.ready` is
   raised when an issue first enters the ready set: open, unclaimed, every blocker closed. `issue.labeled` is raised for
   each label an issue the core already read gains later, once per gain, with `label` and `ready`: `ready` is true when

@@ -85,7 +85,7 @@ the outcome, `loop-manager comment --file <file>` leaves a comment on the run's 
 
 An addon depends on no tool it does not bring or adapt. It talks to loop-manager through the CLI and the environment
 it is given, never to the tracker, a harness or another tool it assumes is on the host: a comment on the issue is
-`loop-manager comment`, not `br comments add`, so the addon works whatever the project's tracker. An addon that
+`loop-manager comment`, not the tracker's own command, so the addon works whatever the project's tracker. An addon that
 adapts a tool, as `dcg` does, names the tool among its needs on the host.
 
 What `hooks/remind` prints on `UserPromptSubmit` joins the prompt:
@@ -226,7 +226,7 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
   `${LOOP_MANAGER_ADDON_DATA}`, by the input's `session_id`.
 - **The issue.** With `LOOP_MANAGER_ISSUE` set, the dump past `hard` is a comment on it, left with
   `loop-manager comment --file <dump>`: the daemon writes it as the actor of the session's attempt, whatever the
-  tracker, so the addon needs no `br`.
+  tracker, so the addon needs no tracker binary.
 - **Stopping.** Past `hard` it declares the outcome with `loop-manager finish <cut>` and answers `{"continue":
   false}`; the `PreToolUse` hook denies every later tool call of the session. On claude the turn ends there. A codex
   tool hook cannot end a turn, so codex compacts at `hard` (`model_auto_compact_token_limit`) and the stop is the
@@ -240,14 +240,15 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
   `loop-manager config check --config <file>` and
   `loop-manager config explain --config <file> --project <p> --agent <a>`, run without a daemon. `explain` shows each
   string filled in for that agent and each parameter with its layer.
-- **The hooks**: run each one by hand with its input on stdin: a harness hook takes the hook input JSON of the
-  harness and the session environment (`LOOP_MANAGER_ISSUE` and the rest); an orchestrator hook takes an event line and
-  `LOOP_MANAGER_ADDON_PARAMS`. Put stand-ins for the commands it calls (`loop-manager`, `br`) first on its `PATH`.
+- **The hooks**: run each one by hand with its input on stdin: a harness hook takes the hook input JSON of the harness
+  and the session environment (`LOOP_MANAGER_ISSUE` and the rest); an orchestrator hook takes an event line and
+  `LOOP_MANAGER_ADDON_PARAMS`. Put stand-ins for the commands it calls (`loop-manager` and any other) first on its
+  `PATH`.
 
 The tests of `context-budget` do both: `crates/loop-manager/tests/e2e/context_budget.rs` checks with `config explain`
 that the params reach the settings and hooks of claude and codex, and drives `hooks/budget` with the hook inputs of
 both harnesses, fake transcripts and rollouts, a stand-in `loop-manager` that records the outcomes and comments, and a
-`br` that fails (`context_budget/codex.rs` for codex).
+stand-in tracker binary that fails if called (`context_budget/codex.rs` for codex).
 
 ## Moving it to its own repository
 

@@ -10,7 +10,7 @@
 - Before a new mechanism, check whether the harness vendor already has it.
 - The first release is not out, so there is no compatibility with an old config: a retired key is a config error in
   one line that says where it is written now. No transition layers.
-- The core knows no harness, no role and no br: those come through the driver and tracker interfaces
+- The core knows no harness, no role and no tracker: those come through the driver and tracker interfaces
   (`scripts/core-boundary.sh`). Policy lives in addons and config, not in the core
   ([architecture](../architecture.md#boundaries)).
 - `tokio::select!` in the core (`loop-manager-contract`, `loop-manager-core`) is written only with `biased;` and a
@@ -47,14 +47,17 @@ is for the review to catch.
 - Everything is at its latest release when added, and pinned: a crate comes by `cargo add <crate>` without a
   version, `Cargo.lock` is in git; tools have exact versions in `mise.toml` (`mise use <tool>@<x.y.z>`), claude and
   codex a release line (`2.1`, `0`); there is no `mise.lock`. No update without a reason; an update is a commit of
-  its own. A harness or br update is accepted by the contract tests ([harness updates](../harness-updates.md)).
-- Dependencies have MIT-compatible licenses (`cargo deny`). No code of br or bv enters the tree.
+  its own. A harness or tracker update is accepted by the contract tests ([harness updates](../harness-updates.md),
+  [tracker-br](../design/tracker-br.md#versions)).
+- Dependencies have MIT-compatible licenses (`cargo deny`). No code of br or bv enters the tree
+  ([license](../../README.md#the-br-tracker-and-its-license)).
 - No implicit dependency on a tool. An addon, a crate, or a plugin and its skills do not call a concrete tracker,
   harness or other tool they are not the adapter of: they go through loop-manager's interfaces, the contract traits,
   the CLI (`loop-manager comment`, `loop-manager finish`, `loop-manager run show`, `loop-manager issue show`) and the
   environment they are given. Only the adapter of a tool runs it
   (`loop-manager-br` runs br, `loop-manager-claude` runs claude); a part that needs more of a tool asks for it through
-  an interface of loop-manager. The devloop pack is exempt: it belongs to a br project by design.
+  an interface of loop-manager. The devloop pack is exempt: it belongs to a br project by design
+  ([issue trackers](../guide/issue-trackers.md#the-br-tracker)).
 - mise is a convenience, not a requirement. A command that is not found: `mise exec -- <command>`.
 - Structural search in Rust is `ast-grep`: `ast-grep -l rust -p '$X.unwrap()' crates/`.
 

@@ -181,19 +181,19 @@ loop-manager config explain --project hello --formula summarize-checked
 
 ## Runs over a tracker
 
-A project with a `.beads` directory uses [br](../../README.md#the-br-tracker-and-its-license) as its task
-tracker. A formula input of `type = "task"` takes the task: its text, the id of an issue to take up, or
-`{ next_ready = true }` to take the next ready issue;
-the prompt then reads its fields as `{{ issue.title }}`, `{{ issue.description }}` and so on, the comments on it as
-`{{ issue.comments }}` and its parents as `{{ issue.parents }}` ([config](../design/config.md#formula-formulasfiletoml)),
-and the run holds the issue's claim until it ends. A trigger on `issue.ready` starts such runs as issues become ready;
-with a label in its `where`, a second trigger on `issue.labeled` also starts one when an issue that is ready already
-gains the label ([config: trigger](../design/config.md#how-runs-start-and-what-a-firing-guarantees)).
+A project with an issue tracker gives its runs their tasks through loop-manager ([issue trackers](issue-trackers.md)). A
+formula input of `type = "task"` takes the task: its text, the id of an issue to take up, or `{ next_ready = true }` to
+take the next ready issue; the prompt then reads its fields as `{{ issue.title }}`, `{{ issue.description }}` and so on,
+the comments on it as `{{ issue.comments }}` and its parents as `{{ issue.parents }}`
+([config](../design/config.md#formula-formulasfiletoml)), and the run holds the issue's claim until it ends. A trigger
+on `issue.ready` starts such runs as issues become ready; with a label in its `where`, a second trigger on
+`issue.labeled` also starts one when an issue that is ready already gains the label ([config:
+trigger](../design/config.md#how-runs-start-and-what-a-firing-guarantees)).
 
-A task in plain words, `--input 'task=Add a dark mode'`, creates a root issue (an epic titled by the first line) and
-the run works on it; a task that is the id of an issue files nothing and takes that issue. A planner step files the work as issues under that
-root, each under the id prefix of its rig (`BD_ISSUE_PREFIX=<prefix> br create ... --deps parent-child:<root>`) and, if it
-wants, with `agent:` and `harness:` labels; a `drain` step then gives every
+A task in plain words, `--input 'task=Add a dark mode'`, creates a root issue (an epic titled by the first line) and the
+run works on it; a task that is the id of an issue files nothing and takes that issue. A planner step files the work as
+issues under that root, each under the id prefix of its rig (`loop-manager issue create --project <project> --rig <rig>
+--parent <root> --title <title>`) and, if it wants, with `agent:` and `harness:` labels; a `drain` step then gives every
 ready issue under the root a run of its own formula and ends when none is ready or running:
 
 ```toml

@@ -40,9 +40,10 @@ on its `PATH`; a harness may name its binary in the config instead (`[harness.cl
 mise is a convenience, not a requirement: install these binaries any way you like.
 
 - `loop-manager doctor` checks what the daemon needs: the config, each harness binary with its source, version and
-  login, br and its license, the mode of the state and socket directories, the state and its outbox. It asks the running
-  daemon; before the first start, `loop-manager doctor --config <file>` checks a file with no daemon. It exits non-zero
-  on an error; warnings (an unsupported or untested version, no login file) do not fail it.
+  login, the tracker binary ([br](docs/guide/issue-trackers.md#the-br-tracker)) and its license, the mode of the state
+  and socket directories, the state and its outbox. It asks the running daemon; before the first start, `loop-manager
+  doctor --config <file>` checks a file with no daemon. It exits non-zero on an error; warnings (an unsupported or
+  untested version, no login file) do not fail it.
 - Packs and addons from git, at a tag, a commit or (a pack only) the latest revision, are downloaded by `loop-manager`
   into `~/.cache/loop-manager/git` when it loads the config; `loop-manager cache clear` empties that cache
   (docs/design/config.md).
@@ -57,13 +58,8 @@ mise is a convenience, not a requirement: install these binaries any way you lik
 
 A project with a `<project>/.beads` directory uses [br](https://github.com/Dicklesworthstone/beads_rust) as its
 tracker. br is a separate binary you install yourself (this repository pins 0.7.6 in `mise.toml`); loop-manager runs it
-as a process and never links, vendors or ships it.
-
-At start the daemon writes `.bv/workspace.yaml` next to the orchestrator config (by default
-`~/.config/loop-manager/.bv/workspace.yaml`): one repository per project with a tracker, with br's id prefix. Run
-[bv](https://github.com/Dicklesworthstone/beads_viewer) there, or with `--workspace <that file>`, to see the issues of
-all projects at once (read by bv 0.25.0 on 2026-11-13 at `0e02fda`).
-<!-- MEASURE id=bv-workspace-read date=2026-11-13 ver=bv-0.25.0,0e02fda env=linux-arm64-orbstack src="by hand: bv --workspace <file> --robot-next" note="checked once by hand; not in CI; re-check when bv or the file format changes" -->
+as a process and never links, vendors or ships it. How loop-manager works with issues, how br is wired and how to
+inspect it by hand: [issue trackers](docs/guide/issue-trackers.md).
 
 **br is not plain MIT.** Its license is MIT with a rider that grants no rights to OpenAI, Anthropic, their affiliates
 or anyone acting on their behalf. Check whether that rider applies to you before you install br. Whether it applies to
