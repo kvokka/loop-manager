@@ -315,6 +315,23 @@ pub(super) async fn instance(client: &Client, json: bool, command: InstanceComma
     Ok(())
 }
 
+#[derive(Subcommand)]
+pub enum IssueCommand {
+    /// Show an issue of a project from its tracker: description, status, labels and comments.
+    Show {
+        issue: String,
+        #[arg(long)]
+        project: String,
+    },
+}
+
+pub(super) async fn issue(client: &Client, json: bool, command: IssueCommand) -> Result<(), ClientError> {
+    let IssueCommand::Show { issue, project } = command;
+    let path = format!("/v1/projects/{}/issues/{}", encode(&project), encode(&issue));
+    print(json, &client.request("GET", &path, None, None).await?);
+    Ok(())
+}
+
 /// An `--input` with its `=`: a bare name is a mistake, not an empty value.
 fn name_value(text: &str) -> Result<String, String> {
     match text.split_once('=') {

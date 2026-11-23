@@ -11,7 +11,7 @@ mod wait;
 
 use crate::client::{Client, ClientError, Events};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-pub use commands::{GateCommand, InstanceCommand, RunCommand, TriggerCommand};
+pub use commands::{GateCommand, InstanceCommand, IssueCommand, RunCommand, TriggerCommand};
 pub use config::{ConfigCommand, FormulaCommand, ListCommand, local as config_local};
 use finish::finish;
 use serde_json::{Value, json};
@@ -36,6 +36,7 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("trigger enable", "POST", "/v1/triggers/enable"),
     ("trigger disable", "POST", "/v1/triggers/disable"),
     ("project list", "GET", "/v1/projects"),
+    ("issue show", "GET", "/v1/projects/{project}/issues/{issue}"),
     ("agent list", "GET", "/v1/agents"),
     ("formula list", "GET", "/v1/formulas"),
     ("pack list", "GET", "/v1/packs"),
@@ -112,6 +113,9 @@ pub enum Command {
     /// Projects and their rigs.
     #[command(subcommand)]
     Project(ListCommand),
+    /// Issues of a project, read from its tracker.
+    #[command(subcommand)]
+    Issue(IssueCommand),
     /// Agents.
     #[command(subcommand)]
     Agent(ListCommand),
@@ -273,6 +277,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Instance(command) => commands::instance(client, json, command).await?,
         Command::Trigger(command) => commands::trigger(client, json, command).await?,
         Command::Project(command) => config::list(client, json, "projects", command).await?,
+        Command::Issue(command) => commands::issue(client, json, command).await?,
         Command::Agent(command) => config::list(client, json, "agents", command).await?,
         Command::Formula(command) => config::formulas(client, json, command).await?,
         Command::Pack(command) => config::list(client, json, "packs", command).await?,

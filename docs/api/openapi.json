@@ -1253,6 +1253,101 @@
         }
       }
     },
+    "/v1/projects/{project}/issues/{issue}": {
+      "get": {
+        "summary": "An issue of a project with its comments, oldest first, read from the project's tracker as the daemon.",
+        "operationId": "show",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "issue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueReply"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the path is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or no such issue in its tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the project has no tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`tracker`: the tracker refused the read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`tracker_unavailable`: the tracker cannot be read now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs": {
       "get": {
         "summary": "Lists runs, newest first.",
@@ -3231,6 +3326,96 @@
         "properties": {
           "stopping": {
             "type": "boolean"
+          }
+        }
+      },
+      "IssueComment": {
+        "type": "object",
+        "required": [
+          "author",
+          "created_at",
+          "text"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "IssueReply": {
+        "type": "object",
+        "description": "An issue of a project as its tracker gives it (docs/design/contracts.md 5.2), with its comments, oldest first.",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "priority",
+          "labels",
+          "created_at",
+          "updated_at",
+          "comments"
+        ],
+        "properties": {
+          "assignee": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "comments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssueComment"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "epic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent of the issue."
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's\ntracker policy adds."
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
           }
         }
       },

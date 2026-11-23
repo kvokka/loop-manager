@@ -46,7 +46,8 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 (`GET /v1/agents` gives each agent's harness in the project outside any rig and formula, `null` when its layers do not
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
-formulas, packs, addons (list), config check, explain and reload; runs
+formulas, packs, addons (list), config check, explain and reload; an issue of a project with its comments
+(`GET /v1/projects/{project}/issues/{issue}`); runs
 (start, list, state, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
 account); events; daemon status, drain and planned restart.
@@ -109,6 +110,12 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `loop-manager comment --file <file>` (`POST /v1/runs/{id}/comment`) puts the text of the file as a comment on the
   issue of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
   A run without an issue (`no_issue`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
+- `loop-manager issue show <issue> --project <project>` (`GET /v1/projects/{project}/issues/{issue}`) reads the
+  issue from the project's tracker through the daemon and prints its fields (`title`, `description`, `status`,
+  `labels`, `assignee`, `epic`, ...) and its `comments` (`author`, `created_at`, `text`, oldest first): how a plugin, a
+  skill or an agent reads an issue whatever the project's tracker. A project or an issue there is none of is
+  `not_found`, a project without a tracker `rejected`, a tracker that cannot be read `tracker_unavailable` (503) or
+  `tracker` (502); each exits 1.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - Without a daemon only `loop-manager format`, `loop-manager daemon`, `loop-manager cache clear`, `loop-manager --version`, and

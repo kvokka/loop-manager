@@ -336,3 +336,59 @@ async fn a_comment_outside_a_session_needs_the_session_environment() {
     let error: Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!((out.status.code(), &error["error"]["code"]), (Some(1), &"usage".into()));
 }
+
+/// `issue show` reads an issue of a project from its br tracker through the daemon: its fields and its comments, in
+/// TOON by default; an issue or a project there is none of exits 1 with `not_found` (docs/api/frontends.md).
+#[tokio::test]
+async fn an_issue_is_shown_from_the_tracker_of_its_project() {
+    let d = Daemon::start(|dir| {
+        crate::tracker::br_in(
+            &dir.join("config/loop-manager/shop"),
+            None,
+            &["init", "--prefix", "t", "-q"],
+        );
+    })
+    .await;
+    let project = d.dir.path().join("config/loop-manager/shop");
+    let id = crate::tracker::br_in(
+        &project,
+        None,
+        &["create", "Fix the cart", "-d", "The total is wrong", "--silent"],
+    );
+    crate::tracker::br_in(&project, None, &["label", "add", &id, "review"]);
+    crate::tracker::br_in(&project, None, &["comments", "add", &id, "Seen on mobile"]);
+    let shown = d.json(&["issue", "show", &id, "--project", "shop"]);
+    assert_eq!(
+        (
+            &shown["title"],
+            &shown["description"],
+            &shown["status"],
+            &shown["labels"]
+        ),
+        (
+            &json!("Fix the cart"),
+            &json!("The total is wrong"),
+            &json!("open"),
+            &json!(["review"])
+        ),
+        "{shown}"
+    );
+    assert_eq!(
+        (&shown["comments"][0]["text"], &shown["comments"][0]["author"]),
+        (&json!("Seen on mobile"), &json!("alice"))
+    );
+    let out = d.cli(&["issue", "show", &id, "--project", "shop"], &[]);
+    let toon = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        out.status.success() && toon.contains("status: open") && toon.contains("Seen on mobile"),
+        "{toon}"
+    );
+    for (issue, project) in [("t-none", "shop"), (id.as_str(), "mall")] {
+        let out = d.cli(&["issue", "show", issue, "--project", project], &[]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.code() == Some(1) && stderr.contains("not_found"),
+            "{issue} {project}: {stderr}"
+        );
+    }
+}

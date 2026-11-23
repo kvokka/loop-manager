@@ -171,6 +171,33 @@ pub(crate) struct Commented {
     answer: String,
 }
 
+/// An issue of a project as its tracker gives it (docs/design/contracts.md 5.2), with its comments, oldest first.
+#[derive(ToSchema)]
+pub(crate) struct IssueReply {
+    id: String,
+    title: String,
+    description: String,
+    /// The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's
+    /// tracker policy adds.
+    status: String,
+    priority: i64,
+    labels: Vec<String>,
+    assignee: Option<String>,
+    /// The parent of the issue.
+    epic: Option<String>,
+    created_at: String,
+    updated_at: String,
+    closed_at: Option<String>,
+    comments: Vec<IssueComment>,
+}
+
+#[derive(ToSchema)]
+pub(crate) struct IssueComment {
+    author: String,
+    created_at: String,
+    text: String,
+}
+
 #[derive(ToSchema)]
 pub(crate) struct Reloaded {
     config_generation: u64,

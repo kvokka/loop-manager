@@ -111,13 +111,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         }
         drivers.push(driver);
     }
-    // A project with a `.beads` directory has br as its tracker (docs/design/tracker-br.md).
-    let issues: Vec<(String, PathBuf)> = config
-        .projects
-        .iter()
-        .map(|p| (p.name.clone(), p.dir.join(".beads")))
-        .filter(|(_, dir)| dir.is_dir())
-        .collect();
+    let issues = issues(&config);
     let trackers = trackers(&paths.config, &issues);
     let config = Arc::new(config);
     let (core, mut task) = run::start(
@@ -125,7 +119,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         Clock::system(),
         config.clone(),
         drivers.clone(),
-        trackers,
+        trackers.clone(),
         Arc::new(ExecHooks {
             socket: Some(paths.socket.clone()),
             bundled: Some(loop_manager_addons::run),
@@ -158,6 +152,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
             move || crate::doctor::findings(&paths)
         }),
         tree: loop_manager_addons::tree,
+        trackers,
     };
     let stop = stop_signal().map_err(|e| format!("signals: {e}"))?;
     eprintln!("loop-manager daemon listening on {}", paths.socket.display());
@@ -213,6 +208,14 @@ async fn bind_tcp(config: &mut Config, state: &Path) -> Result<Option<TcpListene
         .await
         .map(Some)
         .map_err(|e| format!("api_tcp {addr}: {e}"))
+}
+
+/// The projects with a `.beads` directory, which have br as their tracker (docs/design/tracker-br.md), and that directory.
+fn issues(config: &Config) -> Vec<(String, PathBuf)> {
+    (config.projects.iter())
+        .map(|p| (p.name.clone(), p.dir.join(".beads")))
+        .filter(|(_, dir)| dir.is_dir())
+        .collect()
 }
 
 fn trackers(config_file: &Path, issues: &[(String, PathBuf)]) -> BTreeMap<String, Arc<dyn Tracker>> {

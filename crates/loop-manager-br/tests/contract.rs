@@ -314,16 +314,27 @@ async fn waiting_takes_open_blockers_and_a_blocked_status_and_tells_those_under_
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lineage_of_a_bead_is_its_comments_and_its_parents_from_the_root_down() {
+async fn the_lineage_of_a_bead_is_its_fields_its_comments_and_its_parents_from_the_root_down() {
     let (dir, t) = tracker();
     let root = create(dir.path(), "Root", &["-t", "epic"]);
     let epic = create(dir.path(), "Epic", &["-t", "epic", "--parent", &root]);
-    let kid = create(dir.path(), "Kid", &["--parent", &epic]);
+    let kid = create(dir.path(), "Kid", &["--parent", &epic, "-d", "Parse the input"]);
+    br(dir.path(), &["label", "add", &kid, "review"]);
+    br(dir.path(), &["update", &kid, "--status", "blocked"]);
     br(dir.path(), &["comments", "add", &root, "The goal: ship it"]);
     br(dir.path(), &["comments", "add", &kid, "start with the parser"]);
     br(dir.path(), &["comments", "add", &kid, "two lines\nhere"]);
     let lineage = t.lineage(&kid).await.unwrap();
-    assert_eq!(lineage.issue.issue.id, kid);
+    let issue = &lineage.issue.issue;
+    assert_eq!(
+        (
+            issue.id.as_str(),
+            issue.description.as_str(),
+            issue.status.as_str(),
+            &issue.labels
+        ),
+        (kid.as_str(), "Parse the input", "blocked", &vec!["review".to_owned()])
+    );
     let texts: Vec<&str> = lineage.issue.comments.iter().map(|c| c.text.as_str()).collect();
     assert_eq!(texts, ["start with the parser", "two lines\nhere"]);
     assert!(

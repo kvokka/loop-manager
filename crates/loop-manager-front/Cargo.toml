@@ -27,4 +27,5 @@ utoipa-axum = "0.3.0"
 workspace = true
 
 [dev-dependencies]
+loop-manager-testkit = { version = "0.0.1", path = "../loop-manager-testkit" }
 tempfile = "3.27.0"
