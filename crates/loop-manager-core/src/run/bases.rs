@@ -62,8 +62,13 @@ pub(super) fn place(tx: &Tx<'_>, project: &Project, id: &str) -> Result<Place, E
         true => (home(project, &rig), Vec::new()),
         false => base(tx, project, &rig, step_parent(tx, parent.as_deref())?)?,
     };
-    let own = keyed(project, &formula);
-    let rigs = match own {
+    let merge = match continued {
+        true => None,
+        false => merged(tx, id, parent.as_deref())?,
+    };
+    // The key of a `drain` step gives its children their worktree: one, whatever their formula says.
+    let own = keyed(project, &formula) || merge.is_some();
+    let rigs = match keyed(project, &formula) {
         true => {
             let mut stmt = tx
                 .sql()
@@ -82,17 +87,41 @@ pub(super) fn place(tx: &Tx<'_>, project: &Project, id: &str) -> Result<Place, E
         own,
         continued,
         rigs,
+        merge,
     })
 }
 
+/// The title of the bead of run `id` when its step parent is in a `drain` step with `worktree = true`, by the
+/// step's config snapshot: the run merges into its base under it (see [`Place::merge`]). A bead not read yet has an
+/// empty title.
+fn merged(tx: &Tx<'_>, id: &str, parent: Option<&str>) -> Result<Option<String>, Error> {
+    let Some(parent) = parent else {
+        return Ok(None);
+    };
+    let title: Option<String> = tx
+        .sql()
+        .query_row(
+            "SELECT COALESCE(json_extract(c.bead_data, '$.title'), '') FROM runs c, runs p \
+             WHERE c.id = ?1 AND p.id = ?2 AND c.bead IS NOT NULL \
+             AND p.step_kind = 'drain' AND json_extract(p.config, '$.worktree') = 1",
+            params![id, parent],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(title)
+}
+
 /// Whether run `id` works apart from its place's own directory, so `max_writers` does not count it: in a worktree of
-/// its own, in a lazy base of an ancestor, or in a workdir it inherited from an ancestor elsewhere. A continued run
+/// its own (by its formula or the `drain` step that made it), in a lazy base of an ancestor, or in a workdir it inherited from an ancestor elsewhere. A continued run
 /// counts by its formula alone.
 pub(super) fn isolated(tx: &Tx<'_>, project: &Project, id: &str) -> Result<bool, Error> {
     let (rig, formula, parent, continued) = facts(tx, id)?;
     let own = keyed(project, &formula);
     if own || continued {
         return Ok(own);
+    }
+    if merged(tx, id, parent.as_deref())?.is_some() {
+        return Ok(true);
     }
     let (dir, lazy) = base(tx, project, &rig, step_parent(tx, parent.as_deref())?)?;
     Ok(!lazy.is_empty() || dir != home(project, &rig))

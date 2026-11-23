@@ -75,9 +75,14 @@ impl RunHandler {
                 ("worktree", Some(p), Some(run)) => json!({ "run": bases::place(tx, p, run)? }),
                 _ => bundled.params.clone(),
             };
+            // The merge of `worktree` waits for the merges of the siblings before it and runs the project's own git
+            // hooks: it has the ceiling (contracts 3.1).
+            let timeout_ms = match (bundled.name, kind) {
+                ("worktree", "run.finishing") => HOOK_CEILING_MS,
+                _ => HOOK_TIMEOUT_MS,
+            };
             hooks.push(json!({
-                "addon": bundled.name, "bundled": bundled.name, "params": params,
-                "timeout_ms": HOOK_TIMEOUT_MS,
+                "addon": bundled.name, "bundled": bundled.name, "params": params, "timeout_ms": timeout_ms,
             }));
         }
         Ok(hooks)

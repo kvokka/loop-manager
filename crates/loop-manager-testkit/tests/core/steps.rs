@@ -367,6 +367,12 @@ async fn a_remark_on_a_final_exec_step_sends_the_run_back_to_the_ai_step_before_
     let (kind, data) = w.end(&run).await;
     assert_eq!(kind, "run.passed", "{data}");
     assert_eq!(w.log(), "ci\nci\n");
+    let finals: Vec<Value> = w.all("run.finishing").iter().map(|d| d["final"].clone()).collect();
+    assert_eq!(
+        finals,
+        [false, true, false, true],
+        "only a pass of the last step is final"
+    );
     let (_, prompts) = w.driver.sent(&run, 3);
     assert_eq!(prompts, ["Code. []", "Code. [ci: merge conflict]"]);
     let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();

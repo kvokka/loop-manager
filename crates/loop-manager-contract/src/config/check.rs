@@ -112,12 +112,14 @@ fn resolve_steps(
                 Ok(found) => *agent = found,
                 Err(e) => loader.fail(manifest, format!("formula `{name}`: {e}")),
             },
-            StepKind::Drain { formula: run, .. } => {
+            StepKind::Drain {
+                formula: run, worktree, ..
+            } => {
                 let what = format!("formula `{name}`, step `{}`", step.name);
                 match resolve(index, own, run, has_formula, "formula") {
                     Ok(found) => {
                         let pack = index.iter().find(|p| p.name == found.pack).expect("resolved");
-                        if let Err(e) = executor(&pack.formulas[&found.name]) {
+                        if let Err(e) = executor(&pack.formulas[&found.name], *worktree) {
                             loader.fail(manifest, format!("{what}: `{found}` {e}"));
                         }
                         *run = found;
@@ -219,11 +221,19 @@ pub(super) fn resolve(
 }
 
 /// A formula a drain step runs takes the bead and nothing else it needs: one input of type `task`, no other
-/// required one (docs/design/config.md).
-fn executor(formula: &super::Formula) -> Result<(), String> {
+/// required one; under a step with `worktree = true` its last step has no `if` (docs/design/config.md).
+fn executor(formula: &super::Formula, worktree: bool) -> Result<(), String> {
     let beads = formula.inputs.iter().filter(|(_, i)| i.kind == super::InputType::Task);
     if beads.count() != 1 {
         return Err("needs exactly one input of type `task` to run a drained bead".to_owned());
+    }
+    // A run merges on the `pass` of its last step: one that ends on an earlier step would merge nothing.
+    if let Some(last) = formula.steps.last().filter(|s| worktree && !s.condition.is_empty()) {
+        return Err(format!(
+            "has an `if` on its last step `{}`: a run of a `drain` step with `worktree = true` merges on the `pass` \
+             of its last step",
+            last.name
+        ));
     }
     match formula
         .inputs
@@ -273,7 +283,7 @@ pub(super) fn bundled(
 }
 
 /// The bundled addons on for a project: the orchestrator's `on`, except those the project's `tables` decide, and
-/// `worktree` when a formula of its `packs` has `worktree = true`, with no parameters: the core gives it the facts of
+/// `worktree` when a formula or a `drain` step of its `packs` has `worktree = true`, with no parameters: the core gives it the facts of
 /// each run's place as it queues the hook.
 pub(super) fn project_bundled(
     loader: &mut Loader,
@@ -286,7 +296,11 @@ pub(super) fn project_bundled(
     let decides = |b: &Bundled| own.iter().any(|n| n == b.name);
     let mine = bundled(loader, file, tables).into_iter().filter(decides);
     let mut all: Vec<Bundled> = on.iter().filter(|b| !decides(b)).cloned().chain(mine).collect();
-    let worktree = packs.iter().any(|p| p.formulas.values().any(|f| f.worktree));
+    let drains =
+        |f: &super::Formula| (f.steps.iter()).any(|s| matches!(s.kind, StepKind::Drain { worktree: true, .. }));
+    let worktree = packs
+        .iter()
+        .any(|p| p.formulas.values().any(|f| f.worktree || drains(f)));
     if let Some(&(name, on, _)) = BUNDLED.iter().find(|b| b.0 == "worktree" && worktree) {
         let params = Value::Object(Map::new());
         all.push(Bundled { name, on, params });

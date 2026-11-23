@@ -21,8 +21,9 @@ pub(super) const AWAIT_TIMEOUT_MS: i64 = 7 * 24 * 3_600_000;
 
 impl RunHandler {
     /// The prompt, the step timeout and the config snapshot of a run, from the config of now: the effective config
-    /// of an ai step; `{"command", "env"}` of an exec step; `{"drain", "pool", "on_item_failure"}` of a drain step.
-    /// `None`: the step's `if` does not hold, the run skips it (docs/design/config.md).
+    /// of an ai step; `{"command", "env"}` of an exec step; `{"drain", "pool", "on_item_failure", "worktree"}` of a
+    /// drain step. `None`: the step's `if` does not hold, the run skips it (docs/design/config.md).
+    #[expect(clippy::too_many_lines, reason = "one match over the step kinds, an arm each")]
     pub(super) fn render(&self, tx: &Tx<'_>, row: &Row) -> Result<Option<(Option<String>, i64, Value)>, String> {
         let project = self.config.projects.iter().find(|p| p.name == row.project);
         let project = project.ok_or(format!("project `{}` is gone from the config", row.project))?;
@@ -74,10 +75,11 @@ impl RunHandler {
                     timeout,
                     pool,
                     on_item_failure,
+                    worktree,
                 },
                 "drain",
             ) => {
-                let config = json!({ "drain": formula.to_string(), "pool": pool,
+                let config = json!({ "drain": formula.to_string(), "pool": pool, "worktree": worktree,
                     "on_item_failure": on_item_failure, "env": env, "inherit_env": inherit_env });
                 return Ok(Some((None, timeout_ms(timeout, DRAIN_TIMEOUT_MS), config)));
             }

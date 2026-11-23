@@ -62,6 +62,22 @@ The behaviour itself is described in the document named under each heading; this
   cached revision with a warning; one XDG cache per user; no lock file; a running run keeps its snapshot. An addon
   from git must be pinned.
 - After `soft_stop` or `hard_stop` a `drain` step ends `fail`.
+- A `drain` step waiting on a foreign blocker ends at its `timeout` as any step does, by a `runaway_turn` of its
+  attempt: with `default-policy` the wait lasts up to two timeouts. There is no outcome of its own for "waited on a
+  blocker", and the wait is not shown apart from the step running: either would keep the waits between reads.
+- The core hands the bundled `worktree` the facts of a run's place (its base, the lazy bases of its ancestors,
+  whether it gets a worktree of its own, a continued session, the places of its children) as the hook's parameters,
+  not in the event.
+- The lazy bases of a run go with its terminal event under the rules of its own worktree; the branch
+  `loop-manager/<run>` stays for delivery.
+- The merge of a child of a `drain` step with `worktree = true` comes on its final `pass`: a `pass` of the last step of
+  its formula with no failed check of that step's row before it. Such a formula may have no `if` on its last step (a
+  load error): the run would end on an earlier step without a merge. The check script of the last step runs after
+  the merge; its failure repeats the step, and the next merge adds the new commits. Untracked files of the child's
+  worktree count as uncommitted changes. The bundled `worktree` has 300 s on `run.finishing` (waiting for the lock,
+  the project's own hooks), 30 s on its other events.
+- A child of a `formula` step whose formula has `worktree = true` gets a worktree of its own from the HEAD of the
+  directory it inherited, and merges nothing.
 - A check script runs after the step did; the step's own failure is a failed attempt too; the path is relative to
   the formula file; the environment is that of an `exec` step (for a step of another kind, the one of `[exec]` of the
   orchestrator and the project, never the agent's `env`); a repeat of an `ai` step continues

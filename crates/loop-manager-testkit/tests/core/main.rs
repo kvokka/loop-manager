@@ -20,6 +20,7 @@ mod children;
 mod config_inputs;
 mod deciding;
 mod drain;
+mod drain_merge;
 mod drain_pool;
 mod drain_rounds;
 mod drain_steps;

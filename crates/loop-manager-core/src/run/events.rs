@@ -254,7 +254,8 @@ impl RunHandler {
         if let Some(outcome) = outcome {
             row.set_state(tx, "finishing", None)?;
             let outcome: serde_json::Value = serde_json::from_str(&outcome).unwrap_or_default();
-            let data = json!({ "run": row.view(), "outcome": outcome, "remarks": remarks });
+            let last = self.final_pass(tx, &row, &outcome)?;
+            let data = json!({ "run": row.view(), "outcome": outcome, "remarks": remarks, "final": last });
             return self.deciding(tx, row, "run.finishing", data);
         }
         let data = json!({ "run": row.view(), "stop_reason": stop_reason, "remarks": remarks,

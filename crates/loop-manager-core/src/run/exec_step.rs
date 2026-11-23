@@ -170,7 +170,8 @@ impl RunHandler {
         )?;
         tx.clear_deadline(&row.deadline("state"))?;
         row.set_state(tx, "finishing", None)?;
-        let data = json!({ "run": row.view(), "outcome": outcome, "remarks": 0 });
+        let last = self.final_pass(tx, &row, &json!(outcome))?;
+        let data = json!({ "run": row.view(), "outcome": outcome, "remarks": 0, "final": last });
         self.deciding(tx, row, "run.finishing", data)
     }
 }

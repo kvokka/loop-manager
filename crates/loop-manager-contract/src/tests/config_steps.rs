@@ -148,6 +148,44 @@ fn a_drain_step_takes_pool_and_on_item_failure() {
     fails(&[(FLOW, exec)], "unknown field `pool`");
 }
 
+/// `worktree = true` on a drain step merges each child back on its final `pass`: it turns the bundled `worktree` on,
+/// and the formula it runs may not end on a step with an `if`, which would end its runs without a merge
+/// (docs/design/config.md "Formula").
+#[test]
+fn a_drain_step_with_worktree_runs_a_formula_whose_last_step_always_runs() {
+    use crate::config::StepKind;
+    let ship = |keys: &str| {
+        format!(
+            "name = \"flow\"\n[inputs]\nroot = {{ type = \"task\", required = true }}\n\
+             [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"implement\"\n{keys}"
+        )
+    };
+    let keyed = |keys: &str| {
+        let config = load_with(&[(FLOW, &ship(keys))]).unwrap();
+        let project = &config.projects[0];
+        let StepKind::Drain { worktree, .. } = project.packs[1].formulas["flow"].steps[0].kind else {
+            panic!("not a drain step");
+        };
+        (worktree, project.bundled.iter().any(|b| b.name == "worktree"))
+    };
+    assert_eq!(keyed(""), (false, false));
+    assert_eq!(keyed("worktree = true\n"), (true, true));
+    let implement = |when: &str| {
+        format!(
+            "name = \"implement\"\n[inputs]\nbead = {{ type = \"task\", required = true }}\n\
+             [[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"true\"]\n{when}\n\
+             [[step]]\nname = \"ship\"\nkind = \"exec\"\ncommand = [\"true\"]\n{when}\n"
+        )
+    };
+    let gated = implement("if = { \"inputs.bead\" = \"b-1\" }");
+    let formula = ("kit/formulas/implement.toml", gated.as_str());
+    fails(
+        &[(FLOW, &ship("worktree = true\n")), formula],
+        "step `all`: `kit.implement` has an `if` on its last step `ship`",
+    );
+    assert!(load_with(&[(FLOW, &ship("")), formula]).is_ok(), "no merge, no rule");
+}
+
 /// An await step waits 7 days unless `timeout` says otherwise and fails the run at the end unless
 /// `fail_on_timeout = false`; it may go back as a check does, and takes none of the keys of a process.
 #[test]

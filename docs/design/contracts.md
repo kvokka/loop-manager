@@ -142,11 +142,12 @@ Each of them carries `deadline`, the time after which the core applies the "no a
 | `run.preparing` | `{run, workdir, env_keys: [name], prompt_append, deadline}`; `env_keys` lists names only, never values |
 | `run.attempt_failed` | `{run, failure: Failure, rate_limit: {utilization, resets_at}\|null, attempts: Attempts, gates: [Gate], keys: [string], agent_failures_1h: [{run, kind, at}], deadline}` |
 | `run.turn_ended_without_outcome` | `{run, stop_reason, remarks, attempts: Attempts, deadline}` |
-| `run.finishing` | `{run, outcome: Outcome, remarks, deadline}` |
+| `run.finishing` | `{run, outcome: Outcome, remarks, final, deadline}` |
 
 `usage` is `{input_tokens, output_tokens}` summed over every attempt of the run; `rate_limit` is the last limit known
 for the run's account. `stop_reason` of `run.turn_ended_without_outcome` is the reported one (`completed`, `cancelled`,
-`failed`). `remarks` is the number of remarks already returned in this attempt. `gates` lists every closed gate whose
+`failed`). `remarks` is the number of remarks already returned in this attempt. `final` of `run.finishing` is true for
+a `pass` that ends the run once accepted: its step is the last of the formula and no check of its row before it failed. `gates` lists every closed gate whose
 key applies to the run; `keys` lists the gate keys of the run (7), so a policy can name the account, model, agent or rig
 gate in its decision. Credentials and environment values never enter an event: the journal is not a secret store.
 
@@ -253,7 +254,9 @@ timeout = "30s"
 - Result: exit 0 with empty stdout — no objection and no decision; exit 0 with one JSON object on stdout — the
   decision; exit 2 — block with the reason taken from stderr; any other exit, a signal, a timeout, invalid JSON or
   a decision not allowed for the event — a hook failure, reported as `addon.hook_failed`.
-- Timeout: default 30 s, ceiling 300 s per invocation.
+- Timeout: default 30 s, ceiling 300 s per invocation. A bundled addon has the default, except `worktree` on
+  `run.finishing`, which has the ceiling: its merge waits for the merges before it in the repository and runs the
+  project's own git hooks (config.md "Bundled addons").
 - Hooks run after commit, outside the core loop; the result enters the core as a message. Hooks of different
   events run concurrently; the hooks of one run are serialized in `seq` order on two queues: deciding events on
   one, observed events on the other (see 3.5), so an observer never delays a decision.
@@ -305,8 +308,8 @@ in declaration order); the bundled addons come after all of them (docs/design/co
   (`run.preparing`, `run.finishing`) that blocks — `failed{check}` with reason `hook_deadline`; on the other deciding
   events a hook failure is "no decision from this addon", so the "no addon decision" column applies.
 
-`deadline` of a deciding event = commit time + the sum of the timeouts of its hooks + 5 s (one hook can never hold a run
-longer than its own timeout; the runner reports before it unless it is lost). The hooks of a `run.attempt_failed` whose
+`deadline` of a deciding event = commit time + the sum of the timeouts of its hooks, the bundled ones with theirs (3.1),
++ 5 s (one hook can never hold a run longer than its own timeout; the runner reports before it unless it is lost). The hooks of a `run.attempt_failed` whose
 attempt stopped its instance first wait for that process (see 3.1): their sum counts the stop grace (10 s) too. The
 deciding hooks of a run run in order: when hooks of an earlier deciding event of the run are still queued, the sum
 counts their timeouts, and their stop grace, too. While a run in `running` waits for the decision on

@@ -708,6 +708,8 @@ formula = "fix"                     # the formula of each bead's run
 timeout = "24h"                     # optional (default 24h)
 pool = 2                            # optional (default 1): the most beads in work at once
 on_item_failure = "soft_stop"       # optional: continue (default) | soft_stop | hard_stop
+worktree = true                     # optional (default false): each child on a branch of its own from the base of its
+                                    # rig, merged back on its final pass
 
 [[step]]
 name = "review"
@@ -894,8 +896,27 @@ parent's formula has `worktree = true`: a worktree on the branch `loop-manager/<
 there makes from the HEAD of the first that exists of: the lazy base there of the next ancestor with the key up the
 chain of such steps, the workdir of the nearest ancestor on that rig, the rig's directory; an ancestor without the key
 ends that chain. A parent without the key has the rig's directory as its base there: the checkout on its branch. A child whose own formula has
-`worktree = true` gets its worktree from the HEAD of that base. Nothing is merged back, and a child never removes the
-base it works in. A run a session starts is no such child: it starts in its place's directory.
+`worktree = true` gets its worktree from the HEAD of that base. Only a `drain` step with `worktree = true` merges its
+children back (below), and a child never removes the base it works in. A run a session starts is no such child: it starts
+in its place's directory.
+
+`worktree = true` on a `drain` step gives each child a worktree of its own on the branch `loop-manager/<child>` from the
+HEAD of the base of its rig, whatever the child's formula says (the step's key wins: no second worktree), and merges it
+back. When the parent's formula has no key, that base is the checkout on its branch, the one the run started from, and
+the merges go there. On the final `pass` of the child (the `pass` of the last step of its formula, no check of that
+step's row failed before it: `final` of `run.finishing`, contracts 1.3) the bundled `worktree` merges the branch into
+the HEAD of the base with `git merge --no-ff` and the subject `chore(merge): <bead title> [<bead id>]`, one merge of a
+repository at a time. Uncommitted changes in the child's worktree, untracked files among them, are a remark to commit
+them. A conflict aborts the merge and is a remark naming the files and the base's branch: bring that branch in
+(`git merge` with a Conventional Commits message, or `git rebase`), resolve, commit, finish again. A git hook of the
+project that refuses the merge (`pre-merge-commit`, `commit-msg`) has it aborted and vetoes with its output. A remark on
+a step other than `ai` is a failed check (contracts 3.3). Then the bead closes and the step reads the tracker again: the
+next ready bead branches from the base with the merge in it. A merge run again after a restart aborts one left
+halfway and accepts a branch already merged. A child that failed for good leaves its branch unmerged, to a human; a
+later entry of the step gives its bead a new run, on a new branch from the base's tip. The check script of the last
+step runs after the merge; when it fails, the step runs again and the next merge adds the new commits. A formula a
+`drain` step with the key runs has no `if` on its last step (a config error): a run that ended on an earlier step would
+merge nothing.
 
 A prompt template is checked at load against each formula whose steps name its agent (contracts 2.3):
 `inputs.<name>` must be a declared input; `bead.<field>` needs a `task` input and a field of `Bead` (contracts 5.2),
@@ -1088,12 +1109,13 @@ or for a project.
   `crash_pause_s` (300), `resume_failures` (3), `unknown_after_s` (30), `unknown_retries` (3). The waits and caps that a
   zero would turn into a hot loop (`quota_wait_s`, `model_pause_s`, both bases and both caps, `crash_pause_s`) and
   `crash_loop` must be at least 1; `quota_margin_s`, `rapid_s` and `unknown_after_s` must not be negative.
-- `worktree` has no table: it is on in a project with a formula with `worktree = true` (a formula setting; there is no
-  central list and no agent-level switch), and a `[builtin.worktree]` table is a config error saying so. The core
+- `worktree` has no table: it is on in a project with a formula or a `drain` step with `worktree = true` (a setting
+  of the formula; there is no central list and no agent-level switch), and a `[builtin.worktree]` table is a config error saying so. The core
   gives its hook the place of the run as its parameters, not in the event: the directory of its base, the ancestors
-  whose lazy worktree is that base, whether its formula has the key, whether it continues a session, and the other
-  places it had children in. On `run.preparing` the addon moves a child of a step to its base (see "Formula"), making
-  a lazy base that is not there yet, and gives each run of a formula with the key a git worktree on the branch
+  whose lazy worktree is that base, whether it gets a worktree of its own (its formula or the `drain` step that made it
+  has the key), whether it continues a session, the other places it had children in, and, for a child of a `drain`
+  step with the key, the title of its bead. On `run.preparing` the addon moves a child of a step to its base (see "Formula"), making
+  a lazy base that is not there yet, and gives each run that gets one a git worktree on the branch
   `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, from the HEAD of that base, as its workdir.
   The hooks of declared addons come first and see the directory the run was created in. A base in a directory
   without git is that directory: no worktree, no isolation. When the run ends its own worktree, and its lazy bases in
@@ -1101,12 +1123,14 @@ or for a project.
   says why); a branch is deleted only when it is merged into the HEAD of the base it came from. A worktree a run
   inherited is never removed by it. A run with `continue_from` starts in the workdir of the run
   it continues (a session resumes where it ran); when that is a worktree of this addon, it is brought back on its branch
-  if it was removed, whatever the run's formula says. A reload that leaves a project no formula with `worktree = true`
+  if it was removed, whatever the run's formula says. On `run.finishing` it merges a child of a `drain` step with the
+  key into its base (see "Formula"). A reload that leaves a project no formula or `drain` step with `worktree = true`
   turns the addon off there: the worktrees of its runs still going are left in place, as are their branches. Runs of one
   repository that start or end at once make and remove their worktrees one at a time, under an OS lock on the git
   common dir: two `git worktree add` at once can race on the repository config. Its hook has the 30 s timeout of a
-  hook, the wait for that lock included; a `git` still running at that timeout is killed with its process group and
-  the hook fails.
+  hook, the wait for that lock included, and 300 s, the ceiling of a hook, on `run.finishing`: a merge waits for the
+  merges of its siblings before it and runs the project's own git hooks. A `git` still running at that timeout is
+  killed with its process group and the hook fails.
 
 ### Where the bundled addons end and the core begins
 

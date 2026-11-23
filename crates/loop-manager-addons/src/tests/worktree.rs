@@ -264,3 +264,147 @@ fn runs_of_one_repository_prepared_at_once_each_get_a_worktree() {
         assert_eq!(said, Ok(Some(json!({ "decision": "proceed", "workdir": tree }))));
     }
 }
+
+/// `run.finishing` of child `id` of a `drain` step with the key, on bead `w-1`, in `tree`; `last`: its `final`.
+fn finishing(id: &str, tree: &Path, place: &Place, last: bool) -> Result<Option<Value>, String> {
+    let mut event = event("run.finishing", id, tree);
+    event["data"]["run"]["bead"] = json!("w-1");
+    event["data"]["final"] = json!(last);
+    run("worktree", &event, &json!({ "run": place }))
+}
+
+/// The place of a child of a `drain` step with the key whose base is `dir`.
+fn drained(dir: &Path) -> Place {
+    Place {
+        own: true,
+        merge: Some("Fix the cart".into()),
+        ..at(dir)
+    }
+}
+
+/// A child `id` prepared from `repo`, with a commit writing `text` to `f.txt`; its worktree.
+fn child(repo: &Path, id: &str, text: &str) -> PathBuf {
+    let tree = proceed(hook("run.preparing", id, repo, &drained(repo)));
+    std::fs::write(tree.join("f.txt"), text).unwrap();
+    git(&tree, &["add", "f.txt"]);
+    git(&tree, &["commit", "-q", "-m", &format!("work of {id}")]);
+    tree
+}
+
+fn accepted(said: Result<Option<Value>, String>) {
+    assert_eq!(said, Ok(Some(json!({ "decision": "accept" }))));
+}
+
+/// The message of a `remark`.
+fn remarked(said: Result<Option<Value>, String>) -> String {
+    let said = said.unwrap().unwrap();
+    assert_eq!(said["decision"], "remark", "{said}");
+    said["message"].as_str().unwrap().to_owned()
+}
+
+/// Whether a merge stands halfway in `dir`.
+fn halfway(dir: &Path) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+        .output()
+        .unwrap()
+        .status
+        .success()
+}
+
+#[test]
+fn the_final_pass_of_a_drained_child_merges_its_branch_into_its_base_once() {
+    let (_dir, repo) = repo();
+    let place = drained(&repo);
+    let tree = child(&repo, "c1", "one");
+    assert_eq!(finishing("c1", &tree, &place, false), Ok(None), "not the final pass");
+    let mut no_merge = place.clone();
+    no_merge.merge = None;
+    assert_eq!(finishing("c1", &tree, &no_merge, true), Ok(None), "no key on the drain");
+    assert_eq!(subject(&repo, "main"), "base");
+
+    accepted(finishing("c1", &tree, &place, true));
+    assert_eq!(subject(&repo, "main"), "chore(merge): Fix the cart [w-1]");
+    let parents = git(&repo, &["rev-list", "--parents", "-n", "1", "main"]);
+    assert_eq!(parents.split(' ').count(), 3, "a merge commit: {parents}");
+    // Run again, as after a restart: the branch is merged, nothing new.
+    let merged = git(&repo, &["rev-parse", "main"]);
+    accepted(finishing("c1", &tree, &place, true));
+    assert_eq!(git(&repo, &["rev-parse", "main"]), merged);
+    // Its end removes the worktree and the branch, merged into the base.
+    assert_eq!(hook("run.passed", "c1", &tree, &place), Ok(None));
+    assert!(!tree.exists());
+    assert_eq!(git(&repo, &["branch", "--list", "loop-manager/c1"]), "");
+}
+
+#[test]
+fn uncommitted_work_gets_a_remark_and_merges_once_committed() {
+    let (_dir, repo) = repo();
+    let place = drained(&repo);
+    let tree = child(&repo, "c1", "one");
+    std::fs::write(tree.join("left.txt"), "x").unwrap();
+    let message = remarked(finishing("c1", &tree, &place, true));
+    assert!(message.contains("left.txt") && message.contains("`main`"), "{message}");
+    assert_eq!(subject(&repo, "main"), "base");
+    git(&tree, &["add", "left.txt"]);
+    git(&tree, &["commit", "-q", "-m", "left"]);
+    accepted(finishing("c1", &tree, &place, true));
+    assert_eq!(subject(&repo, "main"), "chore(merge): Fix the cart [w-1]");
+}
+
+#[test]
+fn a_conflict_gets_a_remark_naming_the_files_and_leaves_no_merge_behind() {
+    let (_dir, repo) = repo();
+    let place = drained(&repo);
+    let (one, two) = (child(&repo, "c1", "one"), child(&repo, "c2", "two"));
+    accepted(finishing("c1", &one, &place, true));
+    let merged = git(&repo, &["rev-parse", "main"]);
+    let message = remarked(finishing("c2", &two, &place, true));
+    assert!(
+        message.contains("f.txt") && message.contains("git merge main") && message.contains("git rebase main"),
+        "{message}"
+    );
+    for refused in ["reset --hard", "push --force", "branch -D"] {
+        assert!(!message.contains(refused), "{message}");
+    }
+    assert!(!halfway(&repo));
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+    assert_eq!(git(&repo, &["rev-parse", "main"]), merged);
+    // The agent brings the base in and resolves: the next final pass merges.
+    git(&two, &["merge", "-q", "-X", "ours", "-m", "chore: merge main", "main"]);
+    accepted(finishing("c2", &two, &place, true));
+    assert_eq!(git(&repo, &["show", "main:f.txt"]), "two");
+}
+
+#[test]
+fn a_refusal_of_a_git_hook_of_the_project_is_a_veto_with_its_output() {
+    for refusing in ["pre-merge-commit", "commit-msg"] {
+        let (_dir, repo) = repo();
+        let hooks = repo.join(".git/hooks");
+        git(&repo, &["config", "core.hooksPath", &hooks.to_string_lossy()]);
+        let place = drained(&repo);
+        let tree = child(&repo, "c1", "one");
+        let script = hooks.join(refusing);
+        std::fs::write(&script, "#!/bin/sh\necho no merges today\nexit 1\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let said = finishing("c1", &tree, &place, true).unwrap().unwrap();
+        assert_eq!(said["decision"], "veto", "{refusing}: {said}");
+        assert!(said["reason"].as_str().unwrap().contains("no merges today"), "{said}");
+        assert!(!halfway(&repo), "{refusing}");
+        assert_eq!(subject(&repo, "main"), "base");
+    }
+}
+
+#[test]
+fn a_merge_left_halfway_is_aborted_and_made_again() {
+    let (_dir, repo) = repo();
+    let place = drained(&repo);
+    let tree = child(&repo, "c1", "one");
+    git(&repo, &["merge", "-q", "--no-ff", "--no-commit", "loop-manager/c1"]);
+    assert!(halfway(&repo));
+    accepted(finishing("c1", &tree, &place, true));
+    assert!(!halfway(&repo));
+    assert_eq!(subject(&repo, "main"), "chore(merge): Fix the cart [w-1]");
+}

@@ -122,6 +122,10 @@ pub(super) enum StepFile {
         pool: Option<NonZeroU32>,
         #[serde(default)]
         on_item_failure: OnItemFailure,
+        /// Each child works on a branch of its own from the base of its rig, merged back on its final `pass`
+        /// (docs/design/config.md).
+        #[serde(default)]
+        worktree: bool,
         max_attempts: Option<NonZeroU32>,
         step_check_script_path: Option<String>,
     },
@@ -253,6 +257,8 @@ pub enum StepKind {
         /// The most beads in work at once; at least 1.
         pool: u32,
         on_item_failure: OnItemFailure,
+        /// Each child gets the branch `loop-manager/<child>` from the base of its rig, merged back on its final `pass`.
+        worktree: bool,
     },
     /// The step is a run of `formula` of the same project (docs/design/config.md): its outcome is the step's.
     Formula {

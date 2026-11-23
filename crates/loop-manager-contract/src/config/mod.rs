@@ -89,7 +89,8 @@ pub struct Watchdog {
 pub const MAX_ATTEMPTS: u32 = 20;
 
 /// The addons bundled with loop-manager (docs/design/config.md): name, the events they hook, and whether they are on with no
-/// `[builtin.<name>]` table. `worktree` has no table: it is on in a project with a formula of `worktree = true`.
+/// `[builtin.<name>]` table. `worktree` has no table: it is on in a project with a formula or a `drain` step of
+/// `worktree = true`.
 pub const BUNDLED: [(&str, &[&str], bool); 2] = [
     (
         "default-policy",
@@ -98,7 +99,13 @@ pub const BUNDLED: [(&str, &[&str], bool); 2] = [
     ),
     (
         "worktree",
-        &["run.preparing", "run.passed", "run.failed", "run.cancelled"],
+        &[
+            "run.preparing",
+            "run.finishing",
+            "run.passed",
+            "run.failed",
+            "run.cancelled",
+        ],
         false,
     ),
 ];
@@ -122,13 +129,17 @@ pub struct Place {
     /// first is the base, made from the worktree of the first of the others that exists, else from the HEAD of
     /// `dir`. Empty: the base is `dir` itself.
     pub lazy: Vec<String>,
-    /// The run gets a worktree of its own: its formula has `worktree = true`.
+    /// The run gets a worktree of its own: its formula has `worktree = true`, or it is a child of a `drain` step
+    /// with `worktree = true`.
     pub own: bool,
     /// The run continues the session of another (`continue_from`) and works where that one did.
     pub continued: bool,
     /// The directories of the other places where the run had children, when its formula has `worktree = true`:
     /// its lazy worktrees are there.
     pub rigs: Vec<PathBuf>,
+    /// The title of the run's bead when it is a child of a `drain` step with `worktree = true`: its branch merges
+    /// into its base on its final `pass`, under this title.
+    pub merge: Option<String>,
 }
 
 #[derive(Clone, Debug)]

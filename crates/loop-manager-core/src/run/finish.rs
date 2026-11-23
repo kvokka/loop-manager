@@ -229,6 +229,33 @@ impl RunHandler {
         }
     }
 
+    /// Whether a `pass` of `outcome` on the step of `row` would end the run (`final` of `run.finishing`, contracts
+    /// 1.3): the step is the last of the formula and no check of its row before it failed, which would send the run
+    /// back first.
+    pub(super) fn final_pass(&self, tx: &Tx<'_>, row: &Row, outcome: &Value) -> Result<bool, Error> {
+        let project = self.config.projects.iter().find(|p| p.name == row.project);
+        let formula = project.and_then(|p| p.formula(&row.formula).ok()).map(|(_, f)| f);
+        let Some(f) = formula.filter(|f| f.steps.last().is_some_and(|s| s.name == row.step)) else {
+            return Ok(false);
+        };
+        if outcome["result"] != "pass" {
+            return Ok(false);
+        }
+        let row_of = f.steps.iter().rev().take_while(|s| s.back_to.is_some());
+        for check in row_of.filter(|s| s.name != row.step) {
+            let failed: bool = tx.sql().query_row(
+                "SELECT COALESCE((SELECT json_extract(outcome, '$.result') = 'fail' FROM attempts WHERE run = ?1 \
+                 AND step = ?2 AND outcome IS NOT NULL AND skipped = 0 ORDER BY n DESC LIMIT 1), 0)",
+                params![row.id, check.name],
+                |r| r.get(0),
+            )?;
+            if failed {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// The run is past its last step. It ends at the step that ran last, whatever it skipped after it, and passes
     /// with that step's outcome; with no `pass` to pass with, it fails.
     fn ended(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
