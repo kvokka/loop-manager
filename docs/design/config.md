@@ -741,10 +741,10 @@ inputs that give one variable (`note-text` and `note_text`) are a config error. 
 built in this order, a later entry winning over an earlier one of the same name: `PATH`, `HOME` and `LANG` of the
 daemon, or its whole environment when `inherit_env` is true (the variables whose name and value are UTF-8; a scalar: the
 step's, else the project's `[exec]`, else the orchestrator's; default false); the tracker's variables
-([tracker-br](tracker-br.md#one-database-per-project)); the `env` of the orchestrator's `[exec]`, the project's `[exec]` and the step, merged by key
-(see "Environment values"), and over it the `env` of `run.preparing` hooks; then the variables of loop-manager: the
-tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and `LOOP_MANAGER_STEP_*` below),
-so an `env` key cannot replace them. A rig has no `[exec]`.
+([tracker-br](tracker-br.md#one-database-per-project)); the `env` of the orchestrator's `[exec]`, the project's `[exec]`
+and the step, merged by key (see "Environment values"), and over it the `env` of `run.preparing` hooks; then the
+variables of loop-manager: the tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and
+`LOOP_MANAGER_STEP_*` below), so an `env` key cannot replace them. A rig has no `[exec]`.
 
 A `drain` step gives every ready issue of its own under the run's issue, at any depth, a run of `formula`, on each read of
 the tracker, until none is left. A run of a rig owns the issues of its rig under its root; a run of the project root owns

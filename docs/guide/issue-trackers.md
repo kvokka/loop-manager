@@ -127,7 +127,7 @@ Every call of the adapter is one `br --json` process on the project's database, 
 
 `loop-manager issue create` sets only the parent. A `blocks` link is br's own:
 `br dep add <issue> <blocker>` makes `<issue>` wait for `<blocker>` (the type defaults to `blocks`; `--type` sets
-another). The ready set leaves `<issue>` out until `<blocker>` is closed, and `issue list` shows what holds it.
+another). The ready set leaves `<issue>` out until `<blocker>` is closed; `br dep list <issue>` shows what holds it.
 
 ### Inspect and repair a br tracker
 
