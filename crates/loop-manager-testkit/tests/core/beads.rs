@@ -569,3 +569,30 @@ async fn a_comment_of_a_run_without_a_bead_is_refused() {
     let token = w.driver.token(&run, 1).unwrap();
     assert_eq!(w.comment(&run, &token, "a note").await, "no_bead");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_comment_of_an_earlier_attempt_or_of_an_ended_run_is_refused_and_reaches_no_bead() {
+    use loop_manager_core::tracker::Tracker;
+    let pair = "name = \"pair\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        [[step]]\nkind = \"ai\"\nagent = \"fixer\"\n[[step]]\nkind = \"ai\"\nagent = \"fixer\"\n";
+    let w = world(&[FIX, &[("shop/formulas/pair.toml", pair)]].concat());
+    let bead = w.tracker.add(&[], None);
+    w.driver.script(slow_turn());
+    w.driver.script(slow_turn());
+    let run = w.start_bead("pair", Some("web"), json!(bead)).await.unwrap()["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let first = w.driver.token(&run, 1).unwrap();
+    w.finish_attempt(&run, 1, Verdict::Pass, "fixed").await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    let second = w.driver.token(&run, 2).unwrap();
+    assert_eq!(w.comment(&run, &first, "late").await, "stale_attempt");
+    w.finish_attempt(&run, 2, Verdict::Pass, "fixed").await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(w.states(&run).await.last().unwrap(), "passed");
+    assert_eq!(w.comment(&run, &second, "after the end").await, "run_terminal");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(w.tracker.lineage(&bead).await.unwrap().bead.comments, []);
+}
