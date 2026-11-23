@@ -435,3 +435,108 @@ async fn the_bases_of_a_root_run_are_its_workdir_and_its_worktree_in_each_rig_of
     let none = reader.bases(&config, &parent, |_, _| None).unwrap().unwrap();
     assert_eq!(none["api"], w.dir.path().join("shop/api"));
 }
+
+#[tokio::test]
+async fn a_child_of_a_formula_step_with_a_worktree_of_its_own_deletes_its_branch_merged_into_its_parent() {
+    let ship = (
+        "shop/formulas/ship.toml",
+        "name = \"ship\"\nworktree = true\n[[step]]\nname = \"sub\"\nkind = \"formula\"\nformula = \"leaf\"\n\
+         [[step]]\nname = \"after\"\nkind = \"ai\"\nagent = \"dev\"\n",
+    );
+    let leaf = (
+        "shop/formulas/leaf.toml",
+        "name = \"leaf\"\ninternal = true\nworktree = true\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+    );
+    let w = world(&[ship, leaf]);
+    let rig = w.dir.path().join("shop/web");
+    let go = Arc::new(Notify::new());
+    w.driver.script(held_turn(&go));
+    w.driver.script(hollow_turn());
+    let create = Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: "ship".into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: 0,
+        parent_run: None,
+        token: None,
+        continue_from: None,
+    };
+    let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
+    let parent = reply["run"].as_str().unwrap().to_owned();
+    let child = w.child(&parent, 0).await;
+    let tree = w.session_in(&child, 1).await;
+    let base = rig.join(".git/loop-manager/worktrees").join(&parent);
+    assert_eq!(tree, rig.join(".git/loop-manager/worktrees").join(&child));
+    git(&tree, &["commit", "-q", "--allow-empty", "-m", "work of the child"]);
+    // The branch of the child goes into the worktree of its parent, not into the checkout.
+    let branch = format!("loop-manager/{child}");
+    git(&base, &["merge", "-q", "--no-ff", "-m", "merge", &branch]);
+    w.finish_attempt(&child, 1, Verdict::Pass, "done").await;
+    go.notify_one();
+    w.until(Some(&child), "run.passed", 0).await;
+    gone(&tree).await;
+    branch_gone(&rig, &branch).await;
+    assert!(base.exists());
+}
+
+#[tokio::test]
+async fn a_child_elsewhere_than_its_parent_without_the_key_works_in_the_checkout_of_its_rig() {
+    let sweep = (
+        "shop/formulas/sweep.toml",
+        "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+         [[step]]\nkind = \"drain\"\nformula = \"work\"\n",
+    );
+    // `build` turns the bundled `worktree` on in the project; no run here has its key.
+    let w = world(&[sweep, WORK, BUILD]);
+    let rig = w.dir.path().join("shop/web");
+    let root = w.tracker.add(&[], None);
+    w.tracker.add_in("w", &[], Some(&root));
+    w.driver.script(hollow_turn());
+    let reply = w.start_bead("sweep", None, json!(root)).await.unwrap();
+    let parent = reply["run"].as_str().unwrap().to_owned();
+    let kid = w.child(&parent, 0).await;
+    // The base of a parent without the key is the checkout: it has no worktree in the rig of its child.
+    assert_eq!(w.session_in(&kid, 1).await, rig);
+    assert!(!rig.join(".git/loop-manager/worktrees").join(&parent).exists());
+}
+
+#[tokio::test]
+async fn a_run_a_session_starts_works_in_its_place_not_in_the_worktree_of_its_parent() {
+    let solo = (
+        "shop/formulas/solo.toml",
+        "name = \"solo\"\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+    );
+    let w = world(&[BUILD, solo]);
+    let rig = w.dir.path().join("shop/web");
+    let go = Arc::new(Notify::new());
+    w.driver.script(held_turn(&go));
+    w.driver.script(hollow_turn());
+    let create = |formula: &str, parent: Option<String>, token: Option<String>| Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: formula.into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: u32::from(parent.is_some()),
+        parent_run: parent,
+        token,
+        continue_from: None,
+    };
+    let reply = w
+        .core
+        .send(None, Msg::Create(create("build", None, None)))
+        .await
+        .unwrap();
+    let parent = reply["run"].as_str().unwrap().to_owned();
+    let tree = w.session_in(&parent, 1).await;
+    assert_eq!(tree, rig.join(".git/loop-manager/worktrees").join(&parent));
+    // `loop-manager run start` in the session of the parent, which is in an `ai` step.
+    let token = w.driver.token(&parent, 1);
+    let msg = Msg::Create(create("solo", Some(parent.clone()), token));
+    let reply = w.core.send(None, msg).await.unwrap();
+    let kid = reply["run"].as_str().unwrap().to_owned();
+    assert_eq!(w.session_in(&kid, 1).await, rig);
+    go.notify_one();
+}

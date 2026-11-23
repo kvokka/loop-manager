@@ -10,7 +10,9 @@ use rusqlite::{OptionalExtension, params};
 use std::path::PathBuf;
 
 /// The step parent of a run whose parent is `parent`: the parent while it is in a `drain` or `formula` step, which
-/// made the run; a run a session started has its parent in an `ai` step and inherits nothing.
+/// made the run; a run a session started has its parent in an `ai` step and inherits nothing. At the end of a child
+/// of a `formula` step its parent is still in that step: it waits for the hooks of its `run.finishing`, `worktree`'s
+/// among them, so the end of the child still finds its base.
 pub(super) fn step_parent(tx: &Tx<'_>, parent: Option<&str>) -> Result<Option<String>, Error> {
     let Some(parent) = parent else {
         return Ok(None);
@@ -112,8 +114,8 @@ fn merged(tx: &Tx<'_>, id: &str, parent: Option<&str>) -> Result<Option<String>,
 }
 
 /// Whether run `id` works apart from its place's own directory, so `max_writers` does not count it: in a worktree of
-/// its own (by its formula or the `drain` step that made it), in a lazy base of an ancestor, or in a workdir it inherited from an ancestor elsewhere. A continued run
-/// counts by its formula alone.
+/// its own (by its formula or the `drain` step that made it), in a lazy base of an ancestor, or in a workdir it
+/// inherited from an ancestor elsewhere. A continued run counts by its formula alone.
 pub(super) fn isolated(tx: &Tx<'_>, project: &Project, id: &str) -> Result<bool, Error> {
     let (rig, formula, parent, continued) = facts(tx, id)?;
     let own = keyed(project, &formula);
