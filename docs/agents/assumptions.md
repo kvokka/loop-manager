@@ -95,7 +95,8 @@ The behaviour itself is described in the document named under each heading; this
 - The outcome of a run is that of its last step; the finisher's data is visible to the next steps, triggers and the
   waiting parent.
 - The finisher is a CLI command with the attempt token; the finisher of a stale attempt is refused.
-- A remark of a `run.finishing` hook is a return within the step, bounded by the ceiling of invariant 16.
+- A remark of a `run.finishing` hook on an `ai` step is a return within the step, bounded by the ceiling of invariant
+  16; on another step it is a new round (decision 157).
 - A run started by a trigger inherits the correlation of the event; a human's write in the tracker starts a new
   chain. The depth limit is 10; `bead.ready` adds no depth.
 - While a run of the same trigger with the same input key is alive, a new firing is skipped (`trigger.skipped`).
