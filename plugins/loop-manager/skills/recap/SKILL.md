@@ -11,28 +11,27 @@ use [awaiting](../awaiting/SKILL.md) to surface the question while the answer ca
 ## Gather the evidence
 
 For run IDs, use `loop-manager run show <run>` on the user's daemon. Read the project, inputs, outcome,
-step results and artifact references. If the run has an issue, locate its project directory with
-`loop-manager project list --project <project>`. For issue IDs in a known tracker, start there directly.
-For runs without an issue, use the step outcomes and referenced artifacts.
+step results and artifact references. For runs without an issue, use the step outcomes and referenced artifacts.
 
-For a br tracker, group the requested issues by project. Read each description, status and full thread once:
+For each issue, of a run or named by the user, read its description, status, labels and full thread once from
+its project's tracker:
 
 ```sh
-BEADS_DIR='<project dir>/.beads' br show <issue> <another-issue> --format toon
+loop-manager issue show <issue> --project <project>
 ```
 
 Where delegated model selection is available, give the read-only extraction to an inexpensive model.
-Pass the tracker, IDs and user's focus. Have it read the source directly and return compact TOON findings
+Pass the project, issue IDs and user's focus. Have it read the issues directly and return compact TOON findings
 with source IDs. Batch related issues that fit its context. Otherwise do the extraction in the current session.
 For long threads, select the needed comments and return TOON:
 
 ```sh
-BEADS_DIR='<project dir>/.beads' br comments "$issue" --json |
-  jq --argjson ids "$comment_ids" 'map(select(.id as $id | $ids | index($id) != null))' |
+loop-manager issue show "$issue" --project "$project" --json |
+  jq --argjson at "$positions" '[.comments[$at[]]]' |
   loop-manager format
 ```
 
-Here `comment_ids` is a JSON array of numeric comment IDs.
+Here `positions` is a JSON array of comment positions, oldest first from 0.
 
 ## Brief the user
 
@@ -43,4 +42,4 @@ or lessons when they explain a result or a recurring difficulty, whatever headin
 
 Default to a few sentences in the user's language. Lead with anything the user needs to decide, then give the
 outcome, the most important difficulty and whether it was resolved. For several issues, identify each outcome
-and report shared patterns once. On request, expand with the reasoning, evidence, remaining work and comment IDs.
+and report shared patterns once. On request, expand with the reasoning, evidence, remaining work and comment positions.
