@@ -745,7 +745,8 @@ the core sets the actor of an exec step and hands that of a session to the adapt
   bead after the call, not by the exit code text, [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)); `OwnerMismatch { holder }` (conditional release or close
   found another owner, nothing changed); `Unavailable { text }` (transient: retried by the effect queue with
   backoff, `tracker.sync_failed` on every failure); `Invalid { text }` (permanent).
-- `release` and `close` are conditional on `assignee == owner`; br 0.7.6 has neither a conditional close nor a release,
+- `release` and `close` are conditional on `assignee == owner`. A release clears the assignee and sets `open`, but a
+  closed bead keeps its status: a release never reopens a bead. br 0.7.6 has neither a conditional close nor a release,
   so the adapter reads, compares and writes. A `close` of a parent with open children leaves it open: br refuses it, and
   the adapter releases the bead instead, so it does not stay `in_progress` behind a terminal run. The window between
   read and write is open only to humans (the daemon is the only claimer, invariant 3). An owner found changed before the

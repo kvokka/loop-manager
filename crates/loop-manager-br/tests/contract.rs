@@ -150,6 +150,23 @@ async fn repeating_a_close_keeps_the_bead_closed_and_checks_its_owner() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn releasing_a_bead_closed_by_someone_else_clears_its_owner_and_keeps_it_closed() {
+    let (dir, t) = tracker();
+    let id = create(dir.path(), "Closed by hand", &["-t", "epic", "-l", "auto"]);
+    let owner = "loop-manager:run_1";
+    t.claim(owner, &id).await.unwrap();
+    br(dir.path(), &["close", &id, "-r", "done by hand"]);
+    t.release(owner, &id).await.unwrap();
+    let bead = t.lineage(&id).await.unwrap().bead.bead;
+    assert_eq!(
+        (bead.status.as_str(), bead.assignee),
+        ("closed", None),
+        "release never reopens a bead"
+    );
+    assert!(t.ready().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_status_of_the_project_policy_passes_release_and_close_as_text() {
     let (dir, t) = tracker();
     let policy = "workflow:\n  strict: true\n  statuses: [open, in_progress, rework, blocked, deferred, closed]\n";

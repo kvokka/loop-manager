@@ -230,16 +230,11 @@ impl Tracker for Br {
             // br has no release: an update conditional on the bead not having changed since the owner was read.
             for _ in 0..3 {
                 let bead = self.held(owner, id).await?;
-                let args = [
-                    "update",
-                    id,
-                    "-s",
-                    "open",
-                    "--assignee",
-                    "",
-                    "--if-unchanged",
-                    &bead.updated_at,
-                ];
+                let mut args = vec!["update", id, "--assignee", "", "--if-unchanged", &bead.updated_at];
+                // A closed bead keeps its status: the run lets go of what it owns, never reopens a bead.
+                if bead.status != "closed" {
+                    args.extend(["-s", "open"]);
+                }
                 match self.br(owner, &args).await {
                     Err(Fail(Some(6), _)) => {}
                     other => return Ok(other.map(drop)?),

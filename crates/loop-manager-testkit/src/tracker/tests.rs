@@ -67,3 +67,15 @@ async fn waiting_gives_the_open_beads_under_the_root_held_by_a_blocker_of_their_
     assert!(t.waiting(&root).await.unwrap().iter().all(|w| w.blocker != outside));
     assert_eq!(t.waiting("b-404").await, Err(TrackerError::NotFound));
 }
+
+#[tokio::test]
+async fn releasing_a_bead_closed_by_someone_else_clears_its_owner_and_keeps_it_closed() {
+    let t = MemoryTracker::new();
+    let id = t.add(&[], None);
+    t.claim("loop-manager:r1", &id).await.unwrap();
+    t.close_as(&id, "human");
+    t.release("loop-manager:r1", &id).await.unwrap();
+    let bead = t.bead(&id).unwrap();
+    assert_eq!((bead.status.as_str(), bead.assignee), ("closed", None));
+    assert!(t.ready().await.unwrap().is_empty());
+}

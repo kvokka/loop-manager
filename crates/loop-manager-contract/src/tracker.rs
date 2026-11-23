@@ -116,7 +116,7 @@ impl fmt::Display for TrackerError {
 /// The operations of contracts 5.1, those the core calls; `owner` is `loop-manager:<run id>`.
 pub trait Tracker: Send + Sync {
     fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>>;
-    /// Conditional on `assignee == owner`.
+    /// Conditional on `assignee == owner`; clears the assignee and sets `open`, but a closed bead stays closed.
     fn release<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
     /// Conditional on `assignee == owner`.
     fn close<'a>(&'a self, owner: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;

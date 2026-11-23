@@ -108,6 +108,16 @@ impl MemoryTracker {
         self.edit(id, &["status"], |b| status.clone_into(&mut b.status));
     }
 
+    /// `actor` closes `id` whoever holds it, as `br close` does; the bead keeps its assignee.
+    pub fn close_as(&self, id: &str, actor: &str) {
+        let mut state = self.lock();
+        if let Some(b) = state.beads.iter_mut().find(|b| b.id == id) {
+            "closed".clone_into(&mut b.status);
+            b.closed_at = Some(b.updated_at.clone());
+            state.record(id, "closed", actor, &[]);
+        }
+    }
+
     /// A human makes `id` depend on `blocker` with the blocking type `kind` (`blocks`, `conditional-blocks`,
     /// `waits-for`), as `br dep add -t` does.
     pub fn depend(&self, id: &str, blocker: &str, kind: &str) {
@@ -277,7 +287,9 @@ impl Tracker for MemoryTracker {
             self.with(id, ("updated", owner), |b| {
                 held(b, owner)?;
                 b.assignee = None;
-                b.status = "open".to_owned();
+                if b.status != "closed" {
+                    b.status = "open".to_owned();
+                }
                 Ok(())
             })
         })

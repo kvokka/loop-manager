@@ -162,7 +162,7 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   owner succeeds without a write; exit 3 from a concurrent close is checked against the bead's status before a
   release. Replaying a close never reopens a closed bead.
 - A status the project's `.beads/policy.yaml` declares (such as `rework`) passes through the adapter as text. A claim
-  sets `in_progress`, a release sets `open`, and a close goes from any status.
+  sets `in_progress`, a release sets `open` (a closed bead stays closed), and a close goes from any status.
 - `br show` does not find a bead by `external_ref`: the key of a creation is looked up in the whole list.
 - The exit code of a busy claim differs between versions: the adapter branches on the exit code (4), not on text.
 - `br delete` of a parent removes the link: its children have no parent then, and the line of parents a prompt shows
