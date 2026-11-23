@@ -33,7 +33,7 @@ KISS".
     Each repository keeps the feature on one branch over every round, so `feature` has no `worktree`, which is a branch
     per run. Every script can run again with the same result;
   - formula `cleanup`: closes the open pull requests of a feature, deletes its branches, takes each repository back to
-    its default branch as the remote has it and closes its issue.
+    its default branch as the remote has it and closes its issue and the issues under it.
 - `root/` holds the configuration and the tracker of the project; its repository, `[root] path`, is `gate-demo/`.
   `loop-manager.toml` sets the models, `feedback_from` (`kvokka-agent`; put your login there) and two triggers: `cleanup` on
   `run.cancelled` of a `feature` run, and on nothing else (a failed run is left for a human to look into), and
@@ -74,7 +74,7 @@ without a model and without GitHub: the real `codex` on fake model APIs, a fake 
 ## Run
 
 You need `loop-manager`, a login of `codex`, `gh` logged in as an account that may push to the repositories (or its token in
-`GITHUB_TOKEN`), `br` and `jq`.
+`GITHUB_TOKEN`), the tracker [beads_rust](../../docs/guide/issue-trackers.md) and `jq`.
 `mise install` in this directory installs all but `loop-manager` (mise is a convenience, any install does). The repositories
 `gate-demo`, `gate-demo-backend` and `gate-demo-frontend` must exist under the GitHub account `OWNER`
 (`kvokka-agent` by default), each with a default branch. The run spends real tokens and opens real pull requests.

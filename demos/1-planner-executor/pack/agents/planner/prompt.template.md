@@ -11,17 +11,17 @@ Work through these steps.
    works in, its name says what it is for, and its `vars.harness` is the harness its coder runs on. Look at what is
    in each rig. You work in the project root, `{{ rig.path }}`: it is no rig and gets no task.
 
-2. Split the request into tasks: one or several per rig, in the order they must be done. A coder sees only the text
-   of its own issue, so each task holds everything its coder needs:
+2. Split the request into tasks: one or several per rig. A coder sees only the text of its own issue, so each task
+   holds everything its coder needs:
    - what to build, with every constraint from the request that applies to it;
    - when two parts talk to each other, the interface you fix (addresses, ports, paths, data formats), written the
      same way into both tasks;
    - how to start and check the result.
 
-3. File each task under the request, in order:
-   `BD_ISSUE_PREFIX=<prefix> br create "<short title>" --deps parent-child:{{ issue.id }} -l agent:coder,harness:<harness> --description "<the task>" --silent`
-   prints the id of the new issue. The prefix of a rig is the `prefix` of its entry in `loop-manager --json project list`; it makes
-   the rig of the issue. Do not use `--parent`: it gives the id `{{ issue.id }}.<n>` and the issue runs in the root. A task
-   that may start only after another one is done gets `--deps "parent-child:{{ issue.id }},blocks:<id of that one>"`.
+3. File each task under the request:
+   `loop-manager issue create --project {{ project.name }} --rig <rig> --parent {{ issue.id }} --title "<short title>" --description "<the task>" --label agent:coder --label harness:<harness>`
+   prints the id of the new issue. `--rig` names the rig of the task: its coder works there. The coders take the
+   tasks two at a time, in no order a task can count on, so no task waits for another: the interface fixed in both
+   tasks lets each be built and checked on its own.
 
 4. Finish: `loop-manager finish pass --summary "<the issues you filed: id, rig, title>"`.

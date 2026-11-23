@@ -31,8 +31,8 @@ Every agent runs on codex, on the openai models: `planner` on `sol`, `coder` on 
 
 ## Run
 
-You need `loop-manager`, a login of `codex`, `br`, `jq`, `rumdl` and `agent-browser` with a browser: `agent-browser install`
-fetches Chrome once; where Chrome has no build (Linux on arm64), set `executablePath` of a Chromium in
+You need `loop-manager`, a login of `codex`, the tracker [beads_rust](../../docs/guide/issue-trackers.md), `jq`,
+`rumdl` and `agent-browser` with a browser: `agent-browser install` fetches Chrome once; where Chrome has no build (Linux on arm64), set `executablePath` of a Chromium in
 `~/.agent-browser/config.json`. `mise install` in this directory installs all but `loop-manager` and the browser (mise is a
 convenience, any install does). The run spends real tokens.
 
@@ -42,9 +42,9 @@ loop-manager config check --config root/config.toml   # the pack and the project
 ```
 
 `run.sh` takes some minutes and writes `RESULT.md`: when and on what it ran, how many rounds of the checks it took,
-the issue tree, the runs and the outcome. Everything a run creates is in `.gitignore`; `git clean -ffdX -- .` clears
-it for the next run. Compare with the author's run: `frontend-example/`, `backend-example/` and
-`RESULT-example.md`, with its date, versions and models. Your result differs: the agents decide anew each time.
+the issues under the request (`loop-manager issue list`), the runs and the outcome. Everything a run creates is in
+`.gitignore`; `git clean -ffdX -- .` clears it for the next run. Compare with the author's run: `frontend-example/`,
+`backend-example/` and `RESULT-example.md`, with its date, versions and models. Your result differs: the agents decide anew each time.
 
 The author's runs (2026-11-16, two in a row, the second in `RESULT-example.md`) each passed in one round: the
 format check and `qa` in the browser found nothing to send back. An earlier one (2026-11-15) needed two rounds: the

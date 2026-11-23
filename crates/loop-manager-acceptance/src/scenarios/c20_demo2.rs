@@ -22,8 +22,8 @@ const WITHIN: Duration = Duration::from_secs(120);
 /// its prefix `f`. `{dir}` keeps the state.
 const PLAN: &str = "set -e\nissue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
     if [ -e {dir}/planned ]; then title='Fix the README'; else title='Write a README'; touch {dir}/planned; fi\n\
-    BD_ISSUE_PREFIX=f br create \"$title\" --deps \"parent-child:$issue\" -l agent:coder --description \"$title.\" --silent \
-    >> {dir}/issues\n{loop_manager} finish pass --summary \"$title\"\n";
+    {loop_manager} issue create --project multirepo-qa --rig frontend --parent \"$issue\" --title \"$title\" \
+    --description \"$title.\" --label agent:coder >> {dir}/issues\n{loop_manager} finish pass --summary \"$title\"\n";
 
 /// In its rig, the first coder writes a reference without a definition, which rumdl cannot fix (MD052); the second
 /// fixes it.

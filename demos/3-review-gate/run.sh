@@ -44,6 +44,8 @@ export XDG_STATE_HOME="$here/.loop-manager/state" XDG_CONFIG_HOME="$here/.loop-m
 # A socket path has a length limit: it goes to a short temporary directory.
 LOOP_MANAGER_SOCKET="$(mktemp -d)/loop-manager.sock"
 export LOOP_MANAGER_SOCKET
+# The project's tracker, br's, in root/.beads; the runs reach it through loop-manager, and a look into it after the run
+# goes as docs/guide/issue-trackers.md#inspect-and-repair-a-br-tracker says.
 (cd root && br init -q >/dev/null)
 # The commit of the demo and of loop-manager, before the run can change the tree.
 sha=$(git describe --always --dirty 2>/dev/null || echo unknown)

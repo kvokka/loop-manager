@@ -20,9 +20,11 @@ pool = 2                                    # two issues in work at once
 [[step]]
 name = "report"
 kind = "exec"
-command = ["sh", "-c", """
-br dep tree "$LOOP_MANAGER_ISSUE" --direction up --no-color
+command = ["sh", "-c", '''
+set -eu
+project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
+issues=$(loop-manager --json issue list --project "$project" "$LOOP_MANAGER_ISSUE")
+printf '%s' "$issues" | jq -r '.[] | "\(.id): \(.title) [\(.status)]"'
 echo "drain: $LOOP_MANAGER_STEP_WORK_DATA"
-br show "$LOOP_MANAGER_ISSUE" --json | jq -e '(if type == "array" then .[0] else . end).dependents // []
-  | map(select(.dependency_type == "parent-child")) | length > 0 and all(.status == "closed")' >/dev/null
-"""]
+printf '%s' "$issues" | jq -e 'length > 0 and all(.status == "closed")' >/dev/null
+''']

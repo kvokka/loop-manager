@@ -26,9 +26,9 @@ The addon serves claude only; there is none for codex yet, so `indexer` runs wit
 
 ## Run
 
-You need `loop-manager`, logins of `claude` and `codex`, `br` and `jq`; `mise install` in this directory installs all but
-`loop-manager`. The addon's hook calls `jq`, `br` and `loop-manager` too. The run spends real tokens on the cheapest models: claude
-`haiku` and codex `luna`.
+You need `loop-manager`, logins of `claude` and `codex`, the tracker [beads_rust](../../docs/guide/issue-trackers.md)
+and `jq`; `mise install` in this directory installs all but `loop-manager`. The addon's hook calls `jq`, `git` and
+`loop-manager` too. The run spends real tokens on the cheapest models: claude `haiku` and codex `luna`.
 
 ```sh
 loop-manager config check --config root/config.toml   # the pack, the project and the addon load
@@ -73,7 +73,8 @@ with the layer that set it.
 
 ## What to check
 
-- `br comments list <issue>` in `root/` (the issue is in `RESULT.md`): the agent's summary of its work, written when it
-  wrapped up.
+- The comments on the issue of `glossarist`, in `RESULT.md`: the agent's summary of its work, written when it wrapped
+  up. The tracker stays in `root/` after the run, its daemon stopped: [issue trackers](../../docs/guide/issue-trackers.md)
+  says how to look into it directly.
 - `.loop-manager/state/loop-manager/addons/context-budget/`: the files the addon keeps for each session,
   `<session>.*`.

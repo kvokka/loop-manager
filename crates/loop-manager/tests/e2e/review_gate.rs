@@ -121,7 +121,8 @@ impl Gate {
         let plan = format!(
             "set -e\nif [ -e {} ]; then {loop_manager} finish fail --summary refused; exit; fi\n\
              issue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
-             BD_ISSUE_PREFIX=api br create Greet --deps parent-child:$issue -l agent:coder --description Greet --silent\n\
+             {loop_manager} issue create --project {PROJECT} --rig backend --parent $issue --title Greet \
+             --description Greet --label agent:coder\n\
              {loop_manager} finish pass --summary planned\n",
             refuse.display()
         );
@@ -264,6 +265,12 @@ async fn a_merge_of_the_root_pull_request_passes_the_review() {
     let merged = view["outcome"]["data"]["stdout"].as_str().unwrap();
     assert!(merged.contains("MY_AWESOME_ENV_VAR is something"), "{merged}");
     assert_eq!(g.backend_pr(&view).1, "MERGED", "{view}");
+    // `pr` titled the pull requests with the title of the feature's issue.
+    let calls = fs::read_to_string(g.d.dir.path().join("path/github/calls")).unwrap();
+    let titled = calls
+        .lines()
+        .filter(|c| c.starts_with("pr create") && c.contains(" -t Greet the visitor -F "));
+    assert_eq!(titled.count(), 2, "{calls}");
     // `merge` took each repository back to its default branch.
     for repo in REPOS {
         assert_eq!(git(&g.demo(repo), &["branch", "--show-current"]), "main\n", "{repo}");
@@ -338,6 +345,16 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
     assert_eq!(git(&root, &["ls-remote", "--heads", "origin", &branch]), "");
     assert_eq!(git(&root, &["branch", "--show-current"]), "main\n");
     assert_eq!(g.backend_pr(&view).1, "CLOSED", "{view}");
+    // The feature's issue is closed, and the backend's issue under it first.
+    let issue = view["issue"].as_str().unwrap();
+    let shown = g.d.get(&format!("/v1/projects/{PROJECT}/issues/{issue}")).await;
+    let under = g.d.get(&format!("/v1/projects/{PROJECT}/issues?under={issue}")).await;
+    let statuses: Vec<&Value> = under.as_array().unwrap().iter().map(|i| &i["status"]).collect();
+    assert_eq!(
+        (&shown["status"], statuses),
+        (&json!("closed"), vec![&json!("closed")]),
+        "{shown} {under}"
+    );
 
     // A failed feature is left as it is: no cleanup.
     fs::write(g.tools.path().join("refuse"), "").unwrap();

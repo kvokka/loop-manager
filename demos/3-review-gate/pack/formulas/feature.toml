@@ -70,7 +70,7 @@ set -eu
 branch="feature/$LOOP_MANAGER_ISSUE"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
-title=$(cd "$(printf '%s' "$places" | jq -r '.[0].dir')" && br show "$LOOP_MANAGER_ISSUE" --json | jq -r '.[0].title')
+title=$(loop-manager --json issue show --project "$project" "$LOOP_MANAGER_ISSUE" | jq -r .title)
 page=$(mktemp)
 printf '# %s\n\nThe feature `%s`. Its pull requests in the other repositories:\n\n' "$title" "$LOOP_MANAGER_ISSUE" >"$page"
 # The work of the repository in $1 on the branch of the feature, pushed, with its pull request; prints its address.

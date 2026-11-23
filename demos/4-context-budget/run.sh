@@ -20,6 +20,8 @@ export XDG_STATE_HOME="$here/.loop-manager/state" XDG_CONFIG_HOME="$here/.loop-m
 # A socket path has a length limit: it goes to a short temporary directory.
 LOOP_MANAGER_SOCKET="$(mktemp -d)/loop-manager.sock"
 export LOOP_MANAGER_SOCKET
+# The project's tracker, br's, in root/.beads; the runs reach it through loop-manager, and a look into it after the run
+# goes as docs/guide/issue-trackers.md#inspect-and-repair-a-br-tracker says.
 (cd root && br init -q >/dev/null)
 # What the agents read: the documentation of loop-manager as this checkout has it, about 100000 tokens.
 cp -R ../../docs library/docs
@@ -46,7 +48,8 @@ for agent in glossarist indexer; do
   "$loop_manager" --json run show "$(cat .loop-manager/$agent.run)" | jq -r .issue >".loop-manager/$agent.issue"
 done
 # The demo shows the wrap-up of the glossarist at the addon's soft limit: an issue without its summary comment fails it.
-(cd root && br comments list --json "$(cat ../.loop-manager/glossarist.issue)") >.loop-manager/glossarist.comments
+"$loop_manager" --json issue show --project library "$(cat .loop-manager/glossarist.issue)" | jq .comments \
+  >.loop-manager/glossarist.comments
 jq -e 'length > 0' .loop-manager/glossarist.comments >/dev/null || result=failed
 
 versions="loop-manager-$("$loop_manager" --version | cut -d' ' -f2)@$sha"
@@ -71,7 +74,7 @@ done
     echo "The request: \"$(if [ $agent = glossarist ]; then echo "$glossary"; else echo "$index"; fi)\"."
     echo
     if [ $agent = glossarist ]; then
-      echo "The comments on its issue \`$(cat .loop-manager/$agent.issue)\` (\`br comments list\`):"
+      echo "The comments on its issue \`$(cat .loop-manager/$agent.issue)\` (\`loop-manager issue show\`):"
       echo
       echo '```'
       jq -r '.[] | "[\(.author)] at \(.created_at)\n\(.text)\n"' .loop-manager/glossarist.comments

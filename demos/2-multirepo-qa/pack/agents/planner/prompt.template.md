@@ -17,19 +17,19 @@ Work through these steps.
    works in, and its name says what it is for. Look at what is in each rig. You work in the project root,
    `{{ rig.path }}`: it is no rig and gets no task.
 
-2. With no remarks, split the request into tasks: one or several per rig, in the order they must be done. With
-   remarks, the issues filed before are done (`br list --all --tree`): the tasks are only the fixes the remarks call
-   for, each in the rig where the fault is. A coder sees only the text of its own issue, so each task holds everything
-   its coder needs:
+2. With no remarks, split the request into tasks: one or several per rig. With remarks, the issues filed before are
+   done (`loop-manager issue list --project {{ project.name }} {{ issue.id }}`): the tasks are only the fixes the
+   remarks call for, each in the rig where the fault is. A coder sees only the text of its own issue, so each task
+   holds everything its coder needs:
    - what to build or fix, with every constraint from the request that applies to it;
    - when two parts talk to each other, the interface you fix (addresses, ports, paths, data formats), written the
      same way into both tasks;
    - how to start and check the result, and a README in the rig that says so.
 
-3. File each task under the request, in order:
-   `BD_ISSUE_PREFIX=<prefix> br create "<short title>" --deps parent-child:{{ issue.id }} -l agent:coder --description "<the task>" --silent`
-   prints the id of the new issue. The prefix of a rig is the `prefix` of its entry in `loop-manager --json project list`; it makes
-   the rig of the issue. Do not use `--parent`: it gives the id `{{ issue.id }}.<n>` and the issue runs in the root. A task
-   that may start only after another one is done gets `--deps "parent-child:{{ issue.id }},blocks:<id of that one>"`.
+3. File each task under the request:
+   `loop-manager issue create --project {{ project.name }} --rig <rig> --parent {{ issue.id }} --title "<short title>" --description "<the task>" --label agent:coder`
+   prints the id of the new issue. `--rig` names the rig of the task: its coder works there. The coders take the
+   tasks two at a time, in no order a task can count on, so no task waits for another: the interface fixed in both
+   tasks lets each be built and checked on its own.
 
 4. Finish: `loop-manager finish pass --summary "<the issues you filed: id, rig, title>"`.

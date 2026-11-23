@@ -1,5 +1,5 @@
 name = "cleanup"
-description = "Clears what a cancelled feature left: its open pull requests, its branches and its issue"
+description = "Clears what a cancelled feature left: its open pull requests, its branches and its issues"
 
 [inputs]
 issue = { type = "string", required = true }   # the issue of the cancelled feature, which nothing holds any more
@@ -22,9 +22,10 @@ for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); 
   git reset -q --hard "origin/$base"    # a feature cancelled before `pr` left its commits here
   ! git show-ref -q --verify "refs/heads/$branch" || git branch -q -D "$branch"
 done
-cd "$(printf '%s' "$places" | jq -r '.[0].dir')"
-# The issues under it stay as they are: nothing gives them out once their root is closed.
-[ "$(br show "$LOOP_MANAGER_INPUT_ISSUE" --json | jq -r '.[0].status')" = closed ] ||
-  br close "$LOOP_MANAGER_INPUT_ISSUE" --force --reason "the feature was cancelled" --json >/dev/null
+# The issues under it close first, the newest first: a parent with an open child is not closed. A closed one stays so.
+for issue in $(loop-manager --json issue list --project "$project" "$LOOP_MANAGER_INPUT_ISSUE" |
+  jq -r 'reverse | .[] | select(.status != "closed") | .id') "$LOOP_MANAGER_INPUT_ISSUE"; do
+  loop-manager issue close --project "$project" --reason "the feature was cancelled" "$issue" >/dev/null
+done
 echo "cleanup: $LOOP_MANAGER_INPUT_ISSUE"
 ''']

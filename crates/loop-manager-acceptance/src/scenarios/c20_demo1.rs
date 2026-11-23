@@ -13,12 +13,13 @@ use std::{fs, path::Path, process::Command, sync::Arc, time::Duration};
 
 const WITHIN: Duration = Duration::from_secs(120);
 
-/// An issue per rig under the request: `frontend` by its derived prefix `f`, `backend` by its `api`; `{dir}` keeps
-/// their ids.
+/// An issue per rig under the request, as the planner's prompt files it: `frontend` gets its derived prefix `f`,
+/// `backend` its `api`; `{dir}` keeps their ids.
 const PLAN: &str = "set -e\nissue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
-    new() { BD_ISSUE_PREFIX=$1 br create \"$2\" --deps \"parent-child:$issue\" -l \"agent:coder,harness:$3\" \
-    --description \"$2.\" --silent >> {dir}/issues; }\n\
-    new f 'Write the page' claude\nnew api 'Write the server' codex\n{loop_manager} finish pass --summary planned\n";
+    new() { {loop_manager} issue create --project planner-executor --rig $1 --parent \"$issue\" --title \"$2\" \
+    --description \"$2.\" --label agent:coder --label \"harness:$3\" >> {dir}/issues; }\n\
+    new frontend 'Write the page' claude\nnew backend 'Write the server' codex\n\
+    {loop_manager} finish pass --summary planned\n";
 
 const CODE: &str = "set -e\necho done > DONE.md\n{loop_manager} finish pass --summary done\n";
 
@@ -104,10 +105,10 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
         panic!("{issues:?}")
     };
     assert!(page.starts_with("f-") && server.starts_with("api-"), "{issues:?}");
-    // The last step, `report`, shows the tree of the request with both issues closed.
-    let tree = view["outcome"]["data"]["stdout"].as_str().unwrap_or_default();
+    // The last step, `report`, lists the issues under the request, both closed.
+    let listed = view["outcome"]["data"]["stdout"].as_str().unwrap_or_default();
     for (id, title) in [(page, "Write the page"), (server, "Write the server")] {
-        assert!(tree.contains(&format!("{id}: {title} [P2] [closed]")), "{view}");
+        assert!(listed.contains(&format!("{id}: {title} [closed]")), "{view}");
     }
     for rig in ["frontend", "backend"] {
         assert!(d.path(&format!("demo/{rig}/DONE.md")).exists(), "{rig}: {view}");
