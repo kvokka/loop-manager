@@ -27,10 +27,14 @@ struct Acp {
 
 impl Acp {
     fn spawn(d: &Daemon) -> Self {
-        let mut child = tokio::process::Command::from(common::loop_manager())
+        let mut cmd = tokio::process::Command::from(common::loop_manager());
+        cmd.arg("acp").env("LOOP_MANAGER_SOCKET", d.socket());
+        Self::from_command(cmd)
+    }
+
+    fn from_command(mut cmd: tokio::process::Command) -> Self {
+        let mut child = cmd
             .kill_on_drop(true)
-            .arg("acp")
-            .env("LOOP_MANAGER_SOCKET", d.socket())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

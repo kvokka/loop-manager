@@ -37,15 +37,31 @@ my repository that adds our review checklist to the agent’s prompt.”
 
 ## Follow a run in T3 Code
 
-Ask “Show the T3 run card for run_42”. The card follows the current round until you choose an earlier
-round. Select an agent name to open its recorded harness session inside the card. The viewer shows
-prompts, replies, tool inputs and results, and follows an active session. **Back to steps** returns
-to your selected round. Resumed attempts share a link in the same step and round. Replacement sessions
-have separate links. Steps without a recorded session have a plain label.
+Ask “Show the T3 run card for run_42”. Use **‹ Round N ›** to move between executed rounds.
+Select an agent name to open that step's native T3 thread. Opening the card and switching rounds
+only read run data. On the first click T3 imports the selected working session into the corresponding
+T3 project. Future clicks reuse it. Resumes within a step and round share a thread, while replacement
+sessions and other rounds have their own links. Beadless runs work too.
 
-All navigation is local to the T3 card. Viewing a run creates no project or chat thread, requires no ACP
-provider import, and works for runs without a bead. T3 Code is the supported frontend for this plugin.
-The terminal interfaces to LM are documented in [frontends](../docs/api/frontends.md).
+The link uses T3's HTTPS thread URL so desktop, web and iPhone clients can resolve the same thread.
+T3 may ask for confirmation on import or when opening the link. If the browser needs a fresh click
+after a long import, click the agent again. T3 0.1.11 imports a snapshot of the messages available at that point. Opening an already imported
+thread reuses its history.
+
+### Enable native thread links
+
+On the T3 host, install Node.js 22.4 or newer and the `t3` CLI on the plugin process's PATH. In
+**Settings → Providers → Add provider → Show more → Local ACP command**, use the executable
+`sessions.py` in the installed `t3-run-card` directory. Give it two literal argument rows, `--socket`
+and the absolute LM socket path. Register one instance per daemon. If upgrading an existing LM
+working-session provider, keep its instance ID and change its command. When using a versioned
+installation, update the provider path after upgrading. Add the LM project root to T3 once
+(`t3 project add /path/to/project`). The card finds the provider by executable and socket, and finds
+the project by workspace directory. It uses the local T3 runtime in `T3CODE_HOME` (default `~/.t3`).
+
+The provider exposes real working sessions over ACPv2. Terminal and script-only steps have no
+working-session link. T3's read-only history import includes prompts, replies, tool calls and
+results. It does not start or steer an LM run.
 
 The card can also open without asking. After the agent starts a run with `loop-manager run start` or the
 `start_run` MCP tool, a plugin hook asks it to show that run's card on the daemon the command named with

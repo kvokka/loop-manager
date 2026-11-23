@@ -1,10 +1,12 @@
 """Interactive T3 Code card for sessions of a local loop-manager run."""
 
+import hashlib
 import http.client
 import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -141,7 +143,32 @@ def recorded_agents(path, run, watermark):
         return dict(names)
 
 
-def snapshot(path, run):
+def working_sessions(state):
+    """Index the first attempt for each distinct session in a step and round."""
+    seen = set()
+    for a in state["attempts"]:
+        if a["session"] is None:
+            continue
+        if "round" not in a:
+            raise ValueError("Update LM to a version with per-round attempt history")
+        ref = json.dumps(a["session"], sort_keys=True)
+        key = (a["round"], a["step"], a["harness"], ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Keep the IDs of bead-backed views already imported by T3. Runs without a
+        # bead have no task root; include the session identity in their native ID.
+        project = state["project"]
+        suffix = f'#t:{state["id"]}.{a["n"]}'
+        if state.get("bead"):
+            native = f'lm-agent/{project}/{state["bead"]}{suffix}'
+        else:
+            digest = hashlib.sha256(ref.encode()).hexdigest()[:24]
+            native = f'lm-run/{project}/{digest}{suffix}'
+        yield a, native
+
+
+def snapshot(path, run, existing_links=False):
     # Read the watermark first. A transition during either following read is replayed.
     cursor = read(path, "/v1/daemon")["journal_seq"]
     state = read(path, "/v1/runs/" + run + "?all_attempts=true")
@@ -162,13 +189,20 @@ def snapshot(path, run):
     # While entering a step the run can still point at the previous step's attempt.
     outcome = state.get("outcome") or {}
     attempts = state["attempts"]
-    if (state["state"] in TERMINAL or state["state"] == "finishing") and outcome.get("summary"):
-        if attempts and attempts[-1]["step"] == state["step"] and attempts[-1]["n"] == state["attempt"]:
-            summaries[state["step"]] = outcome["summary"]
+    if ((state["state"] in TERMINAL or state["state"] == "finishing") and outcome.get("summary")
+            and attempts and attempts[-1]["step"] == state["step"] and attempts[-1]["n"] == state["attempt"]):
+        summaries[state["step"]] = outcome["summary"]
     card["summaries"] = summaries
     names = recorded_agents(path, run, cursor) if any(a["session"] for a in attempts) else {}
     rounds = {}
-    seen = set()
+    native_ids = {a["n"]: native for a, native in working_sessions(state)}
+    links = {}
+    if native_ids and existing_links:
+        try:
+            links = t3_request(path, state["project"], {"sessions": native_ids}, existing=True)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            # An offline T3 server must not hide the run; the click retries and reports the error.
+            pass
     known = {s["step"] for s in plan}
     for a in attempts:
         if "round" not in a:
@@ -181,14 +215,12 @@ def snapshot(path, run):
         item = steps.setdefault(step, {"sessions": [], "result": None, "summary": None})
         item["result"] = a.get("result")
         item["summary"] = a.get("summary")
-        if a["session"] is not None:
-            identity = (a["round"], step, a["harness"], json.dumps(a["session"], sort_keys=True))
-            if identity not in seen:
-                seen.add(identity)
-                agent = names.get((a["n"], step))
-                if not agent and a["n"] == state["attempt"]:
-                    agent = state.get("agent")
-                item["sessions"].append({"attempt": a["n"], "harness": a["harness"], "agent": agent})
+        if a["n"] in native_ids:
+            agent = names.get((a["n"], step))
+            if not agent and a["n"] == state["attempt"]:
+                agent = state.get("agent")
+            item["sessions"].append({"attempt": a["n"], "harness": a["harness"],
+                                     "agent": agent, "url": links.get(str(a["n"]))})
     if state["step"] not in known:
         plan.append({"step": state["step"], "kind": state["step_kind"]})
     return {"roundHistory": rounds, "card": card, "plan": plan, "cursor": cursor, "terminal": state["state"] in TERMINAL}
@@ -217,15 +249,43 @@ WATCH = tool("watch_run_card", "Wait for changes to an open run card.", watch=Tr
 
 
 THREAD = {
-    "name": "read_run_thread",
-    "description": "Read the next page of the selected LM session in this round.",
+    "name": "open_run_thread",
+    "title": "Open this LM session in T3",
+    "description": "Import the selected working session on demand and return its native T3 link.",
     "_meta": {"ui": {"visibility": ["app"]}},
-    "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     "inputSchema": {"type": "object", "properties": {
-        **PROPERTIES, "attempt": {"type": "integer", "minimum": 1},
-        "offset": {"type": "integer", "minimum": 0}},
+        **PROPERTIES, "attempt": {"type": "integer", "minimum": 1}},
         "required": ["run", "attempt"], "additionalProperties": False},
 }
+
+
+def open_thread(path, run, number):
+    state = read(path, f"/v1/runs/{run}?all_attempts=true")
+    for attempt, native in working_sessions(state):
+        if attempt["n"] == number:
+            break
+    else:
+        raise ValueError("No recorded session for this attempt")
+    watermark = read(path, "/v1/daemon")["journal_seq"]
+    agent = recorded_agents(path, run, watermark).get((number, attempt["step"])) or attempt["step"]
+    label = f'{run} · Round {attempt["round"]} · {agent} · {attempt["step"]} ({attempt["harness"]})'
+    return t3_request(path, state["project"], {"sessionId": native, "title": label})
+
+
+def t3_request(path, project_name, arguments, existing=False):
+    project = next((p for p in read(path, "/v1/projects") if p["name"] == project_name), None)
+    if project is None:
+        raise ValueError("The LM project is unavailable")
+    data = {"socket": str(path), "root": project["root"]["path"], **arguments}
+    command = ["node", str(Path(__file__).with_name("open-thread.mjs"))]
+    if existing:
+        command.append("--existing")
+    proc = subprocess.run(command, input=json.dumps(data), capture_output=True, text=True, check=False,
+                          timeout=20 if existing else 165)
+    if proc.returncode:
+        raise ValueError(proc.stderr.strip() or "Could not open the T3 thread")
+    return json.loads(proc.stdout)
 
 
 def call(params):
@@ -241,11 +301,10 @@ def call(params):
         raise ValueError(f"Unknown argument: {', '.join(sorted(unknown))}. Open a new card with the daemon socket.")
     path = socket_path(args.get("socket"))
     if name == THREAD["name"]:
-        attempt, offset = args.get("attempt"), args.get("offset", 0)
-        if type(attempt) is not int or attempt < 1 or type(offset) is not int or offset < 0:
-            raise ValueError("Expected a positive attempt and non-negative offset")
-        page = read(path, f"/v1/runs/{run}/live?chat=true&attempt={attempt}&offset={offset}")
-        return {"content": [], "structuredContent": page}
+        attempt = args.get("attempt")
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("Expected a positive attempt number")
+        return {"content": [], "structuredContent": open_thread(path, run, attempt)}
     if name == WATCH["name"]:
         cursor = args["cursor"]
         if type(cursor) is not int or cursor < 0:
@@ -264,7 +323,7 @@ def call(params):
             raise ValueError(f"Unknown or unavailable daemon: {daemon}")
         path = registered[daemon]
     try:
-        data = snapshot(path, run)
+        data = snapshot(path, run, existing_links=name == SHOW_NAME)
     except (FileNotFoundError, ConnectionRefusedError) as error:
         if "daemon" in args or "socket" in args or os.environ.get("LOOP_MANAGER_SOCKET") or name != SHOW_NAME:
             raise ConnectionError(f"Cannot connect to loop-manager at {path}") from error
@@ -274,7 +333,7 @@ def call(params):
             choices = ", ".join(sorted(registered)) or "an explicit socket path"
             raise ConnectionError(f"Cannot connect to loop-manager at {path}. Choose {choices}.") from error
         path = alternatives.pop()
-        data = snapshot(path, run)
+        data = snapshot(path, run, existing_links=name == SHOW_NAME)
     data["socket"] = str(path)
     card = data["card"]
     fields = [run, card["formula"]]
@@ -295,7 +354,7 @@ def dispatch(method, params):
         version = params.get("protocolVersion")
         return {"protocolVersion": version if version in supported else supported[-1],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "t3-run-card", "version": "0.1.0"}}
+                "serverInfo": {"name": "t3-run-card", "version": "0.2.0"}}
     if method in ("ping", "resources/templates/list"):
         return {"resourceTemplates": []} if method.startswith("resources") else {}
     if method == "tools/list":
@@ -310,7 +369,7 @@ def dispatch(method, params):
     if method == "tools/call":
         try:
             return call(params)
-        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
+        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException, subprocess.TimeoutExpired) as error:
             return {"isError": True, "content": [{"type": "text", "text": str(error)}]}
     raise ValueError(f"Unsupported request: {method}")
 

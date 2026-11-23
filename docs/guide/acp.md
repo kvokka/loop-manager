@@ -32,8 +32,8 @@ start resumes the same sessions.
 ## T3 Code
 
 Use the [T3 Code run card](../../plugins/README.md#follow-a-run-in-t3-code) to browse a run. Select a round
-and click the agent that performed the step. The card reads the real session directly through the daemon.
-This workflow requires no local ACP command registration or session import in T3.
+and click the agent that performed the step. The card resolves the actual session to a native T3 thread
+through the plugin's local ACP provider. Opening the card creates no threads.
 
 ## Verified by
 

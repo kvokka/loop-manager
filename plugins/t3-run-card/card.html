@@ -13,34 +13,33 @@ li{position:relative;display:grid;grid-template-columns:25px minmax(0,1fr) minma
 [data-tone=active]{color:var(--blue)}[data-tone=waiting]{color:var(--amber)}[data-tone=passed]{color:var(--green)}[data-tone=failed]{color:var(--red)}[aria-current=step]{font-weight:650;box-shadow:inset -2px 0 currentColor;background:color-mix(in srgb,currentColor 6%,transparent);border-radius:6px}
 [data-tone=skipped] .symbol{border-style:dashed}.arrival{animation:arrive .6s ease-out}@keyframes arrive{from{box-shadow:inset 0 0 0 2px currentColor}to{box-shadow:inset 0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.arrival{animation:none}}
 svg{position:absolute;inset:0;pointer-events:none;width:100%;height:100%;overflow:visible;fill:none;stroke:var(--line);stroke-width:1.2}path.used{stroke:var(--blue);stroke-width:2}footer{margin:10px 4px;color:var(--dim);font-size:12px;overflow-wrap:anywhere}#notice{color:var(--amber)}
-button,select{font:inherit;color:inherit}nav{display:flex;align-items:center;gap:.5em;margin:10px 4px}
+button{font:inherit;color:inherit}nav{display:flex;align-items:center;gap:.5em;margin:10px 4px}
 .name:has(.session-link){white-space:normal;overflow:visible}.session-link{color:var(--blue);background:none;border:0;padding:0;text-decoration:underline;text-underline-offset:.18em;cursor:pointer}
-#transcript{padding:4px}#messages{list-style:none;padding:0}#messages li{display:block;color:inherit;border-top:1px solid var(--line);padding:.65em 0}
-#messages pre{margin:.35em 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
-#messages .tool pre{font-family:var(--font-mono,monospace)}[hidden]{display:none!important}
+#rounds button{min-width:44px;min-height:44px;border:1px solid var(--line);border-radius:6px;background:transparent;cursor:pointer}
+#rounds button:disabled{opacity:.35;cursor:default}#round{min-width:8ch;text-align:center;font-variant-numeric:tabular-nums}
 </style>
 <details open><summary><strong id="heading">T3 Code run card</strong><span id="position" aria-live="polite">Connecting…</span></summary>
-<nav id="rounds"><label for="round">Round</label><select id="round"></select></nav>
-<section id="transcript" hidden><button type="button" id="back">Back to steps</button>
-<h3 id="session-title"></h3><ol id="messages"></ol><p role="status" id="chat-status"></p>
-<button type="button" id="more" hidden>Load more</button></section>
+<nav id="rounds" aria-label="Run rounds"><button id="prev" type="button" aria-label="Previous round" disabled>&lt;</button>
+<span id="round" aria-live="polite">Round 1</span><button id="next" type="button" aria-label="Next round" disabled>&gt;</button></nav>
 <div id="graph"><svg aria-hidden="true"></svg><ol id="steps"></ol></div>
-<footer><span id="route"></span> <span id="notice" role="status"></span></footer></details>
+<footer><span id="route"></span> <span id="notice" role="status"></span> <span id="open-status" role="status"></span></footer></details>
 <script>
 "use strict";
 const el = id => document.getElementById(id);
 const svg = document.querySelector("svg");
-let selectedRound = null, thread = null, timer;
+let selectedRound = null;
+const destinations = new Map();
+const importing = new Set();
 let model, signature, nextId = 0, stopped = false;
 const pending = new Map();
 
 function send(method, params, id) {
   parent.postMessage({jsonrpc:"2.0", method, params, ...(id === undefined ? {} : {id})}, "*");
 }
-function request(method, params) {
+function request(method, params, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const id = ++nextId;
-    const timer = setTimeout(() => {pending.delete(id); reject(Error("Host did not respond"));}, 30000);
+    const timer = setTimeout(() => {pending.delete(id); reject(Error("Host did not respond"));}, timeout);
     pending.set(id, message => {
       clearTimeout(timer);
       if (message.error) reject(Error(message.error.message)); else resolve(message.result);
@@ -98,19 +97,16 @@ function display(data) {
   const c = data.card, steps = data.plan, current = steps.findIndex(s => s.step === c.step);
   const round = selectedRound ?? c.round, isCurrent = round === c.round;
   const history = data.roundHistory?.[round] ?? {};
-  const select = el("round");
-  if (select.options.length !== c.round) {
-    select.replaceChildren(...Array.from({length:c.round}, (_,i) => new Option(String(i+1),String(i+1))));
-  }
-  select.value = String(round);
+  el("round").textContent = "Round " + round;
+  el("prev").disabled = round <= 1;
+  el("next").disabled = round >= c.round;
   const returns = steps.filter(s => s.back_to && c.back_from?.includes(s.step));
   const entries = returns.map(s => steps.findIndex(t => t.step === s.back_to)).filter(i => i >= 0);
   const start = c.round === 1 ? 0 : Math.min(...entries);
   const [tone,status] = currentStatus(c);
   el("heading").textContent = "T3 Code · " + c.formula;
   const position = [c.step, status];
-  if (c.round > 1) position.unshift("Round " + countLabel(c.round, c.rounds));
-  el("position").textContent = isCurrent ? position.join(" · ") : "Round " + round;
+  el("position").textContent = isCurrent ? position.join(" · ") : "";
   const links = steps.filter(s => s.back_to);
   el("steps").style.setProperty("--nodes", links.length ? `calc(100% - ${18 + 5 * links.length}px)` : "100%");
   const rows = steps.map((s,i) => {
@@ -152,13 +148,15 @@ function display(data) {
     name.textContent = s.title || agent || s.step;
     if (sessions.length) {
       const buttons = sessions.map((session,index) => {
+        if (session.url) destinations.set(session.attempt,session.url);
         const title = session.agent || (isCurrent && i === current ? agent : null) || s.step + " (" + session.harness + ")";
-        const button = document.createElement("button");
-        button.type = "button";
+        const button = document.createElement(destinations.has(session.attempt) ? "a" : "button");
+        if (button.tagName === "A") button.href = destinations.get(session.attempt);
+        else button.type = "button";
         button.className = "session-link";
         button.textContent = title + (sessions.length > 1 ? " · session " + (index+1) : "");
         button.title = s.step + " · " + session.harness + " · attempt " + session.attempt;
-        button.onclick = () => openThread(session.attempt, "Round " + round + " · " + button.textContent, button);
+        button.onclick = event => { event.preventDefault(); openThread(session.attempt); };
         return button;
       });
       name.replaceChildren();
@@ -188,72 +186,39 @@ function display(data) {
   el("route").textContent = detail.join(" · ");
   drawEdges();
 }
-el("round").onchange = () => {
-  const value = Number(el("round").value);
-  selectedRound = value === model.card.round ? null : value;
+function moveRound(delta) {
+  const round = Math.max(1, Math.min(model.card.round, (selectedRound ?? model.card.round) + delta));
+  selectedRound = round === model.card.round ? null : round;
+  el("open-status").textContent = "";
   display(model);
-};
-function viewThread(active) {
-  el("transcript").hidden = !active;
-  for (const id of ["graph","rounds","route"]) el(id).hidden = active;
 }
-function closeThread() {
-  clearTimeout(timer);
-  const previous = thread;
-  thread = null;
-  viewThread(false);
-  selectedRound = previous.round === model.card.round ? null : previous.round;
-  display(model);
-  drawEdges();
-  (previous?.button?.isConnected ? previous.button : el("round")).focus();
-}
-el("back").onclick = closeThread;
-function openThread(attempt, title, button) {
-  clearTimeout(timer);
-  thread = {attempt, button, round:selectedRound ?? model.card.round, offset:0, busy:false, calls:new Map()};
-  el("messages").replaceChildren();
-  el("session-title").textContent = title;
-  viewThread(true);
-  el("back").focus();
-  loadPage(thread);
-}
-function entryRow(view,entry) {
-  const row = document.createElement("li"), heading = document.createElement("strong");
-  const tool = entry.type === "tool_call" || entry.type === "tool_result";
-  if (entry.type === "tool_call" && entry.id) view.calls.set(entry.id,entry.name);
-  const role = {user:"Prompt",assistant:"Agent",tool_call:"Tool call",tool_result:entry.is_error?"Tool error":"Tool result"};
-  heading.textContent = [role[entry.type],entry.name || view.calls.get(entry.id)].filter(Boolean).join(" · ");
-  const body = document.createElement("pre");
-  const value = tool ? (entry.type === "tool_call" ? entry.input : entry.output) : entry.text;
-  body.textContent = typeof value === "string" ? value : JSON.stringify(value,null,2);
-  if (tool) row.className = "tool";
-  row.append(heading,body);
-  return row;
-}
-async function loadPage(view) {
-  if (!view || view.busy || stopped) return;
-  view.busy = true;
-  el("more").hidden = true;
-  el("chat-status").textContent = "Loading session…";
+el("prev").onclick = () => moveRound(-1);
+el("next").onclick = () => moveRound(1);
+async function openThread(attempt) {
+  if (importing.has(attempt)) return;
+  importing.add(attempt);
+  const status = el("open-status");
   try {
-    const page = unpack(await request("tools/call",{name:"read_run_thread",arguments:{
-      socket:model.socket,run:model.card.id,attempt:view.attempt,offset:view.offset
-    }}));
-    if (thread !== view || stopped) return;
-    el("messages").append(...page.entries.map(entry => entryRow(view,entry)));
-    view.offset = page.next;
-    el("more").hidden = !page.more;
-    el("chat-status").textContent = page.more ? "" : page.live ? "Following session…" :
-      view.offset ? "End of session" : "No recorded messages";
-    if (!page.more && page.live) timer = setTimeout(() => loadPage(view),2000);
-  } catch (error) {
-    if (thread === view) {
-      el("chat-status").textContent = error.message;
-      el("more").hidden = false;
+    let url = destinations.get(attempt);
+    if (!url) {
+      status.textContent = "Opening the native T3 thread…";
+      const answer = unpack(await request("tools/call",{name:"open_run_thread", arguments:{
+        socket:model.socket, run:model.card.id, attempt
+      }},180000));
+      url = answer.url;
+      if (!url.startsWith("https://app.t3.codes/threads/")) throw Error("Invalid T3 thread link");
+      destinations.set(attempt,url);
+      signature = undefined;
+      display(model);
     }
-  } finally { view.busy = false; }
+    // T3 handles HTTPS universal links through the MCP Apps host, outside the card.
+    const opened = await request("ui/open-link",{url});
+    if (opened?.isError) throw Error("T3 declined to open the link");
+    status.textContent = "";
+  } catch(error) {
+    status.textContent = destinations.has(attempt) ? "Thread ready. Tap the agent name to open it in T3." : error.message;
+  } finally { importing.delete(attempt); }
 }
-el("more").onclick = () => loadPage(thread);
 function unpack(reply) {
   if (reply.isError || !reply.structuredContent) throw Error(reply.content?.[0]?.text || "Missing card data");
   return reply.structuredContent;
@@ -284,7 +249,7 @@ addEventListener("message",event => {
     catch (error) {el("position").textContent = "Unavailable"; el("notice").textContent = error.message;}
   } else if (m.method === "ui/notifications/host-context-changed") context(m.params);
   else if (m.method === "ui/resource-teardown") {
-    stopped = true; clearTimeout(timer);
+    stopped = true;
     parent.postMessage({jsonrpc:"2.0",id:m.id,result:{}}, "*");
   } else if (pending.has(m.id)) {
     const resolve = pending.get(m.id); pending.delete(m.id); resolve(m);
@@ -294,7 +259,7 @@ new ResizeObserver(() => {
   drawEdges();
   send("ui/notifications/size-changed",{height:Math.ceil(document.body.getBoundingClientRect().height)});
 }).observe(document.body);
-request("ui/initialize",{appInfo:{name:"t3-run-card",version:"0.1.0"},appCapabilities:{},protocolVersion:"2026-01-26"})
+request("ui/initialize",{appInfo:{name:"t3-run-card",version:"0.2.0"},appCapabilities:{},protocolVersion:"2026-01-26"})
   .then(result => {context(result.hostContext);send("ui/notifications/initialized",{});})
   .catch(error => el("notice").textContent = error.message);
 </script></html>

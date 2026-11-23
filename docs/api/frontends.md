@@ -177,8 +177,8 @@ tokens in every session, so an agent names it in its own config
 ## T3 Code run card
 
 Install `t3-run-card@loop-manager` in the harness used by T3 Code. Open a run, select an executed round
-and click an agent name to read its session inside the card. The plugin uses the daemon socket. No
-imported ACP thread is needed. See the [installation and viewing guide](../../plugins/README.md).
+and click an agent name to open its working session as a native T3 thread. Opening a session can import a thread.
+See the [installation and viewing guide](../../plugins/README.md).
 
 `GET /v1/runs/{id}?all_attempts=true` returns every recorded attempt with its round, result and summary.
 `GET /v1/runs/{id}/live?chat=true&attempt=N` returns a JSON page of the selected session's conversation.

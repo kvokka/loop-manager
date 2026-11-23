@@ -177,6 +177,39 @@ async fn acp_shows_a_resumed_session_once_slices_a_continued_one_and_survives_a_
         assert_eq!(d.get(&format!("{url}&offset=1")).await["entries"], json!(entries[1..]));
     }
 
+    // T3 imports one independently selectable native session per round, retaining tool results
+    // as messages in its text-only native-history importer.
+    let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/sessions.py");
+    let mut command = tokio::process::Command::new("python3");
+    command.arg("-B").arg(program).arg("--socket").arg(d.socket());
+    let mut card_provider = Acp::from_command(command);
+    card_provider.call(1, "initialize", json!({"protocolVersion":2})).await;
+    let (_, list) = card_provider.call(2, "session/list", json!({})).await;
+    let sessions = list["result"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "{list}");
+    let native = sessions
+        .iter()
+        .filter_map(|s| s["sessionId"].as_str())
+        .find(|id| id.ends_with(&format!("#t:{second}.1")))
+        .unwrap();
+    let (lines, response) = card_provider
+        .call(
+            3,
+            "session/resume",
+            json!({
+                "sessionId": native, "cwd": shop, "mcpServers": [], "replayFrom": {"type": "start"}
+            }),
+        )
+        .await;
+    assert_eq!(response["result"], json!({}), "{response}");
+    let texts: Vec<_> = on(&lines, native)
+        .into_iter()
+        .filter_map(|u| u["content"][0]["text"].as_str())
+        .collect();
+    assert!(texts.iter().any(|t| t.contains("Tool call") && t.contains("c-three")));
+    assert!(texts.iter().any(|t| t.contains("Tool result")));
+    assert!(!texts.iter().any(|t| t.contains("c-one")));
+
     // The transcript is gone: both threads stay, each says so and replays nothing.
     let files = transcripts(d.dir.path());
     assert_eq!(files.len(), 1, "{files:?}");
