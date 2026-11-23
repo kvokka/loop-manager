@@ -726,9 +726,10 @@ both reported as `tracker.sync_failed{op: "comment"}`; an issue the tracker no l
 
 `file`, `subtree` and `close_by` serve the commands `loop-manager issue create|list|close`
 ([frontends](../api/frontends.md#cli)): the API calls them outside the core and its queue, as it reads `lineage`, so
-an agent or a user files, lists and closes issues without knowing the tracker. Each writes as the attempt's actor
-`loop-manager:<run id>:<attempt n>` when the command comes from a session whose token is that of the current attempt
-of a live run, and as `loop-manager` otherwise; the core reads the write back through `changes` like any other.
+an agent or a user files, lists and closes issues without knowing the tracker. `file` and `close_by` write as the
+attempt's actor `loop-manager:<run id>:<attempt n>` when the command comes from a session whose token is that of the
+current attempt of a live run, and as `loop-manager` otherwise; the core reads the write back through `changes` like
+any other.
 `file` files `NewIssue {title, description, labels, parent, prefix}`: under `parent` when it has one (a `parent` the
 tracker does not have is `NotFound`), with the id prefix `prefix`, the rig's (decision 96), or the tracker's own for an
 issue of the root. With a `key` it files once per key, as `create` does: the API gives it the request's idempotency key,

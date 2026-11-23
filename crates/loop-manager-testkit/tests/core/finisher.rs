@@ -82,6 +82,7 @@ async fn a_token_of_an_earlier_attempt_is_stale() {
         code: Some(1),
         signal: None,
     }]);
+    w.driver.script(slow_turn());
     let run = w.create().await;
     let after = Duration::ZERO;
     w.decide(
@@ -94,8 +95,15 @@ async fn a_token_of_an_earlier_attempt_is_stale() {
     tokio::time::sleep(Duration::from_secs(1)).await;
     let (first, second) = (w.driver.token(&run, 1).unwrap(), w.driver.token(&run, 2).unwrap());
     assert_ne!(first, second);
+    // The API acts for a session only while its attempt is the current one of a live run (contracts 6.3).
+    let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();
+    assert_eq!(reader.attempt(&run, &first).unwrap(), None);
+    assert_eq!(reader.attempt(&run, &second).unwrap(), Some(2));
     assert_eq!(w.finish(&run, &first, Verdict::Pass, "old").await, "stale_attempt");
     assert_eq!(w.finish(&run, &second, Verdict::Pass, "new").await, "accepted");
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(w.states(&run).await.last().unwrap(), "passed");
+    assert_eq!(reader.attempt(&run, &second).unwrap(), None);
 }
 
 #[tokio::test(start_paused = true)]

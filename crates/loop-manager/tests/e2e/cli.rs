@@ -498,6 +498,32 @@ async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
     assert_eq!(first["id"], again["id"]);
     let error: Value = serde_json::from_slice(&keyed("Other").stderr).unwrap();
     assert_eq!(error["error"]["code"], "idempotency_key_reused");
+    // The tracker keeps no key of a close: the daemon answers a reused key before it closes anything.
+    let other = d.json(&["issue", "create", "--project", "shop", "--title", "Kept open"]);
+    let close = |issue: &str| {
+        let args = [
+            "--json",
+            "issue",
+            "close",
+            issue,
+            "--project",
+            "shop",
+            "--reason",
+            "done",
+            "--key",
+            "c",
+        ];
+        d.cli(&args, &[])
+    };
+    let closed = close(first["id"].as_str().unwrap());
+    assert!(closed.status.success(), "{}", String::from_utf8_lossy(&closed.stderr));
+    assert_eq!(closed.stdout, close(first["id"].as_str().unwrap()).stdout);
+    let error: Value = serde_json::from_slice(&close(other["id"].as_str().unwrap()).stderr).unwrap();
+    assert_eq!(error["error"]["code"], "idempotency_key_reused");
+    let project = d.dir.path().join("config/loop-manager/shop");
+    let shown = crate::tracker::br_in(&project, None, &["show", other["id"].as_str().unwrap(), "--json"]);
+    let shown: Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(shown[0]["status"], "open");
     let create = ["issue", "create", "--project", "shop", "--title", "Lost"];
     assert_eq!(code(&d, &[&create[..], &["--rig", "api"]].concat(), &[]), "not_found");
     assert_eq!(
