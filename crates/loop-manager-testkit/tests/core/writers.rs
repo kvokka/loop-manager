@@ -9,7 +9,10 @@ use common::{
     drain::SWEEP,
     last, world, world_with,
 };
-use loop_manager_core::run::{Create, Decision, ExecHooks, GateSpec, Msg};
+use loop_manager_core::{
+    driver::Normalized,
+    run::{Create, Decision, ExecHooks, GateSpec, Msg},
+};
 use loop_manager_testkit::Step;
 use serde_json::json;
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
@@ -349,4 +352,75 @@ async fn a_run_whose_agent_is_gone_keeps_its_place() {
     w.reload_with(&[], &["shop/agents/ops", OPS[2].0]).await;
     let second = w.create().await;
     assert_eq!(w.waiting_for(&second).await, "writers");
+}
+
+/// The children of a `drain` step with `worktree = true` work on branches of their own the bundled `worktree` gives
+/// them, whatever their formula says: no place of the rig is theirs, and a pool of two starts both at once. Real git,
+/// so real time.
+#[tokio::test]
+async fn the_children_of_a_drain_with_the_key_take_no_place() {
+    let formulas = [
+        (
+            "shop/formulas/work.toml",
+            "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+             [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+        ),
+        (
+            "shop/formulas/sweep.toml",
+            "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+             [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\nworktree = true\n",
+        ),
+    ];
+    let bundled = Arc::new(ExecHooks {
+        socket: None,
+        bundled: Some(loop_manager_addons::run),
+    });
+    let w = world_with(&[RIGS, &formulas[..]].concat(), bundled);
+    let web = w.dir.path().join("shop/web");
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &["config", "user.email", "t@example.com"],
+        &["config", "user.name", "t"],
+        &["config", "commit.gpgsign", "false"],
+        &["add", "-A"],
+        &["commit", "-q", "-m", "base"],
+    ] {
+        let out = std::process::Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .arg("-C")
+            .arg(&web)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let root = w.tracker.add(&[], None);
+    for _ in 0..2 {
+        w.tracker.add_in("w", &[], Some(&root));
+    }
+    // The turns never end: both children stay alive.
+    let held = Arc::new(tokio::sync::Notify::new());
+    for _ in 0..2 {
+        w.driver
+            .script(vec![Step::Emit(Normalized::TurnStarted), Step::Await(held.clone())]);
+    }
+    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
+    let run = reply["run"].as_str().unwrap().to_owned();
+    let started = std::time::Instant::now();
+    loop {
+        let kids = w.kids(&run);
+        if kids.iter().filter(|k| w.driver.token(&k.0, 1).is_some()).count() == 2 {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "not both started: {kids:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

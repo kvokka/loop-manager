@@ -145,3 +145,27 @@ async fn the_step_timeout_ends_the_wait() {
     let failed = failed.iter().find(|d| d["run"]["id"] == run).expect("the wait ended");
     assert_eq!(failed["failure"]["kind"], "runaway_turn", "{failed}");
 }
+
+/// A bead of its own this entry already gave, which failed and now waits on a foreign blocker, does not hold the
+/// step: it ends with the bead in `failed`, not at the step's `timeout`.
+#[tokio::test(start_paused = true)]
+async fn a_given_bead_that_failed_and_waits_on_a_foreign_blocker_does_not_hold_the_step() {
+    let mut files = SWEEP.to_vec();
+    let sweep = files.iter_mut().find(|f| f.0 == "shop/formulas/sweep.toml").unwrap();
+    sweep.1 = "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"work\"\ntimeout = \"10m\"\n\
+        [[step]]\nname = \"wrap\"\nkind = \"ai\"\nagent = \"scribe\"\n";
+    let w = world(&files);
+    let root = w.tracker.add(&[], None);
+    let mine = w.tracker.add_in("w", &[], Some(&root));
+    let foreign = w.tracker.add_in("a", &[], Some(&root));
+    let run = w.sweep_on(&root, "web").await;
+    // The child works on the bead when the foreign blocker comes.
+    let stop = [mine.as_str()];
+    assert_eq!(w.settle(&run, &[], &stop, &mut BTreeSet::new()).await, Value::Null);
+    w.tracker.depend(&mine, &foreign, "blocks");
+    let outcome = w.settle(&run, &stop, &[], &mut BTreeSet::new()).await;
+    assert_eq!(outcome["data"]["failed"], json!([mine]), "{outcome}");
+    assert_eq!(outcome["data"]["closed"], json!([]));
+    assert!(w.all("run.attempt_failed").iter().all(|d| d["run"]["id"] != run));
+}

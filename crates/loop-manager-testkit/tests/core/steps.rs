@@ -460,3 +460,32 @@ async fn a_kill_at_every_step_boundary_keeps_the_step() {
     let steps: Vec<String> = w.attempts().into_iter().map(|(s, _)| s).collect();
     assert_eq!(steps, ["a", "b", "c", "c"]);
 }
+
+/// A pass of the last step is not final while an earlier check of its row failed in the same round: that failure
+/// sends the run back first. Once the whole row passes, the pass is final.
+#[tokio::test]
+async fn a_pass_of_the_last_check_is_not_final_after_a_failed_check_of_its_row() {
+    let back = "back_to = \"work\"\n";
+    let steps = [
+        exec("work", "echo work >> log"),
+        exec(
+            "lint",
+            "n=$(($(cat lint 2>/dev/null || echo 0) + 1)); echo $n > lint; [ $n -gt 1 ]",
+        ) + back,
+        exec("test", "echo test >> log") + back,
+    ];
+    let w = flow(&steps, &[], Arc::new(ExecHooks::default()));
+    let run = w.start_flow().await;
+    let (kind, data) = w.end(&run).await;
+    assert_eq!(kind, "run.passed", "{data}");
+    assert_eq!(w.log(), "work\ntest\nwork\ntest\n");
+    let finals: Vec<Value> = (w.all("run.finishing").iter())
+        .filter(|d| d["run"]["step"] == "test")
+        .map(|d| d["final"].clone())
+        .collect();
+    assert_eq!(
+        finals,
+        [false, true],
+        "a failed check of the row makes the pass not final"
+    );
+}
