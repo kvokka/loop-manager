@@ -115,3 +115,23 @@ async fn the_runs_own_close_read_after_a_status_write_of_another_actor_leaves_it
         w.journal_of("run.cancelled")
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_write_of_another_actor_without_status_read_after_the_runs_own_close_leaves_it_running() {
+    let w = world(FILES);
+    let bead = w.tracker.add(&["auto"], None);
+    w.changed().await;
+    let held = w.run_of(&bead);
+    w.until(Some(&held), "run.awaiting", 0).await;
+
+    // One read takes both writes, each with the bead as read: closed. The label does not tell who closed it.
+    w.tracker.close_as(&bead, &format!("loop-manager:{held}:1"));
+    w.tracker.label(&bead, "x");
+    w.changed().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        w.journal_of("run.cancelled").is_empty(),
+        "{:?}",
+        w.journal_of("run.cancelled")
+    );
+}
