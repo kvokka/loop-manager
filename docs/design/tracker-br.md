@@ -61,7 +61,8 @@ run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-
   one call for the issue and one for each parent up to the root: its `comments` (`author`, `created_at`, `text`, in
   br's order, oldest first) and its `parent`. The run reads them each time it enters such a step, so the comments that
   agents and humans leave on an issue are how the steps and rounds of a run, and the runs after it, hand the work over.
-  `loop-manager issue show` reads an issue the same way, without its parents.
+  `loop-manager issue show` reads an issue by the same lineage read, the issue and each parent up to the root, and
+  replies with the issue and its comments only; an error reading a parent is an error of the command.
 - An issue has at most one live owner run; a second request for it is refused with the reason.
 - An issue named by id that belongs to another rig is refused at the start; the claim checks it again
   (`failed{infrastructure, issue_of_another_rig}`, the claim released). A start with no rig takes the rig of

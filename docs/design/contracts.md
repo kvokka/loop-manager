@@ -695,7 +695,7 @@ snapshot of the issue and the prompt renders; an `Unavailable` tracker is tried 
 fails it at once (`failed{infrastructure, issue_unreadable: <error>}`). An answer to another entry of a step, or to a
 run that prepares no more, is dropped. The API reads it too, outside the core and its queue, for
 `GET /v1/projects/{project}/issues/{issue}` (`loop-manager issue show`, [frontends](../api/frontends.md#cli)): the
-issue and its comments, its parents left out.
+issue and its comments; the parents are read too but left out of the reply, so an error reading one fails the read.
 
 `attempt_ended` appends the end of an attempt to the audit trail of the issue `id` as the attempt's actor
 `loop-manager:<run id>:<attempt n>`, apart from the issue: no write `changes` reads, so no `issue.*` event follows. When an

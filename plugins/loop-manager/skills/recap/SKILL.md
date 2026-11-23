@@ -20,6 +20,9 @@ its project's tracker:
 loop-manager issue show <issue> --project <project>
 ```
 
+The project of a run's issue is in `loop-manager run show <run>`. For an issue named without a run, take the
+project from `loop-manager project list` or ask the user.
+
 Where delegated model selection is available, give the read-only extraction to an inexpensive model.
 Pass the project, issue IDs and user's focus. Have it read the issues directly and return compact TOON findings
 with source IDs. Batch related issues that fit its context. Otherwise do the extraction in the current session.

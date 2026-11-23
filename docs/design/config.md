@@ -930,7 +930,8 @@ its parents from the root down, each with its fields and its comments — the wh
 it. Both are TOON (contracts 2.3), so a template puts each on a line of its own. The run reads them from the tracker
 each time it enters the step: a comment an earlier step of the same run left, or a human meanwhile, is in the prompt
 of the next step and of the next round. `last_comments` on the step keeps the last comments of the issue and of each
-parent, and the agent reads the older ones itself (`loop-manager issue show <id> --project <project>`). An issue with no comments shows `[]`.
+parent, and the agent reads the older ones itself (`loop-manager issue show <id> --project <project>`). An issue
+with no comments shows `[]`.
 
 ```
 [2]{author,created_at,text}:
