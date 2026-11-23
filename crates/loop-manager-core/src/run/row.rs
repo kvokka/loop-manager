@@ -138,13 +138,17 @@ impl Row {
 
 /// `Attempts` of contracts 1.3: the last 20 attempts of a run, newest last.
 pub(super) fn attempts(conn: &Connection, run: &str) -> Result<Vec<Value>, Error> {
+    attempt_history(conn, run, false)
+}
+
+pub(super) fn attempt_history(conn: &Connection, run: &str, all: bool) -> Result<Vec<Value>, Error> {
     let mut stmt = conn.prepare(
         "SELECT n, kind, started_ms, ended_ms, json_extract(failure, '$.kind'), harness, session, input_tokens, \
-         output_tokens, step FROM \
-         (SELECT * FROM attempts WHERE run = ?1 ORDER BY n DESC LIMIT 20) ORDER BY n",
+         output_tokens, step, round, json_extract(outcome, '$.result'), json_extract(outcome, '$.summary') FROM \
+         (SELECT * FROM attempts WHERE run = ?1 ORDER BY n DESC LIMIT ?2) ORDER BY n",
     )?;
-    let rows = stmt.query_map([run], |r| {
-        Ok(json!({
+    let rows = stmt.query_map(rusqlite::params![run, if all { -1 } else { 20 }], |r| {
+        let mut item = json!({
             "n": r.get::<_, i64>(0)?, "generation": r.get::<_, i64>(0)?, "kind": r.get::<_, String>(1)?,
             "step": r.get::<_, String>(9)?,
             "started_at": rfc3339_ms(r.get(2)?), "ended_at": r.get::<_, Option<i64>>(3)?.map(rfc3339_ms),
@@ -152,7 +156,13 @@ pub(super) fn attempts(conn: &Connection, run: &str) -> Result<Vec<Value>, Error
             // The session reference (docs/api/frontends.md): the harness's own tools open the conversation by it.
             "session": r.get::<_, Option<String>>(6)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
             "input_tokens": r.get::<_, i64>(7)?, "output_tokens": r.get::<_, i64>(8)?,
-        }))
+        });
+        if all {
+            item["round"] = json!(r.get::<_, u32>(10)?);
+            item["result"] = json!(r.get::<_, Option<String>>(11)?);
+            item["summary"] = json!(r.get::<_, Option<String>>(12)?);
+        }
+        Ok(item)
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }

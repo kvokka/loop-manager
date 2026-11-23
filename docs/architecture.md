@@ -44,7 +44,7 @@ These are checked by the build, not kept by agreement.
 | `loop-manager-claude` | the claude adapter: one `claude -p` process per session, stream-json | [adapters](design/adapters.md), [contracts 4.6](design/contracts.md#46-harness-specifics-the-contract-relies-on) |
 | `loop-manager-codex` | the codex adapter: one `codex app-server` per fingerprint over stdio, a thread per session | the same |
 | `loop-manager-br` | the br tracker adapter: every call is one `br` process on the project's database | [tracker](design/tracker-br.md) |
-| `loop-manager-front` | the frontends: the HTTP API on the daemon's unix socket, the CLI and its client, the MCP server | [frontends](api/frontends.md), [MCP](api/mcp.md), [OpenAPI](api/openapi.json) |
+| `loop-manager-front` | the frontends: the HTTP API on the daemon's unix socket, the CLI and its client, the MCP server and the read-only ACPv2 command | [frontends](api/frontends.md), [MCP](api/mcp.md), [OpenAPI](api/openapi.json) |
 | `loop-manager-addons` | the bundled addons `default-policy` and `worktree`, in-process executors of the hook contract | [config: bundled addons](design/config.md#bundled-addons-builtinname), [contracts 10](design/contracts.md#10-default-policy-as-decisions) |
 | `loop-manager` | the binary: the daemon, the adapter table, `doctor`, the git cache of packs and addons, the stdio→HTTP MCP bridge | [install](guide/install.md) |
 | `loop-manager-testkit` | test doubles: the scripted driver, fake providers, a test MCP service. Nothing of it runs in the product | [development](guide/development.md) |
@@ -71,10 +71,10 @@ and an agent attaches it with `addons = [{ name, params }]`
   useful answer goes on the bead as one comment.
 
 The [loop-manager marketplace](../plugins/README.md) packages plugins for the operator's harness.
-`plugins/loop-manager/` contains the operator skills. `plugins/run-card/` provides the live formula card
-as a stdio MCP App. Claude Code reads `.claude-plugin/marketplace.json` and each plugin's
+`plugins/loop-manager/` contains the operator skills. `plugins/t3-run-card/` provides the T3 Code round and session viewer as a stdio MCP App.
+The T3 host imports individual sessions through `loop-manager acp`. Claude Code reads `.claude-plugin/marketplace.json` and each plugin's
 `.claude-plugin/plugin.json`. Codex reads `.agents/plugins/marketplace.json` and each plugin's root
-`plugin.json`, or `.codex-plugin/plugin.json` for `run-card`: Codex loads no hooks of a root `plugin.json`.
+`plugin.json`, or `.codex-plugin/plugin.json` for `t3-run-card`: Codex loads no hooks of a root `plugin.json`.
 
 ## The life of a run
 

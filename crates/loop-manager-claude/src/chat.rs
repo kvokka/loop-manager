@@ -2,6 +2,7 @@
 
 use loop_manager_contract::driver::chat::ChatEntry;
 use serde_json::Value;
+use uuid::Uuid;
 
 /// The CLI's project-directory encoding operates on UTF-16 code units. Long names carry its signed
 /// 32-bit string hash in base 36 after the first 200 sanitized characters.
@@ -33,6 +34,13 @@ pub(super) fn project_dir(workdir: &str) -> String {
         dir.extend(suffix.into_iter().rev());
     }
     dir
+}
+
+/// `send_prompt` makes the `PromptKey`, a UUID v5, the user record's `uuid`. Claude's own user records (tool
+/// results, meta and interruption notes) carry random v4 uuids.
+pub(super) fn prompt(record: &Value) -> Option<String> {
+    let uuid = Uuid::parse_str(record["uuid"].as_str().filter(|_| record["type"] == "user")?).ok()?;
+    (uuid.get_version_num() == 5).then(|| uuid.to_string())
 }
 
 pub(super) fn entries(record: &Value) -> Vec<ChatEntry> {

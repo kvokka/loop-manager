@@ -11,9 +11,9 @@
       "description": "Discover, install and create loop-manager addons, recap work from Beads, recover failed runs and answer waiting runs."
     },
     {
-      "name": "run-card",
-      "source": "./plugins/run-card",
-      "description": "Follow a loop-manager run as a live formula diagram in chat."
+      "name": "t3-run-card",
+      "source": "./plugins/t3-run-card",
+      "description": "T3 Code run card for browsing rounds and real agent session histories."
     }
   ]
 }

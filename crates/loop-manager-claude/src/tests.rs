@@ -66,6 +66,23 @@ fn chat_finds_transcripts_in_long_and_unicode_project_paths() {
 }
 
 #[test]
+fn the_chat_log_finds_the_prompt_key_of_a_user_record() {
+    let key = PromptKey::new("r", 1, 1).0.to_string();
+    // A record claude 2.1.330 wrote for a prompt of loop-manager, private fields shortened.
+    let prompt = json!({ "parentUuid": "27f38392-bde8-496d-b911-2b149616b6f1", "isSidechain": false,
+        "promptId": "617aa0f5-d13a-42f2-8ae9-46f00f2b0d84", "type": "user",
+        "message": { "role": "user", "content": "hi" }, "uuid": key, "timestamp": "2026-11-22T11:54:09.063Z",
+        "promptSource": "sdk", "userType": "external", "entrypoint": "loop-manager", "cwd": "/w",
+        "sessionId": "b92bad8e-272d-5e66-a802-e694adb69b44", "version": "2.1.330" });
+    assert_eq!(chat::prompt(&prompt), Some(key.clone()));
+    let tool_result = json!({ "type": "user", "uuid": "0b7d6f1e-6f0a-4c43-9f3e-2f1a8f7d9c11",
+        "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] } });
+    assert_eq!(chat::prompt(&tool_result), None);
+    let assistant = json!({ "type": "assistant", "uuid": key, "message": { "content": [] } });
+    assert_eq!(chat::prompt(&assistant), None);
+}
+
+#[test]
 fn the_transcript_tells_where_the_prompt_stands() {
     let dir = tempfile::tempdir().unwrap();
     let session = json!({ "session_id": "s1", "config_dir": dir.path(), "workdir": "/w/my rig" });

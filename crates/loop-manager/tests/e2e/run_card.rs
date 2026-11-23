@@ -1,5 +1,7 @@
 //! The optional chat plugin opens a card on the daemon socket and resumes from the cursor after a terminal event.
 
+mod sessions;
+
 use crate::common::{self, Daemon, WAIT};
 use serde_json::{Value, json};
 use std::{io::Write, path::Path, process::Stdio};
@@ -9,12 +11,13 @@ fn card(d: &Daemon, name: &str, args: Value) -> Value {
 }
 
 fn card_in(d: &Daemon, name: &str, args: Value, runtime: &Path) -> Value {
-    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/run-card/server.py");
+    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/server.py");
     let mut child = common::program("timeout")
         .arg(WAIT.as_secs().to_string())
         .arg("python3")
         .arg(server)
         .env_remove("LOOP_MANAGER_SOCKET")
+        .env("T3CODE_HOME", d.dir.path().join("t3"))
         .env("XDG_RUNTIME_DIR", runtime)
         .env("XDG_CONFIG_HOME", d.dir.path().join("config"))
         .stdin(Stdio::piped())

@@ -17,10 +17,10 @@
       "category": "Coding"
     },
     {
-      "name": "run-card",
+      "name": "t3-run-card",
       "source": {
         "source": "local",
-        "path": "./plugins/run-card"
+        "path": "./plugins/t3-run-card"
       },
       "policy": {
         "installation": "AVAILABLE",

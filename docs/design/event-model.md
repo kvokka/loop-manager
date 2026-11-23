@@ -39,7 +39,8 @@ all of them share.
   pid, start time, pgid), bead ownership with its generation and failure count, ready sets, the labels of the beads
   read and tracker cursors,
   deadlines (timers and schedules), gates (operator holds among them), idempotency keys, the outbox and the effects
-  queue.
+  queue. Each attempt records the round of its run when the attempt starts. The session reference and prompt
+  keys identify the part of the harness transcript belonging to that step and round.
 - Definitions (projects, rigs, agents, formulas, triggers, addons) live in config files. A run keeps only the
   snapshot of its effective config (`runs.config`, the serialized `EffectiveConfig` of the step it is at), so it answers
   "what did this run with" and is reproducible. The repeat of a step lives in `runs.step_attempt` (from 1) and

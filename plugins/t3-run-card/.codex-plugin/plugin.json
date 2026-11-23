@@ -1,0 +1,13 @@
+{
+  "name": "t3-run-card",
+  "version": "0.3.0",
+  "description": "T3 Code run card for browsing rounds and real agent session histories.",
+  "mcpServers": "./mcp.json",
+  "author": {
+    "name": "loop-manager",
+    "url": "https://github.com/kvokka/loop-manager"
+  },
+  "interface": {
+    "displayName": "T3 Code Run Card"
+  }
+}

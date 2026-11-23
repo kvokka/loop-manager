@@ -16,7 +16,7 @@ The behaviour itself is described in the document named under each heading; this
 ## Product shape — [overview](../overview.md), [event model](../design/event-model.md)
 
 - A local daemon of one user: no Windows, no several machines or users. One daemon per user, projects register in it.
-- No ACP hub "up" for editors.
+- The LM binary provides read-only ACPv2 access to working sessions over stdio. The optional T3 card handles navigation.
 - The orchestrator's state is its own SQLite database.
 - Config files are TOML.
 - Adapters are modules of the one binary, with no protocol between processes; the outside path later is an ACP v2

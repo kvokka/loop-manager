@@ -48,6 +48,7 @@ impl From<hyper::Error> for ClientError {
     }
 }
 
+#[derive(Clone)]
 pub struct Client {
     socket: PathBuf,
 }

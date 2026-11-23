@@ -214,8 +214,8 @@ impl RunHandler {
             params![row.id, row.attempt],
         )?;
         tx.sql().execute(
-            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step, round) \
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, round FROM runs WHERE id = ?1",
             // The kind that happens: a resume with no session to resume is a new session.
             params![
                 row.id,

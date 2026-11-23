@@ -156,17 +156,29 @@ tokens in every session, so an agent names it in its own config
 - The tests of acceptance criterion 17 (a CLI command per operation, OpenAPI equal to the code, five MCP tools) run in
   `mise run ci`. The live scenario `c17_mcp.rs` has a real haiku session call `list_formulas` and report a formula only the tool named.
 
-## Expanded run card in chat
+## Read working sessions over ACPv2
 
-Install `run-card@loop-manager` from the [operator plugin marketplace](../../plugins/README.md).
-In an MCP Apps host, ask to show the expanded card for a run ID. Its formula stays in place while the
-current step, round, step attempt and wait reason change. A dotted arrow marks a possible return;
-the highlighted arrows mark the checks in the run's `back_from`. Click the heading to collapse the card.
-The card of every run the agent starts opens by itself when the user turns this on: the plugin option `auto_open`
-in Claude Code, the trusted `run-card` hook in Codex.
+Configure the ACP client to launch `loop-manager acp`. The binary serves newline-delimited JSON-RPC
+on stdio and reads the daemon through its Unix socket. Socket selection follows the CLI: `--socket`,
+then `LOOP_MANAGER_SOCKET`, then `$XDG_RUNTIME_DIR/loop-manager/loop-manager.sock`. Without an absolute
+runtime directory it uses `loop-manager/loop-manager.sock` under the XDG state directory.
 
-The host starts the plugin over stdio. It reads the run and the ordered steps and `back_to` edges of the
-currently configured formula. If the formula was removed, it shows the current step alone. The card
-follows the journal cursor over the daemon's Unix socket, refreshes its snapshot after a gap, reconnects
-on failure and stops following at a terminal state. Live refresh uses the host's MCP Apps bridge.
-Clients with text output get a status line and can follow the run with `loop-manager run watch <run>`.
+After `initialize` with protocol version 2, `session/list` lists real harness sessions and accepts a
+project root as `cwd` and the previous page's `nextCursor` as `cursor`. Send `session/resume` with the
+listed `sessionId` and `replayFrom: {"type":"start"}` to receive the transcript and subsequent live
+updates. Omit `replayFrom` for new entries only. `session/close` stops following the selected session.
+Prompts, tool invocations, results and replies are readable. Run control stays with the daemon's run API.
+
+## T3 Code run card
+
+The optional T3 Code plugin reads the run and its attempts. Select a round and click an agent name to
+open its working session. The card asks T3 to import that session through the registered LM provider.
+See [Follow a run in T3 Code](../../plugins/README.md#follow-a-run-in-t3-code).
+
+`GET /v1/runs/{id}?all_attempts=true` returns every recorded attempt with its round, result and summary.
+The first attempt of each session in a step and round carries its stable `acp_session_id`.
+`GET /v1/runs/{id}/live?chat=true&attempt=N` returns a JSON page of the selected session's conversation.
+Resumes in the same run, round and step share history. A continued session is sliced at the recorded
+prompt keys. Pass the returned `next` as `offset` to read further. A page has `entries`, `more` and
+`live`. Poll at the end while `live` is true. A missing session reference gives 404 and an unreadable
+transcript gives 503.

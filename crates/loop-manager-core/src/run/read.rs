@@ -16,6 +16,19 @@ pub struct AttemptSession {
     pub session: SessionRef,
 }
 
+/// The part of a harness transcript belonging to one run, step and round, across its resumed attempts.
+pub struct TranscriptSlice {
+    pub harness: String,
+    pub session: SessionRef,
+    /// This slice owns entries before the first recorded prompt.
+    pub starts_here: bool,
+    pub prompt_keys: std::collections::HashSet<String>,
+    /// An attempt in this slice is still writing.
+    pub live: bool,
+    /// All attempts sharing the transcript have ended, including continuations in other slices.
+    pub ended: bool,
+}
+
 /// Which runs `Reader::runs` lists.
 #[derive(Default)]
 pub struct RunFilter {
@@ -43,13 +56,18 @@ impl Reader {
     /// declared (null if none); why it ended (`reason`) and the closed gate a queued or parked run waits on; `None` if
     /// there is no such run.
     pub fn run(&self, id: &str) -> Result<Option<Value>, Error> {
+        self.run_with_attempts(id, false)
+    }
+
+    /// Include every recorded round on request. Ordinary run listings keep their bounded attempt history.
+    pub fn run_with_attempts(&self, id: &str, all: bool) -> Result<Option<Value>, Error> {
         let conn = self.conn();
         let Some(row) = Row::read(&conn, id)? else {
             return Ok(None);
         };
         let (waiting_for, reason, outcome, round): (Option<String>, Option<String>, Option<String>, u32) = conn
             .query_row(
-                "SELECT waiting_for, reason, outcome, round FROM runs \
+                "SELECT waiting_for, reason, outcome, runs.round FROM runs \
              LEFT JOIN attempts ON attempts.run = runs.id AND attempts.n = runs.attempt WHERE id = ?1",
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
@@ -74,7 +92,7 @@ impl Reader {
         view["gate"] = json!(gate);
         view["round"] = json!(round);
         view["back_from"] = super::render::back_from(&conn, id)?;
-        view["attempts"] = json!(row::attempts(&conn, id)?);
+        view["attempts"] = json!(row::attempt_history(&conn, id, all)?);
         view["steps"] = json!(super::render::step_results(&conn, id, &row.step)?);
         view["usage"] = row::usage(&conn, id)?;
         Ok(Some(view))
@@ -162,6 +180,43 @@ impl Reader {
             })
         })?;
         Ok((rows.collect::<Result<_, _>>()?, terminal))
+    }
+
+    /// Resolve an attempt to its transcript and the prompts delivered in its step and round. The earliest
+    /// attempt owns the preamble, including when a later run continues the session.
+    pub fn transcript_slice(&self, run: &str, attempt: u32) -> Result<Option<TranscriptSlice>, Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT a.harness, a.session, a.run = chosen.run AND a.step = chosen.step AND a.round = chosen.round, \
+             a.ended_ms IS NULL, p.key FROM attempts chosen \
+             JOIN runs origin ON origin.id = chosen.run JOIN runs r ON r.project = origin.project \
+             JOIN attempts a ON a.run = r.id AND a.harness = chosen.harness AND a.session = chosen.session \
+             LEFT JOIN prompts p ON p.run = a.run AND p.attempt = a.n \
+             WHERE chosen.run = ?1 AND chosen.n = ?2 ORDER BY a.started_ms, r.n, a.n, p.n",
+        )?;
+        let mut rows = stmt.query(params![run, attempt])?;
+        let Some(mut row) = rows.next()? else { return Ok(None) };
+        let mut slice = TranscriptSlice {
+            harness: row.get(0)?,
+            session: SessionRef(row.get(1)?),
+            starts_here: row.get(2)?,
+            prompt_keys: Default::default(),
+            live: false,
+            ended: true,
+        };
+        loop {
+            let belongs: bool = row.get(2)?;
+            let live: bool = row.get(3)?;
+            slice.ended &= !live;
+            slice.live |= belongs && live;
+            if belongs && let Some(key) = row.get::<_, Option<String>>(4)? {
+                slice.prompt_keys.insert(key);
+            }
+            match rows.next()? {
+                Some(next) => row = next,
+                None => return Ok(Some(slice)),
+            }
+        }
     }
 
     /// The last `seq` the outbox assigned, journaled or not; 0 before the first event.

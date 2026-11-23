@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 25;
+const VERSION: i32 = 26;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -79,14 +79,15 @@ CREATE TABLE runs (
     remarks TEXT,
     step_attempt INTEGER NOT NULL DEFAULT 1,
     step_remarks TEXT,
-    back_from TEXT
+    back_from TEXT,
+    parent_round INTEGER -- Reserved in schema 26.
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);
 -- The finisher (contracts 6.3): the attempt token by its SHA-256, the declared `outcome` and the number of `prompts`
 -- the attempt sent (remarks = prompts - 1). `waited`: its failure parked the run on an account gate, so it is
 -- outside the attempts ceiling (invariant 16). The tokens it used (contracts 4.3) and the step it ran. `skipped`:
--- the step was skipped by its `if` since, so its outcome is no longer the step's.
+-- the step was skipped by its `if` since, so its outcome is no longer the step's. `round` is the run's round when the attempt started.
 CREATE TABLE attempts (
     run TEXT NOT NULL,
     n INTEGER NOT NULL,
@@ -110,6 +111,8 @@ CREATE TABLE attempts (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     step TEXT NOT NULL DEFAULT '1',
     skipped INTEGER NOT NULL DEFAULT 0,
+    round INTEGER NOT NULL,
+    workdir TEXT, -- Reserved in schema 26.
     PRIMARY KEY (run, n)
 );
 CREATE INDEX attempts_instance ON attempts (instance);

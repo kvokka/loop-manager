@@ -247,6 +247,16 @@ async fn a_repeat_stays_in_its_round_and_a_round_starts_the_count_again() {
     let remark = again("check script: exit 1");
     assert_eq!(w.driver.sent(&run, 1).1, [FIRST.to_owned(), remark, FIRST.to_owned()]);
     assert_eq!(w.repeat_view(&run)["round"], 2);
+    // The repeat stays in round 1; the session attempt after the return is of round 2.
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let view = reader.run_with_attempts(&run, true).unwrap().unwrap();
+    let rounds: Vec<_> = view["attempts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["round"].as_u64().unwrap())
+        .collect();
+    assert_eq!(rounds, [1, 1, 1, 2, 2]);
 }
 
 /// A restart in the middle of the second execution: the count survives, so the step has no third.

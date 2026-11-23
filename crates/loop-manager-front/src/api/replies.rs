@@ -55,7 +55,7 @@ pub(crate) struct Run {
     /// The outcomes of the other steps the run went through, by step name: the last attempt of each.
     #[schema(value_type = Object)]
     steps: Map<String, Value>,
-    /// The last 20, newest last.
+    /// The last 20, newest last; all recorded attempts with `all_attempts=true`.
     attempts: Vec<Attempt>,
     /// The tokens of every attempt of the run.
     usage: Usage,
@@ -80,6 +80,11 @@ pub(crate) struct Outcome {
 
 #[derive(ToSchema)]
 pub(crate) struct Attempt {
+    /// Stable ACP session ID on the first attempt of a session in its step and round, with all_attempts=true.
+    acp_session_id: Option<String>,
+    round: Option<u32>,
+    result: Option<String>,
+    summary: Option<String>,
     n: u32,
     generation: u32,
     /// `new_session` or `resume`.

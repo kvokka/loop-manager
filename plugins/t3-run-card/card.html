@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Run card</title>
+<title>T3 Code run card</title>
 <style>
 :root{color-scheme:light dark;font:14px/1.4 var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,CanvasText);--line:var(--color-border-secondary,GrayText);--dim:var(--color-text-secondary,GrayText);--blue:light-dark(#135eb6,#85bdff);--amber:light-dark(#805000,#f1c368);--green:light-dark(#216944,#85d7a5);--red:light-dark(#ad3434,#ff9995)}
 *{box-sizing:border-box}body{margin:0;padding:8px}details{max-width:760px;margin:auto}summary{cursor:pointer;padding:4px;overflow-wrap:anywhere}strong,code,.name{font-family:var(--font-mono,ui-monospace,monospace)}#heading{margin-inline-start:4px}#position{margin-inline-start:8px;color:var(--dim)}
@@ -13,24 +13,34 @@ li{position:relative;display:grid;grid-template-columns:25px minmax(0,1fr) minma
 [data-tone=active]{color:var(--blue)}[data-tone=waiting]{color:var(--amber)}[data-tone=passed]{color:var(--green)}[data-tone=failed]{color:var(--red)}[aria-current=step]{font-weight:650;box-shadow:inset -2px 0 currentColor;background:color-mix(in srgb,currentColor 6%,transparent);border-radius:6px}
 [data-tone=skipped] .symbol{border-style:dashed}.arrival{animation:arrive .6s ease-out}@keyframes arrive{from{box-shadow:inset 0 0 0 2px currentColor}to{box-shadow:inset 0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.arrival{animation:none}}
 svg{position:absolute;inset:0;pointer-events:none;width:100%;height:100%;overflow:visible;fill:none;stroke:var(--line);stroke-width:1.2}path.used{stroke:var(--blue);stroke-width:2}footer{margin:10px 4px;color:var(--dim);font-size:12px;overflow-wrap:anywhere}#notice{color:var(--amber)}
+button{font:inherit;color:inherit}nav{display:flex;align-items:center;gap:.5em;margin:10px 4px}
+.name:has(.session-link){white-space:normal;overflow:visible}.session-link{color:var(--blue);background:none;border:0;padding:0;text-decoration:underline;text-underline-offset:.18em;cursor:pointer}
+#rounds button{position:relative;width:24px;height:24px;padding:0;line-height:1;border:1px solid var(--line);border-radius:4px;background:transparent;cursor:pointer}
+@media(pointer:coarse){#rounds button::after{content:"";position:absolute;inset:-10px}}
+#rounds button:disabled{opacity:.35;cursor:default}#round{min-width:8ch;text-align:center;font-variant-numeric:tabular-nums}
 </style>
-<details open><summary><strong id="heading">Run card</strong><span id="position" aria-live="polite">Connecting…</span></summary>
+<details open><summary><strong id="heading">T3 Code run card</strong><span id="position" aria-live="polite">Connecting…</span></summary>
+<nav id="rounds" aria-label="Run rounds"><button id="prev" type="button" aria-label="Previous round" disabled>&lt;</button>
+<span id="round" aria-live="polite">Round 1</span><button id="next" type="button" aria-label="Next round" disabled>&gt;</button></nav>
 <div id="graph"><svg aria-hidden="true"></svg><ol id="steps"></ol></div>
-<footer><span id="route"></span> <span id="notice" role="status"></span></footer></details>
+<footer><span id="route"></span> <span id="notice" role="status"></span> <span id="open-status" role="status"></span></footer></details>
 <script>
 "use strict";
 const el = id => document.getElementById(id);
 const svg = document.querySelector("svg");
+let selectedRound = null;
+const destinations = new Map();
+const importing = new Set();
 let model, signature, nextId = 0, stopped = false;
 const pending = new Map();
 
 function send(method, params, id) {
   parent.postMessage({jsonrpc:"2.0", method, params, ...(id === undefined ? {} : {id})}, "*");
 }
-function request(method, params) {
+function request(method, params, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const id = ++nextId;
-    const timer = setTimeout(() => {pending.delete(id); reject(Error("Host did not respond"));}, 30000);
+    const timer = setTimeout(() => {pending.delete(id); reject(Error("Host did not respond"));}, timeout);
     pending.set(id, message => {
       clearTimeout(timer);
       if (message.error) reject(Error(message.error.message)); else resolve(message.result);
@@ -65,7 +75,7 @@ function drawEdges() {
     const a = from.top + from.height / 2 - graph.top, b = to.top + to.height / 2 - graph.top;
     const path = document.createElementNS("http://www.w3.org/2000/svg","path");
     path.setAttribute("d",`M ${x} ${a} H ${x2} V ${b} H ${x} m 4 -3 l -4 3 4 3`);
-    if (model.card.back_from?.includes(s.step)) path.setAttribute("class","used");
+    if (selectedRound === null && model.card.back_from?.includes(s.step)) path.setAttribute("class","used");
     else path.setAttribute("stroke-dasharray","3 3");
     paths.push(path);
   });
@@ -81,19 +91,23 @@ function countLabel(value, limit) {
 }
 function display(data) {
   model = data;
-  const key = JSON.stringify([data.card,data.plan]);
+  const key = JSON.stringify([data.card,data.plan,data.roundHistory,selectedRound]);
   if (key === signature) return;
   const previous = signature !== undefined;
   signature = key;
   const c = data.card, steps = data.plan, current = steps.findIndex(s => s.step === c.step);
+  const round = selectedRound ?? c.round, isCurrent = round === c.round;
+  const history = data.roundHistory?.[round] ?? {};
+  el("round").textContent = "Round " + round;
+  el("prev").disabled = round <= 1;
+  el("next").disabled = round >= c.round;
   const returns = steps.filter(s => s.back_to && c.back_from?.includes(s.step));
   const entries = returns.map(s => steps.findIndex(t => t.step === s.back_to)).filter(i => i >= 0);
   const start = c.round === 1 ? 0 : Math.min(...entries);
   const [tone,status] = currentStatus(c);
-  el("heading").textContent = c.formula;
+  el("heading").textContent = "T3 Code · " + c.formula;
   const position = [c.step, status];
-  if (c.round > 1) position.unshift("Round " + countLabel(c.round, c.rounds));
-  el("position").textContent = position.join(" · ");
+  el("position").textContent = isCurrent ? position.join(" · ") : "";
   const links = steps.filter(s => s.back_to);
   el("steps").style.setProperty("--nodes", links.length ? `calc(100% - ${18 + 5 * links.length}px)` : "100%");
   const rows = steps.map((s,i) => {
@@ -101,7 +115,12 @@ function display(data) {
     row.dataset.step = s.step;
     row.dataset.kind = s.kind;
     let state = ["future",data.terminal ? "Not reached" : "Ahead"];
-    if (i === current) {
+    const recorded = history[s.step];
+    if (!isCurrent) {
+      state = recorded?.result === "pass" ? ["passed","Passed"] :
+        recorded?.result === "fail" ? ["failed","Failed"] :
+        recorded ? ["skipped","Ended"] : ["skipped","No attempt"];
+    } else if (i === current) {
       state = [tone,status + (c.step_attempt > 1 ? ` · attempt ${countLabel(c.step_attempt, s.max_attempts)}` : "")];
       row.setAttribute("aria-current","step");
       if (previous) row.className = "arrival";
@@ -125,11 +144,28 @@ function display(data) {
     label.className = "step-label";
     const name = document.createElement("span");
     name.className = "name";
-    const agent = i === current ? c.agent || s.agent : s.agent;
+    const agent = isCurrent && i === current ? c.agent || s.agent : s.agent;
+    const sessions = recorded?.sessions || [];
     name.textContent = s.title || agent || s.step;
+    if (sessions.length) {
+      const buttons = sessions.map((session,index) => {
+        if (session.url) destinations.set(session.attempt,session.url);
+        const title = session.agent || (isCurrent && i === current ? agent : null) || s.step + " (" + session.harness + ")";
+        const button = document.createElement(destinations.has(session.attempt) ? "a" : "button");
+        if (button.tagName === "A") button.href = destinations.get(session.attempt);
+        else button.type = "button";
+        button.className = "session-link";
+        button.textContent = title + (sessions.length > 1 ? " · session " + (index+1) : "");
+        button.title = s.step + " · " + session.harness + " · attempt " + session.attempt;
+        button.onclick = event => { event.preventDefault(); openThread(session.attempt); };
+        return button;
+      });
+      name.replaceChildren();
+      buttons.forEach((button,index) => { if(index) name.append(" / "); name.append(button); });
+    }
     name.title = [s.step, agent, s.title].filter(Boolean).join(" · ");
     label.append(name);
-    const summary = c.summaries?.[s.step];
+    const summary = recorded?.summary ?? (isCurrent ? c.summaries?.[s.step] : null);
     if (typeof summary === "string" && summary.trim() && state[0] !== "future" && state[0] !== "skipped") {
       const outcome = document.createElement("span");
       outcome.className = "outcome";
@@ -146,10 +182,43 @@ function display(data) {
   });
   el("steps").replaceChildren(...rows);
   const detail = [c.id];
-  if (returns.length) detail.push(`↶ ${returns.map(s => s.step).join(", ")} → ${steps[start]?.step || "earlier step"}`);
-  if (c.reason && c.state !== "passed") detail.push(c.reason);
+  if (isCurrent && returns.length) detail.push(`↶ ${returns.map(s => s.step).join(", ")} → ${steps[start]?.step || "earlier step"}`);
+  if (isCurrent && c.reason && c.state !== "passed") detail.push(c.reason);
   el("route").textContent = detail.join(" · ");
   drawEdges();
+}
+function moveRound(delta) {
+  const round = Math.max(1, Math.min(model.card.round, (selectedRound ?? model.card.round) + delta));
+  selectedRound = round === model.card.round ? null : round;
+  el("open-status").textContent = "";
+  display(model);
+}
+el("prev").onclick = () => moveRound(-1);
+el("next").onclick = () => moveRound(1);
+async function openThread(attempt) {
+  if (importing.has(attempt)) return;
+  importing.add(attempt);
+  const status = el("open-status");
+  try {
+    let url = destinations.get(attempt);
+    if (!url) {
+      status.textContent = "Opening the native T3 thread…";
+      const answer = unpack(await request("tools/call",{name:"open_run_thread", arguments:{
+        socket:model.socket, run:model.card.id, attempt
+      }},180000));
+      url = answer.url;
+      if (!url.startsWith("https://app.t3.codes/threads/")) throw Error("Invalid T3 thread link");
+      destinations.set(attempt,url);
+      signature = undefined;
+      display(model);
+    }
+    // T3 handles HTTPS universal links through the MCP Apps host, outside the card.
+    const opened = await request("ui/open-link",{url});
+    if (opened?.isError) throw Error("T3 declined to open the link");
+    status.textContent = "";
+  } catch(error) {
+    status.textContent = destinations.has(attempt) ? "Thread ready. Tap the agent name to open it in T3." : error.message;
+  } finally { importing.delete(attempt); }
 }
 function unpack(reply) {
   if (reply.isError || !reply.structuredContent) throw Error(reply.content?.[0]?.text || "Missing card data");
@@ -191,7 +260,7 @@ new ResizeObserver(() => {
   drawEdges();
   send("ui/notifications/size-changed",{height:Math.ceil(document.body.getBoundingClientRect().height)});
 }).observe(document.body);
-request("ui/initialize",{appInfo:{name:"run-card",version:"0.0.7"},appCapabilities:{},protocolVersion:"2026-01-26"})
+request("ui/initialize",{appInfo:{name:"t3-run-card",version:"0.3.0"},appCapabilities:{},protocolVersion:"2026-01-26"})
   .then(result => {context(result.hostContext);send("ui/notifications/initialized",{});})
   .catch(error => el("notice").textContent = error.message);
 </script></html>
