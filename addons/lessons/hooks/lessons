@@ -6,8 +6,8 @@ data=$1
 input=$(cat)
 field() { printf '%s' "$input" | jq -r "$1 // empty"; }
 
-# Only the session's own agent, in a run on a bead; a subagent's stop is not the end of the work.
-[ -n "${LOOP_MANAGER_RUN:-}" ] && [ -n "${LOOP_MANAGER_BEAD:-}" ] || exit 0
+# Only the session's own agent, in a run on an issue; a subagent's stop is not the end of the work.
+[ -n "${LOOP_MANAGER_RUN:-}" ] && [ -n "${LOOP_MANAGER_ISSUE:-}" ] || exit 0
 [ -z "$(field .agent_id)" ] || exit 0
 session=$(field .session_id)
 [ -n "$session" ] || exit 0
@@ -24,7 +24,7 @@ if [ -f "$me.asked" ]; then
     case $word in "" | NONE) exit 0 ;; esac
     printf 'LESSONS: %s\n\n%s' "$LOOP_MANAGER_RUN" "$notes" >"$me.lessons.md"
     loop-manager comment --file "$me.lessons.md" >/dev/null ||
-        echo "lessons: the lessons of $session are not on $LOOP_MANAGER_BEAD" >&2
+        echo "lessons: the lessons of $session are not on $LOOP_MANAGER_ISSUE" >&2
     exit 0
 fi
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decision 43: the core knows no harness and no tracker by name; what it needs comes through the driver
+# Decision 43: the core knows no harness and no tracker by name, nor br's name of an issue (a bead); what it needs comes through the driver
 # capabilities and the tracker interface, in any letter case. Checks the code of the core (`loop-manager-contract`, `loop-manager-core`)
 # outside its tests: `src/tests/`, every `tests.rs` (the tests of a module, in a file of their own) and the top-level
 # item under a `#[cfg(test)]` or `#[test]` (up to its closing `}` at column 0 when it opens a block).
@@ -11,7 +11,7 @@ if [[ -z $harnesses ]]; then
   echo "no adapter found in the table of crates/loop-manager/src/harness.rs"
   exit 1
 fi
-names="\\b($harnesses|br|max_sessions|instance_idle_s|beads_dir)\\b|\\.beads\\b"
+names="\\b($harnesses|br|max_sessions|instance_idle_s)\\b|bead"
 found=$(find crates/loop-manager-contract/src crates/loop-manager-core/src -name '*.rs' -not -path '*/src/tests/*' -not -name tests.rs -print0 |
   sort -z |
   xargs -0 awk '

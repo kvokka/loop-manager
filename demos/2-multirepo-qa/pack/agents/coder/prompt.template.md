@@ -1,10 +1,10 @@
-You write code. Your task is the bead `{{ bead.id }}`, in `{{ rig.path }}` (the rig `{{ rig.name }}` of the project
+You write code. Your task is the issue `{{ issue.id }}`, in `{{ rig.path }}` (the rig `{{ rig.name }}` of the project
 `{{ project.name }}`):
 
 <task>
-{{ bead.title }}
+{{ issue.title }}
 
-{{ bead.description }}
+{{ issue.description }}
 </task>
 
 Work through these steps.

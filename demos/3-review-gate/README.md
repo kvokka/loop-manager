@@ -10,20 +10,20 @@ The request is one sentence: "Let a visitor of the site type their name and see 
 KISS".
 
 - `pack/` is the pack `dev`, with not a word about the task:
-  - agents `planner` (files the beads), `coder` (does one bead in its rig and commits it) and `reviser` (works the
+  - agents `planner` (files the issues), `coder` (does one issue in its rig and commits it) and `reviser` (works the
     comments of the review). The reviser reads them only from the file the formula gives it: a `PreToolUse` hook of
     its own, in its `agent.toml`, denies it every shell command that calls `gh`;
   - formula `feature-base` (`internal = true`): `plan`, an ai step of `planner`, and `work`, a `drain` step that gives
-    every ready bead a run of `implement`, two at once;
+    every ready issue a run of `implement`, two at once;
   - formula `feature`, the one a user starts:
     1. `build`, a `formula` step that runs `feature-base`;
     2. `collect`, an exec step with `if = { back_from = "review" }`: after a return from the review, it takes the
        comments and reviews of the authors in the input `feedback_from` (logins, comma-separated; none given,
-       nobody's) that it has not taken yet, writes them to `root/feedback/<bead>.md` and marks each with the reaction
+       nobody's) that it has not taken yet, writes them to `root/feedback/<issue>.md` and marks each with the reaction
        "eyes";
     3. `address`, an ai step of `reviser` with the same `if`;
     4. `pr`, an exec step: in each repository with work of the feature it moves that work to the branch
-       `feature/<bead>`, pushes it and opens or updates the pull request; the root's comes last, with a page that
+       `feature/<issue>`, pushes it and opens or updates the pull request; the root's comes last, with a page that
        links the others, and its address is the last line of the step's output;
     5. `review`, an `await` step with `back_to = "collect"`: it waits for `loop-manager run resolve <run> review pass|fail`,
        which the bridge sends;
@@ -33,7 +33,7 @@ KISS".
     Each repository keeps the feature on one branch over every round, so `feature` has no `worktree`, which is a branch
     per run. Every script can run again with the same result;
   - formula `cleanup`: closes the open pull requests of a feature, deletes its branches, takes each repository back to
-    its default branch as the remote has it and closes its bead.
+    its default branch as the remote has it and closes its issue.
 - `root/` holds the configuration and the tracker of the project; its repository, `[root] path`, is `gate-demo/`.
   `loop-manager.toml` sets the models, `feedback_from` (`kvokka-agent`; put your login there) and two triggers: `cleanup` on
   `run.cancelled` of a `feature` run, and on nothing else (a failed run is left for a human to look into), and
@@ -57,7 +57,7 @@ while there are sessions and gets no socket of the API. It follows the daemon's 
 which covers a run that waited before it started. While a run of the project waits on `review`, it looks at the
 feature's pull requests through `gh` every `INTERVAL` seconds (30 by default); with no run waiting, it asks GitHub
 nothing. The root's pull request is the last line of the output of `pr`, the others are those of the branch
-`feature/<bead>` in each repository.
+`feature/<issue>` in each repository.
 
 - The root's pull request merged: `loop-manager run resolve <run> review pass`, with `{"merged_by": <login>}` as the data.
 - Closed without a merge: `loop-manager run cancel <run>` with the reason `closed without a merge: <address>`; the trigger

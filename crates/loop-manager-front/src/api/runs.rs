@@ -28,7 +28,7 @@ const RUN_VIEWS: &str = "Run views as `GET /v1/runs/{id}` gives them, without `b
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateRun {
     project: String,
-    /// Absent: the rig of the id prefix of the bead its task names; else the run
+    /// Absent: the rig of the id prefix of the issue its task names; else the run
     /// works in the project root.
     rig: Option<String>,
     /// `name` or `<pack>.<name>`, as the project writes it.
@@ -50,7 +50,7 @@ pub(crate) struct ParentAttempt {
 }
 
 /// Starts a run of a formula; the reply is `{"run": "<id>"}`, or `{"nothing_ready": true}` when a task input
-/// `{ next_ready = true }` finds no ready bead to take (docs/design/tracker-br.md). With `parent`, a stale token or a
+/// `{ next_ready = true }` finds no ready issue to take (docs/design/tracker-br.md). With `parent`, a stale token or a
 /// chain deeper than 10 is `rejected`.
 #[utoipa::path(post, path = "/v1/runs", request_body = CreateRun,
     params(("Idempotency-Key" = Option<String>, Header, description = "Repeats return the first reply")),
@@ -245,8 +245,8 @@ pub(crate) struct CommentRun {
     text: String,
 }
 
-/// A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the
-/// reply is `{"answer": "accepted"|"no_bead"|"stale_attempt"|"run_terminal"|"invalid"}`.
+/// A comment of the attempt on the issue of its run, queued for the tracker as the attempt's actor (contracts 6.3); the
+/// reply is `{"answer": "accepted"|"no_issue"|"stale_attempt"|"run_terminal"|"invalid"}`.
 #[utoipa::path(post, path = "/v1/runs/{id}/comment", request_body = CommentRun,
     params(("id" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
     responses((status = OK, body = Commented), Keyed))]

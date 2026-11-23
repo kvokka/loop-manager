@@ -11,7 +11,7 @@ enum Shape {
 
 use Shape::{Any, Leaf, Obj};
 
-const BEAD: Shape = Obj(&[
+const ISSUE: Shape = Obj(&[
     ("id", Leaf),
     ("title", Leaf),
     ("description", Leaf),
@@ -36,7 +36,7 @@ const RUN: Shape = Obj(&[
     ("class", Leaf),
     ("attempt", Leaf),
     ("generation", Leaf),
-    ("bead", Leaf),
+    ("issue", Leaf),
     ("workdir", Leaf),
     ("depth", Leaf),
     ("parent_run", Leaf),
@@ -149,11 +149,11 @@ fn payload(event_type: &str) -> Option<&'static [(&'static str, Shape)]> {
         "trigger.switched" => &[("trigger", Leaf), ("enabled", Leaf)],
         "gate.closed" => &[("gate", GATE)],
         "gate.opened" => &[("key", Leaf), ("by", Leaf)],
-        "bead.created" | "bead.updated" | "bead.closed" | "bead.ready" => {
-            &[("bead", BEAD), ("actor", Leaf), ("changed", Leaf)]
+        "issue.created" | "issue.updated" | "issue.closed" | "issue.ready" => {
+            &[("issue", ISSUE), ("actor", Leaf), ("changed", Leaf)]
         }
-        "bead.labeled" => &[("bead", BEAD), ("actor", Leaf), ("label", Leaf), ("ready", Leaf)],
-        "tracker.sync_failed" => &[("op", Leaf), ("bead", Leaf), ("error", Leaf), ("next_retry_at", Leaf)],
+        "issue.labeled" => &[("issue", ISSUE), ("actor", Leaf), ("label", Leaf), ("ready", Leaf)],
+        "tracker.sync_failed" => &[("op", Leaf), ("issue", Leaf), ("error", Leaf), ("next_retry_at", Leaf)],
         "addon.hook_failed" => &[
             ("addon", Leaf),
             ("hook_type", Leaf),
@@ -226,9 +226,9 @@ pub(crate) fn event_path(event_type: &str, path: &str, matchable: bool) -> Optio
     })
 }
 
-/// Whether `path` exists in a `Bead` (contracts 5.2).
-pub(crate) fn bead_path(path: &str) -> bool {
-    has(&BEAD, path)
+/// Whether `path` exists in an `Issue` (contracts 5.2).
+pub(crate) fn issue_path(path: &str) -> bool {
+    has(&ISSUE, path)
 }
 
 /// Whether `path` exists in a `RunView` (contracts 1.3).

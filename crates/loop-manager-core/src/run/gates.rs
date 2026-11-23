@@ -21,7 +21,7 @@ pub struct GateSpec {
 
 /// A gate key of contracts 7: `orchestrator` or one of the prefixed kinds with a non-empty name.
 pub fn valid_key(key: &str) -> bool {
-    const KINDS: [&str; 6] = ["project:", "rig:", "agent:", "bead:", "account:", "model:"];
+    const KINDS: [&str; 6] = ["project:", "rig:", "agent:", "issue:", "account:", "model:"];
     key == "orchestrator" || KINDS.iter().any(|k| key.strip_prefix(k).is_some_and(|n| !n.is_empty()))
 }
 
@@ -68,14 +68,14 @@ impl RunHandler {
         if !row.exec() {
             keys.push(format!("agent:{}", row.agent));
         }
-        if let Some(bead) = &row.bead {
-            keys.push(format!("bead:{}/{bead}", row.project));
+        if let Some(issue) = &row.issue {
+            keys.push(format!("issue:{}/{issue}", row.project));
         } else if row.state == "queued" {
-            // A task may name a bead the core has not read yet; it gets that bead only as it prepares
+            // A task may name an issue the core has not read yet; it gets that issue only as it prepares
             // (docs/design/contracts.md 5).
             let inputs: Value = serde_json::from_str(&row.inputs).unwrap_or_default();
             let named = inputs.as_object().into_iter().flatten().filter_map(|(_, v)| v.as_str());
-            keys.extend(named.map(|text| format!("bead:{}/{text}", row.project)));
+            keys.extend(named.map(|text| format!("issue:{}/{text}", row.project)));
         }
         let (account, model): (Option<String>, Option<String>) = conn.query_row(
             "SELECT account, CASE WHEN config IS NULL THEN model ELSE 'model:' || json_extract(config, '$.harness') \
@@ -217,7 +217,7 @@ impl RunHandler {
             return Ok(());
         }
         if by.is_none() {
-            Self::forgive_bead(tx, key)?;
+            Self::forgive_issue(tx, key)?;
         }
         let opened_by = if by.is_some() { "timer" } else { "operator" };
         gate_event(tx, "gate.opened", json!({ "key": key, "by": opened_by }))?;

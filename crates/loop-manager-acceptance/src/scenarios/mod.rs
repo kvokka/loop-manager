@@ -13,7 +13,7 @@ mod c10_quota;
 mod c12_explain;
 mod c13_instances;
 mod c14_shared_mcp;
-mod c16_beads;
+mod c16_issues;
 mod c17_mcp;
 mod c18_journal;
 mod c19_gates;
@@ -70,7 +70,7 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "5a",
-        title: "an exec planner creates three beads of an epic; a subscription closes each; one correlation",
+        title: "an exec planner creates three issues of an epic; a subscription closes each; one correlation",
         launch: Launch::Ci,
         run: |env| Box::pin(c05a_chain::run(env)),
     },
@@ -138,9 +138,9 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "16",
-        title: "a bead: claim held through a crash, returned on failure, closed on pass, one run per bead",
+        title: "an issue: claim held through a crash, returned on failure, closed on pass, one run per issue",
         launch: Launch::Ci,
-        run: |env| Box::pin(c16_beads::run(env)),
+        run: |env| Box::pin(c16_issues::run(env)),
     },
     Scenario {
         criterion: "17",
@@ -169,21 +169,21 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "20",
-        title: "demo 1's pack: beads with rig prefixes, coders on claude and codex, the report finds every bead closed",
+        title: "demo 1's pack: issues with rig prefixes, coders on claude and codex, the report finds every issue closed",
         launch: Launch::Ci,
         run: |env| Box::pin(c20_demo1::run(env)),
     },
     Scenario {
         criterion: "20",
         title: "demo 2's pack in a second round: format fails, the planner gets rumdl's findings and files a fix, the \
-        drain runs only the new bead, format and qa pass",
+        drain runs only the new issue, format and qa pass",
         launch: Launch::Ci,
         run: |env| Box::pin(c20_demo2::run(env)),
     },
     Scenario {
         criterion: "24",
-        title: "a task's root gets beads with rig prefixes and agent and harness labels; drain gives each a run; \
-        kill -9 in every step: no step and no bead runs twice",
+        title: "a task's root gets issues with rig prefixes and agent and harness labels; drain gives each a run; \
+        kill -9 in every step: no step and no issue runs twice",
         launch: Launch::Ci,
         run: |env| Box::pin(c24_drain::run(env)),
     },
@@ -209,7 +209,7 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "30",
-        title: "a drain step on br keeps one bead in work, two with `pool = 2`; `continue` runs the rest after a \
+        title: "a drain step on br keeps one issue in work, two with `pool = 2`; `continue` runs the rest after a \
                 failure, `soft_stop` ends the started across kill -9 and gives no new, `hard_stop` cancels them",
         launch: Launch::Ci,
         run: |env| Box::pin(c30_drain::run(env)),

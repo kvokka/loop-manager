@@ -103,21 +103,21 @@ deny() {
 ends=true
 [ -z "$codex" ] || ends=false
 
-# Past `hard`: the dump goes on the bead, the session declares the outcome `cut`, and the agent stops.
+# Past `hard`: the dump goes on the issue, the session declares the outcome `cut`, and the agent stops.
 cut_off() {
     if [ -z "$agent" ]; then stop="$data/$session.stop"; else stop="$me.stop"; fi
     if [ ! -f "$stop" ]; then
         dump "$1" >"$me.dump.md"
-        if [ -n "${LOOP_MANAGER_BEAD:-}" ]; then
+        if [ -n "${LOOP_MANAGER_ISSUE:-}" ]; then
             loop-manager comment --file "$me.dump.md" >/dev/null ||
-                echo "context-budget: the dump is not on $LOOP_MANAGER_BEAD" >&2
+                echo "context-budget: the dump is not on $LOOP_MANAGER_ISSUE" >&2
         fi
         # A subagent's stop is its own: the session goes on, and its agent declares the outcome.
         # A wrong `cut` costs only the outcome: the session is stopped all the same.
         if [ -z "$agent" ]; then
             case $cut in
             pass | fail)
-                loop-manager finish "$cut" --summary "context budget: the session was stopped; its state is on the bead" >&2 ||
+                loop-manager finish "$cut" --summary "context budget: the session was stopped; its state is on the issue" >&2 ||
                     echo "context-budget: the outcome $cut is not accepted" >&2
                 ;;
             *) echo "context-budget: cut is \`$cut\`, not pass or fail; no outcome is declared" >&2 ;;
@@ -177,8 +177,8 @@ PostToolUse)
     summary="$summary (files, where it stopped, the next step)"
     if [ -n "$agent" ]; then
         context "$wrap; then return your summary to your caller: $summary."
-    elif [ -n "${LOOP_MANAGER_BEAD:-}" ]; then
-        context "$wrap; commit what is done; write your summary to a file and leave it on the bead with \`loop-manager comment --file <file>\`: $summary; then end with \`loop-manager finish\`."
+    elif [ -n "${LOOP_MANAGER_ISSUE:-}" ]; then
+        context "$wrap; commit what is done; write your summary to a file and leave it on the issue with \`loop-manager comment --file <file>\`: $summary; then end with \`loop-manager finish\`."
     else
         context "$wrap; commit what is done; then end with \`loop-manager finish\`, your summary in \`--summary\`: $summary."
     fi

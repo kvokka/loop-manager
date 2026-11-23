@@ -1,15 +1,15 @@
 name = "cleanup"
-description = "Clears what a cancelled feature left: its open pull requests, its branches and its bead"
+description = "Clears what a cancelled feature left: its open pull requests, its branches and its issue"
 
 [inputs]
-bead = { type = "string", required = true }   # the bead of the cancelled feature, which nothing holds any more
+issue = { type = "string", required = true }   # the issue of the cancelled feature, which nothing holds any more
 
 [[step]]
 name = "cleanup"
 kind = "exec"
 command = ["sh", "-c", '''
 set -eu
-branch="feature/$LOOP_MANAGER_INPUT_BEAD"
+branch="feature/$LOOP_MANAGER_INPUT_ISSUE"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
 for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); do
@@ -23,8 +23,8 @@ for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); 
   ! git show-ref -q --verify "refs/heads/$branch" || git branch -q -D "$branch"
 done
 cd "$(printf '%s' "$places" | jq -r '.[0].dir')"
-# The beads under it stay as they are: nothing gives them out once their root is closed.
-[ "$(br show "$LOOP_MANAGER_INPUT_BEAD" --json | jq -r '.[0].status')" = closed ] ||
-  br close "$LOOP_MANAGER_INPUT_BEAD" --force --reason "the feature was cancelled" --json >/dev/null
-echo "cleanup: $LOOP_MANAGER_INPUT_BEAD"
+# The issues under it stay as they are: nothing gives them out once their root is closed.
+[ "$(br show "$LOOP_MANAGER_INPUT_ISSUE" --json | jq -r '.[0].status')" = closed ] ||
+  br close "$LOOP_MANAGER_INPUT_ISSUE" --force --reason "the feature was cancelled" --json >/dev/null
+echo "cleanup: $LOOP_MANAGER_INPUT_ISSUE"
 ''']

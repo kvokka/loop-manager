@@ -1,6 +1,6 @@
 //! Criterion 20, without a model: demo 1's pack, word for word, laid out as the demo lays itself out, on the real
-//! `claude` and `codex` against fake APIs. The planner files a bead for each rig with the rig's prefix, the coder of
-//! `frontend` runs on claude and that of `backend` on codex, and `report` finds every bead under the request closed.
+//! `claude` and `codex` against fake APIs. The planner files an issue for each rig with the rig's prefix, the coder of
+//! `frontend` runs on claude and that of `backend` on codex, and `report` finds every issue under the request closed.
 
 use crate::{
     Env,
@@ -13,11 +13,11 @@ use std::{fs, path::Path, process::Command, sync::Arc, time::Duration};
 
 const WITHIN: Duration = Duration::from_secs(120);
 
-/// A bead per rig under the request: `frontend` by its derived prefix `f`, `backend` by its `api`; `{dir}` keeps
+/// An issue per rig under the request: `frontend` by its derived prefix `f`, `backend` by its `api`; `{dir}` keeps
 /// their ids.
-const PLAN: &str = "set -e\nbead=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .bead)\n\
-    new() { BD_ISSUE_PREFIX=$1 br create \"$2\" --deps \"parent-child:$bead\" -l \"agent:coder,harness:$3\" \
-    --description \"$2.\" --silent >> {dir}/beads; }\n\
+const PLAN: &str = "set -e\nissue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
+    new() { BD_ISSUE_PREFIX=$1 br create \"$2\" --deps \"parent-child:$issue\" -l \"agent:coder,harness:$3\" \
+    --description \"$2.\" --silent >> {dir}/issues; }\n\
     new f 'Write the page' claude\nnew api 'Write the server' codex\n{loop_manager} finish pass --summary planned\n";
 
 const CODE: &str = "set -e\necho done > DONE.md\n{loop_manager} finish pass --summary done\n";
@@ -98,11 +98,13 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     let run = reply["run"].as_str().expect("a run").to_owned();
     let view = d.until_state(&run, "passed", WITHIN).await;
 
-    let beads = fs::read_to_string(state.path().join("beads")).unwrap();
-    let beads: Vec<&str> = beads.lines().collect();
-    let [page, server] = beads[..] else { panic!("{beads:?}") };
-    assert!(page.starts_with("f-") && server.starts_with("api-"), "{beads:?}");
-    // The last step, `report`, shows the tree of the request with both beads closed.
+    let issues = fs::read_to_string(state.path().join("issues")).unwrap();
+    let issues: Vec<&str> = issues.lines().collect();
+    let [page, server] = issues[..] else {
+        panic!("{issues:?}")
+    };
+    assert!(page.starts_with("f-") && server.starts_with("api-"), "{issues:?}");
+    // The last step, `report`, shows the tree of the request with both issues closed.
     let tree = view["outcome"]["data"]["stdout"].as_str().unwrap_or_default();
     for (id, title) in [(page, "Write the page"), (server, "Write the server")] {
         assert!(tree.contains(&format!("{id}: {title} [P2] [closed]")), "{view}");
@@ -116,7 +118,7 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     );
     let out = d.cli(&["--json", "run", "list", "--project", "planner-executor"]);
     let runs: Value = serde_json::from_slice(&out.stdout).expect("run list");
-    let on = |bead: &str| runs.as_array().unwrap().iter().filter(|r| r["bead"] == bead).count();
+    let on = |issue: &str| runs.as_array().unwrap().iter().filter(|r| r["issue"] == issue).count();
     assert_eq!((on(page), on(server)), (1, 1), "{runs}");
     format!("{page} on claude and {server} on codex, filed by the planner with the rig prefixes, closed; report passed")
 }

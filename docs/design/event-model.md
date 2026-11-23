@@ -36,7 +36,7 @@ all of them share.
   the schema takes the next number, and the daemon does not start on a state of another number (the message says to
   move the state directory away).
 - The state holds runtime only: runs, attempts, session references, harness instances (the process part and the handle:
-  pid, start time, pgid), bead ownership with its generation and failure count, ready sets, the labels of the beads
+  pid, start time, pgid), issue ownership with its generation and failure count, ready sets, the labels of the issues
   read and tracker cursors,
   deadlines (timers and schedules), gates (operator holds among them), idempotency keys, the outbox and the effects
   queue. Each attempt records the round of its run when the attempt starts. The session reference and prompt
@@ -110,7 +110,7 @@ Resync is not a tick: it advances nothing in normal operation and only catches l
   swept again (invariants 7, 20), a normal transition with no event. A recorded instance and a marker this state
   never gave (another daemon's) are left alone. `/proc` is walked only when there is such an instance. Markers of
   services and exec steps are not checked: the state keeps no history of their ids.
-- An ambiguous difference (for example a bead whose owner changed outside the daemon) is reported as
+- An ambiguous difference (for example an issue whose owner changed outside the daemon) is reported as
   `resync.diverged` and no automatic effect follows (invariant 20).
 - Services (`kind = 'service'`) are not checked on resync: their process is supervised by its own task, which sees
   its exit directly.

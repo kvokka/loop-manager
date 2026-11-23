@@ -13,10 +13,10 @@ use std::{
 pub const TEMPLATE: &str = "prompt.template.md";
 
 /// The roots of a prompt template (contracts 2.3).
-const ROOTS: &[&str] = &["inputs", "bead", "rig", "run", "project", "steps", "remarks", "agent"];
+const ROOTS: &[&str] = &["inputs", "issue", "rig", "run", "project", "steps", "remarks", "agent"];
 
-/// What only a prompt shows of the run's bead: its comments, and its parents with theirs (contracts 2.3).
-const LINEAGE: [&str; 2] = ["bead.comments", "bead.parents"];
+/// What only a prompt shows of the run's issue: its comments, and its parents with theirs (contracts 2.3).
+const LINEAGE: [&str; 2] = ["issue.comments", "issue.parents"];
 
 /// The prompt of an agent in one project.
 #[derive(Clone, Debug)]
@@ -29,7 +29,7 @@ pub struct Prompt {
 }
 
 impl Prompt {
-    /// Whether the template shows the comments or the parents of the run's bead: a run reads them as it enters
+    /// Whether the template shows the comments or the parents of the run's issue: a run reads them as it enters
     /// the step (docs/design/contracts.md 5).
     pub fn shows_lineage(&self) -> bool {
         self.template.paths().any(|p| LINEAGE.contains(&p))
@@ -139,7 +139,7 @@ fn path(path: &str, inputs: &BTreeMap<String, Input>, before: &[Step], optional:
     let first = rest.split('.').next().unwrap_or_default();
     match root {
         "inputs" => inputs.contains_key(first),
-        "bead" => inputs.values().any(|i| i.kind == InputType::Task) && schema::bead_path(rest),
+        "issue" => inputs.values().any(|i| i.kind == InputType::Task) && schema::issue_path(rest),
         "run" => schema::run_path(rest),
         "project" => matches!(rest, "name" | "path"),
         // The remarks of the checks that sent the run back; empty in the first round (docs/design/config.md).
@@ -182,7 +182,7 @@ pub(super) fn step_if(
     let known = |p: &str| {
         let root = p.split('.').next().unwrap_or_default();
         p == "back_from"
-            || (["inputs", "bead", "rig", "run", "project", "steps"].contains(&root) && path(p, inputs, before, true))
+            || (["inputs", "issue", "rig", "run", "project", "steps"].contains(&root) && path(p, inputs, before, true))
     };
     if let Some(bad) = parsed.paths().find(|p| !known(p)) {
         return Err(format!("`if`: a run has no `{bad}`"));

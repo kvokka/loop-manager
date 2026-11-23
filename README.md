@@ -18,7 +18,7 @@ Scripts can request JSON with the global `--json` flag, as in `loop-manager run 
 - [Operator skills and the T3 Code run card](plugins/README.md)
 - [Using addons](docs/guide/addons.md)
 - [Writing an addon](docs/guide/addon-development.md)
-- [Demos](demos/README.md): a planner agent files a request as beads, and coder agents on claude and codex do them
+- [Demos](demos/README.md): a planner agent files a request as issues, and coder agents on claude and codex do them
 - Reference: [configuration files](docs/design/config.md), [contracts](docs/design/contracts.md) (events, hooks,
   run states), [HTTP API](docs/api/openapi.json)
 - [Everything else](docs/README.md): the map of the documentation
@@ -61,7 +61,7 @@ as a process and never links, vendors or ships it.
 
 At start the daemon writes `.bv/workspace.yaml` next to the orchestrator config (by default
 `~/.config/loop-manager/.bv/workspace.yaml`): one repository per project with a tracker, with br's id prefix. Run
-[bv](https://github.com/Dicklesworthstone/beads_viewer) there, or with `--workspace <that file>`, to see the beads of
+[bv](https://github.com/Dicklesworthstone/beads_viewer) there, or with `--workspace <that file>`, to see the issues of
 all projects at once (read by bv 0.25.0 on 2026-11-13 at `0e02fda`).
 <!-- MEASURE id=bv-workspace-read date=2026-11-13 ver=bv-0.25.0,0e02fda env=linux-arm64-orbstack src="by hand: bv --workspace <file> --robot-next" note="checked once by hand; not in CI; re-check when bv or the file format changes" -->
 

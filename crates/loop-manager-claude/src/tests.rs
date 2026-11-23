@@ -121,7 +121,7 @@ fn the_native_permission_mode_is_a_flag_and_not_a_settings_key() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let p = part::process(&config, &plan, Path::new("/state")).unwrap();
     assert!(part::args(&p).windows(2).any(|w| w == ["--permission-mode", "plan"]));
@@ -153,7 +153,7 @@ fn a_config_the_adapter_cannot_deliver_is_a_config_error() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let one = driver.split(&config, &plan).unwrap();
     assert_eq!(
@@ -196,7 +196,7 @@ fn new_plan() -> SessionPlan {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     }
 }
 

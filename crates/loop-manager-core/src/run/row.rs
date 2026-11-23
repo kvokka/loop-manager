@@ -31,11 +31,11 @@ pub(super) struct Row {
     pub(super) next: Option<String>,
     pub(super) created_ms: i64,
     pub(super) started_ms: Option<i64>,
-    pub(super) bead: Option<String>,
-    /// The bead as the tracker last gave it: at the claim, or with its comments and parents for a prompt that shows
+    pub(super) issue: Option<String>,
+    /// The issue as the tracker last gave it: at the claim, or with its comments and parents for a prompt that shows
     /// them (contracts 5.2).
-    pub(super) bead_data: Option<String>,
-    /// The agent of every ai step, as the `agent:` label of the bead names it; `None`: each step's own.
+    pub(super) issue_data: Option<String>,
+    /// The agent of every ai step, as the `agent:` label of the issue names it; `None`: each step's own.
     pub(super) as_agent: Option<String>,
     /// `ai`, `exec` or `drain`: the kind of `step`.
     pub(super) step_kind: String,
@@ -47,7 +47,7 @@ pub(super) struct Row {
 }
 
 const COLUMNS: &str = "id, project, rig, formula, agent, inputs, correlation, depth, parent_run, workdir, state, \
-    class, attempt, prompt, timeout_ms, config, next, created_ms, started_ms, bead, bead_data, step, as_agent, \
+    class, attempt, prompt, timeout_ms, config, next, created_ms, started_ms, issue, issue_data, step, as_agent, \
     step_kind, step_attempt";
 
 impl Row {
@@ -78,8 +78,8 @@ impl Row {
                 next: r.get(16)?,
                 created_ms: r.get(17)?,
                 started_ms: r.get(18)?,
-                bead: r.get(19)?,
-                bead_data: r.get(20)?,
+                issue: r.get(19)?,
+                issue_data: r.get(20)?,
                 step: r.get(21)?,
                 as_agent: r.get(22)?,
                 step_kind: r.get(23)?,
@@ -106,7 +106,7 @@ impl Row {
             "id": self.id, "formula": self.formula, "step": self.step, "agent": agent, "step_kind": self.step_kind,
             "step_attempt": self.step_attempt, "state": self.state, "class": self.class, "attempt": self.attempt,
             "generation": self.attempt,
-            "bead": self.bead, "workdir": self.workdir, "depth": self.depth, "parent_run": self.parent_run,
+            "issue": self.issue, "workdir": self.workdir, "depth": self.depth, "parent_run": self.parent_run,
             "created_at": rfc3339_ms(self.created_ms), "started_at": self.started_ms.map(rfc3339_ms),
         })
     }

@@ -117,14 +117,14 @@ fn base(common: &Path, place: &Place, until: Instant) -> Result<PathBuf, String>
 }
 
 /// Merges the branch of `run`, a child of a `drain` step with the key working in its own worktree `tree`, into the
-/// HEAD of its base with `--no-ff`, the subject `chore(merge): <title> [<bead>]`. Under the lock of the repository,
+/// HEAD of its base with `--no-ff`, the subject `chore(merge): <title> [<issue>]`. Under the lock of the repository,
 /// so siblings merge one at a time. Uncommitted work (untracked files too: the worktree could not go) and a conflict
 /// go back to the agent as a remark; a refusal of the project's own git hook is a veto with its output. Run again
 /// after a restart it decides the same: a merge left halfway is aborted and made again, a branch already merged is
 /// accepted (git has nothing to merge and makes no commit).
 fn merge(common: &Path, place: &Place, run: &Value, title: &str, tree: &Path, until: Instant) -> Result<Value, String> {
     let id = run["id"].as_str().ok_or("the event has no run")?;
-    let bead = run["bead"].as_str().ok_or("the run has no bead")?;
+    let issue = run["issue"].as_str().ok_or("the run has no issue")?;
     let _held = hold(common, until)?;
     let base = base(common, place, until)?;
     let into = match git(&base, &["branch", "--show-current"], until)? {
@@ -145,7 +145,7 @@ fn merge(common: &Path, place: &Place, run: &Value, title: &str, tree: &Path, un
         git(&base, &["merge", "--abort"], until)?;
     }
     let branch = format!("loop-manager/{id}");
-    let subject = format!("chore(merge): {title} [{bead}]");
+    let subject = format!("chore(merge): {title} [{issue}]");
     let merge = ["merge", "--no-ff", "--no-edit", "-m", &subject, &branch];
     let (merged, out, err) = output(&base, &merge, until)?;
     if merged {

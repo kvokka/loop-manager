@@ -1352,7 +1352,7 @@
         }
       },
       "post": {
-        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready bead to take (docs/design/tracker-br.md). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
+        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready issue to take (docs/design/tracker-br.md). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
         "operationId": "create",
         "parameters": [
           {
@@ -1659,7 +1659,7 @@
     },
     "/v1/runs/{id}/comment": {
       "post": {
-        "summary": "A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_bead\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
+        "summary": "A comment of the attempt on the issue of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_issue\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
         "operationId": "comment",
         "parameters": [
           {
@@ -2737,7 +2737,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `bead:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
+            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `issue:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
           },
           "reason": {
             "type": "string"
@@ -2776,7 +2776,7 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`."
+            "description": "`accepted`, `no_issue`, `stale_attempt`, `run_terminal` or `invalid`."
           }
         }
       },
@@ -2824,7 +2824,7 @@
               "string",
               "null"
             ],
-            "description": "Absent: the rig of the id prefix of the bead its task names; else the run\nworks in the project root."
+            "description": "Absent: the rig of the id prefix of the issue its task names; else the run\nworks in the project root."
           }
         }
       },
@@ -3439,7 +3439,7 @@
               "string",
               "null"
             ],
-            "description": "The prefix of the ids of the rig's beads; null for the root, whose beads carry the tracker's own."
+            "description": "The prefix of the ids of the rig's issues; null for the root, whose issues carry the tracker's own."
           },
           "vars": {
             "type": "object",
@@ -3517,12 +3517,6 @@
               "type": "string"
             }
           },
-          "bead": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "class": {
             "type": [
               "string",
@@ -3564,6 +3558,12 @@
           },
           "inputs": {
             "type": "object"
+          },
+          "issue": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "outcome": {
             "oneOf": [
@@ -3646,7 +3646,7 @@
       },
       "Started": {
         "type": "object",
-        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
+        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready issue the run can take; `passed_over`: the ready issues it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
         "properties": {
           "nothing_ready": {
             "type": [

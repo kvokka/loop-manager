@@ -86,8 +86,8 @@ fn input_values_come_from_the_project_over_the_orchestrator() {
 /// A value for a `task` input or of the wrong type is an error of the file that gives it.
 #[test]
 fn a_value_for_a_task_or_of_the_wrong_type_is_an_error() {
-    let task = "`inputs.bead` for formula `kit.implement`: a `task` input takes no value from the config";
-    rejected("[inputs]\nbead = \"b-1\"\n", "", task);
+    let task = "`inputs.issue` for formula `kit.implement`: a `task` input takes no value from the config";
+    rejected("[inputs]\nissue = \"b-1\"\n", "", task);
     rejected(
         "",
         "[inputs]\nn = \"many\"\n",
@@ -103,7 +103,7 @@ fn a_value_for_a_task_or_of_the_wrong_type_is_an_error() {
 fn a_required_input_the_config_gives_needs_no_caller() {
     let trigger = "[[trigger]]\nname = \"t\"\ncron = \"0 3 * * *\"\nrun = \"flow\"\n";
     let outer = "name = \"outer\"\n[[step]]\nkind = \"formula\"\nformula = \"flow\"\n";
-    let task = "[inputs]\nbead = { type = \"task\", required = true }\n";
+    let task = "[inputs]\nissue = { type = \"task\", required = true }\n";
     let each = format!("name = \"each\"\n{task}focus = {{ type = \"string\", required = true }}\n{EXEC}");
     let drainer = format!("name = \"drainer\"\n{task}[[step]]\nkind = \"drain\"\nformula = \"each\"\n");
     let mut changes = files("", "", FLOW_TEXT);

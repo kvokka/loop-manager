@@ -1,8 +1,8 @@
 # context-budget
 
 An addon of loop-manager for claude and codex agents: it bounds the context of a session. Past a soft limit the agent
-is told to wrap up and leave its summary on the run's bead; past a hard limit the session is stopped and its state
-goes on the bead. The context is never compacted. [Demo 4](../../demos/4-context-budget/README.md) runs it on a claude
+is told to wrap up and leave its summary on the run's issue; past a hard limit the session is stopped and its state
+goes on the issue. The context is never compacted. [Demo 4](../../demos/4-context-budget/README.md) runs it on a claude
 agent. What differs on codex is in [On codex](#on-codex).
 
 ## Install
@@ -51,12 +51,12 @@ it).
   The session's first start in a run keeps the commit it starts on, for the dump.
 - `PostToolUse`, past `soft`: a note joins the agent's context: its context and budget, then what to do. Start
   nothing new and call no subagents; finish the step at hand or roll it back; commit; write the summary to a file and
-  leave it on the bead with `loop-manager comment --file <file>` (what is done, what did not work, what is started
-  and not finished); end with `loop-manager finish`. A run without a bead puts the summary in `--summary`. A subagent
+  leave it on the issue with `loop-manager comment --file <file>` (what is done, what did not work, what is started
+  and not finished); end with `loop-manager finish`. A run without an issue puts the summary in `--summary`. A subagent
   is told to return its summary to its caller instead. The note comes again each time the context grows by
   `warn_step`.
 - `PreToolUse`, past `soft`: a call of a subagent (the tool `Agent`) is denied.
-- Past `hard`, on either tool hook: the state of the work goes on the bead as a comment, with `loop-manager comment`:
+- Past `hard`, on either tool hook: the state of the work goes on the issue as a comment, with `loop-manager comment`:
   `git status --short`, the commits since the run's first session started, `git diff --stat`, the agent's last tool
   calls and last texts. The session declares the outcome `cut` (`loop-manager finish <cut>`) and stops: every tool
   call is denied from then on and the turn ends. Neither claude nor codex runs a `Stop` hook after that stop, so no
@@ -102,7 +102,7 @@ its own, named by its input's `transcript_path`, and its tool is `spawn_agent`. 
 ## Needs on the host
 
 `jq`, `git` and `loop-manager` (the comments and the finisher) on the `PATH` of the harness's hooks. A comment goes
-through the daemon to the run's bead, whatever the tracker of the project: the addon does not call `br`, and needs a
+through the daemon to the run's issue, whatever the tracker of the project: the addon does not call `br`, and needs a
 loop-manager with the `comment` command.
 
 See the [changelog](CHANGELOG.md) for version history.

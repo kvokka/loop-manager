@@ -1,7 +1,8 @@
 #!/bin/sh
 # Commit the round's tracker state locally. The close step publishes the completed epic.
 set -eu
-bead=${LOOP_MANAGER_BEAD:?}
+# shortcut: a daemon installed before the rename sets LOOP_MANAGER_BEAD; drop the fallback once it runs a newer build.
+issue=${LOOP_MANAGER_ISSUE:-${LOOP_MANAGER_BEAD:?}}
 head=$(git rev-parse HEAD)
 ci=$(printf '%s\n' "${LOOP_MANAGER_STEP_CI_REPORT_DATA:-null}" | jq -ec '.stdout | fromjson' || echo null)
 review=${LOOP_MANAGER_STEP_REVIEW_DATA:-null}
@@ -14,10 +15,10 @@ if [ -z "$changes" ] && jq -en --argjson ci "$ci" --argjson review "$review" --a
    and ($review.verdict? == "complete" and ($review.score? | tonumber?) >= 9)' >/dev/null; then
   pass=true
 fi
-if [ "$pass" = false ]; then br update "$bead" -s rework -q; fi
+if [ "$pass" = false ]; then br update "$issue" -s rework -q; fi
 br sync --flush-only -q
 git add -- devloop/.beads
-git diff --cached --quiet -- devloop/.beads || git commit -q -m "chore(devloop): record tracker state [$bead]" -- devloop/.beads
+git diff --cached --quiet -- devloop/.beads || git commit -q -m "chore(devloop): record tracker state [$issue]" -- devloop/.beads
 
 echo "gate: SCORE ${score:-none}/10, VERDICT ${verdict:-none}"
 if [ "$pass" = true ]; then exit 0; fi

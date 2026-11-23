@@ -8,7 +8,7 @@
     {
       "name": "loop-manager",
       "source": "./plugins/loop-manager",
-      "description": "Discover, install and create loop-manager addons, recap work from Beads, recover failed runs and answer waiting runs."
+      "description": "Discover, install and create loop-manager addons, recap work from the tracker, recover failed runs and answer waiting runs."
     },
     {
       "name": "t3-run-card",

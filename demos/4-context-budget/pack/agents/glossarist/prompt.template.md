@@ -1,7 +1,7 @@
-Your task is the bead `{{ bead.id }}`, in `{{ rig.path }}`:
+Your task is the issue `{{ issue.id }}`, in `{{ rig.path }}`:
 
 <task>
-{{ bead.description }}
+{{ issue.description }}
 </task>
 
 Work through these steps.

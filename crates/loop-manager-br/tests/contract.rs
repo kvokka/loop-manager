@@ -132,11 +132,11 @@ async fn repeating_a_close_keeps_the_bead_closed_and_checks_its_owner() {
     t.claim(owner, &id).await.unwrap();
     // An exec finalizer may close and publish the tracker before the daemon acknowledges the outcome.
     br(dir.path(), &["close", &id, "-r", "published report"]);
-    let before = t.lineage(&id).await.unwrap().bead.bead;
+    let before = t.lineage(&id).await.unwrap().issue.issue;
     for _ in 0..2 {
         t.close(owner, &id, "passed: report").await.unwrap();
     }
-    let after = t.lineage(&id).await.unwrap().bead.bead;
+    let after = t.lineage(&id).await.unwrap().issue.issue;
     assert_eq!(after.status, "closed");
     assert_eq!(after.assignee.as_deref(), Some(owner));
     assert_eq!(after.updated_at, before.updated_at, "replays do not mutate the tracker");
@@ -157,7 +157,7 @@ async fn releasing_a_bead_closed_by_someone_else_clears_its_owner_and_keeps_it_c
     t.claim(owner, &id).await.unwrap();
     br(dir.path(), &["close", &id, "-r", "done by hand"]);
     t.release(owner, &id).await.unwrap();
-    let bead = t.lineage(&id).await.unwrap().bead.bead;
+    let bead = t.lineage(&id).await.unwrap().issue.issue;
     assert_eq!(
         (bead.status.as_str(), bead.assignee),
         ("closed", None),
@@ -172,7 +172,7 @@ async fn a_status_of_the_project_policy_passes_release_and_close_as_text() {
     let policy = "workflow:\n  strict: true\n  statuses: [open, in_progress, rework, blocked, deferred, closed]\n";
     std::fs::write(dir.path().join(".beads/policy.yaml"), policy).unwrap();
     let state = async |id: &str| {
-        let bead = t.lineage(id).await.unwrap().bead.bead;
+        let bead = t.lineage(id).await.unwrap().issue.issue;
         (bead.status, bead.assignee)
     };
     let (one, two) = (create(dir.path(), "One", &[]), create(dir.path(), "Two", &[]));
@@ -255,7 +255,7 @@ async fn under_gives_the_ready_beads_at_any_depth_and_an_epic_once_its_children_
 /// A hold of `bead` by `blocker` in `status`, as `waiting` gives it.
 fn wait(bead: &str, blocker: &str, kind: &str, status: &str, under: bool) -> Wait {
     Wait {
-        bead: bead.to_owned(),
+        issue: bead.to_owned(),
         blocker: blocker.to_owned(),
         kind: kind.to_owned(),
         status: status.to_owned(),
@@ -281,7 +281,7 @@ async fn waiting_holds_every_bead_below_a_blocked_parent_up_past_the_root() {
         .into_iter()
         .chain(held)
         .collect();
-    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
+    expected.sort_by(|a, b| (&a.issue, &a.blocker).cmp(&(&b.issue, &b.blocker)));
     assert_eq!(t.waiting(&root).await.unwrap(), expected);
     assert_eq!(t.waiting("t-none").await, Err(TrackerError::NotFound));
 }
@@ -309,7 +309,7 @@ async fn waiting_takes_open_blockers_and_a_blocked_status_and_tells_those_under_
         wait(&kids[3], &kids[4], "waits-for", "blocked", true),
         wait(&kids[4], &kids[4], "status", "blocked", true),
     ];
-    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
+    expected.sort_by(|a, b| (&a.issue, &a.blocker).cmp(&(&b.issue, &b.blocker)));
     assert_eq!(t.waiting(&root).await.unwrap(), expected);
 }
 
@@ -323,14 +323,14 @@ async fn the_lineage_of_a_bead_is_its_comments_and_its_parents_from_the_root_dow
     br(dir.path(), &["comments", "add", &kid, "start with the parser"]);
     br(dir.path(), &["comments", "add", &kid, "two lines\nhere"]);
     let lineage = t.lineage(&kid).await.unwrap();
-    assert_eq!(lineage.bead.bead.id, kid);
-    let texts: Vec<&str> = lineage.bead.comments.iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(lineage.issue.issue.id, kid);
+    let texts: Vec<&str> = lineage.issue.comments.iter().map(|c| c.text.as_str()).collect();
     assert_eq!(texts, ["start with the parser", "two lines\nhere"]);
     assert!(
-        (lineage.bead.comments.iter()).all(|c| c.author == "alice" && !c.created_at.is_empty()),
+        (lineage.issue.comments.iter()).all(|c| c.author == "alice" && !c.created_at.is_empty()),
         "{lineage:?}"
     );
-    let parents: Vec<&str> = lineage.parents.iter().map(|p| p.bead.id.as_str()).collect();
+    let parents: Vec<&str> = lineage.parents.iter().map(|p| p.issue.id.as_str()).collect();
     assert_eq!(parents, [root.as_str(), epic.as_str()]);
     assert_eq!(lineage.parents[0].comments.len(), 1);
     assert!(lineage.parents[1].comments.is_empty());
@@ -367,7 +367,7 @@ async fn each_command_is_one_change_with_its_actor_and_the_watcher_signals_it() 
         ]
     );
     assert!(changes.windows(2).all(|w| w[0].seq < w[1].seq));
-    assert_eq!(changes[2].bead.status, "closed");
+    assert_eq!(changes[2].issue.status, "closed");
     let last = changes[2].seq;
     assert!(t.changes(last).await.unwrap().is_empty(), "nothing after the cursor");
 }
@@ -499,7 +499,7 @@ async fn a_comment_lands_on_its_bead_as_its_actor_and_a_missing_bead_is_not_foun
     let text = "--summary: two lines\nhere";
     t.comment("loop-manager:run_1:2", &id, text).await.unwrap();
     let lineage = t.lineage(&id).await.unwrap();
-    let comments: Vec<(&str, &str)> = (lineage.bead.comments.iter())
+    let comments: Vec<(&str, &str)> = (lineage.issue.comments.iter())
         .map(|c| (c.author.as_str(), c.text.as_str()))
         .collect();
     assert_eq!(comments, [("loop-manager:run_1:2", text)]);

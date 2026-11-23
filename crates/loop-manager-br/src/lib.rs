@@ -10,7 +10,7 @@ mod parse;
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Bead, Change, Commented, Lineage, Tracker, TrackerError, Wait},
+    tracker::{Change, Commented, Issue, Lineage, Tracker, TrackerError, Wait},
 };
 use parse::{bead, commented, field};
 use serde_json::Value;
@@ -94,7 +94,7 @@ impl Br {
     }
 
     /// The beads `ids` as `br show` has them, in that order.
-    async fn show(&self, ids: &[&str]) -> Result<Vec<Bead>, TrackerError> {
+    async fn show(&self, ids: &[&str]) -> Result<Vec<Issue>, TrackerError> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -103,12 +103,12 @@ impl Br {
         shown.as_array().into_iter().flatten().map(bead).collect()
     }
 
-    async fn one(&self, id: &str) -> Result<Bead, TrackerError> {
+    async fn one(&self, id: &str) -> Result<Issue, TrackerError> {
         self.show(&[id]).await?.pop().ok_or(TrackerError::NotFound)
     }
 
     /// The bead `id` if `owner` holds it.
-    async fn held(&self, owner: &str, id: &str) -> Result<Bead, TrackerError> {
+    async fn held(&self, owner: &str, id: &str) -> Result<Issue, TrackerError> {
         let bead = self.one(id).await?;
         if bead.assignee.as_deref() == Some(owner) {
             Ok(bead)
@@ -211,7 +211,7 @@ struct Row {
 }
 
 impl Tracker for Br {
-    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>> {
+    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         Box::pin(async move {
             match self.br(owner, &["update", id, "--claim"]).await {
                 Ok(_) => self.one(id).await,
@@ -262,7 +262,7 @@ impl Tracker for Br {
         })
     }
 
-    fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>> {
+    fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
         Box::pin(async move {
             let ready = self.br(READER, &["ready", "--unassigned", "--limit", "0"]).await?;
             // `ready` leaves out the description and the parent; `show` has both.
@@ -303,7 +303,7 @@ impl Tracker for Br {
                 let mut stmt = db.prepare(WAITING)?;
                 let rows = stmt.query_map([root], |r| {
                     Ok(Wait {
-                        bead: r.get(0)?,
+                        issue: r.get(0)?,
                         blocker: r.get(1)?,
                         kind: r.get(2)?,
                         status: r.get(3)?,
@@ -353,7 +353,7 @@ impl Tracker for Br {
                     kind: kind.to_owned(),
                     actor: group[0].actor.clone(),
                     changed: if kind == "updated" { changed } else { Vec::new() },
-                    bead,
+                    issue: bead,
                 });
             }
             Ok(out)
@@ -366,7 +366,7 @@ impl Tracker for Br {
         key: &'a str,
         title: &'a str,
         description: &'a str,
-    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         Box::pin(async move {
             // `br show` finds no external ref and takes a partial id: the whole list, closed beads too, is searched.
             let all = self.br(READER, &["list", "-a", "--limit", "0"]).await?;
@@ -398,19 +398,19 @@ impl Tracker for Br {
             let mut line: Vec<Commented> = Vec::new();
             let mut next = Some(id.to_owned());
             // One `show` per bead, up the parents; a parent met twice would never end, one deleted meanwhile ends it.
-            while let Some(id) = next.filter(|id| line.iter().all(|c| c.bead.id != *id)) {
+            while let Some(id) = next.filter(|id| line.iter().all(|c| c.issue.id != *id)) {
                 let shown = match self.br(READER, &["show", &id]).await {
                     Err(Fail(_, TrackerError::NotFound)) if !line.is_empty() => break,
                     shown => shown?,
                 };
                 let found = commented(shown.get(0).ok_or(TrackerError::NotFound)?)?;
-                next = found.bead.epic.clone();
+                next = found.issue.epic.clone();
                 line.push(found);
             }
             let mut line = line.into_iter();
             let bead = line.next().ok_or(TrackerError::NotFound)?;
             Ok(Lineage {
-                bead,
+                issue: bead,
                 parents: line.rev().collect(),
             })
         })

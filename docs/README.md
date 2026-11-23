@@ -32,7 +32,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [design/contracts.md](design/contracts.md) | events, the filter and template language, hooks, the driver and tracker interfaces, run states, gates, the registry, the default policy |
 | [design/adapters.md](design/adapters.md) | harness adapters: what the core expects, adding a harness, the contract suite |
 | [harness-updates.md](harness-updates.md) | updating claude or codex, the contract scenarios |
-| [design/tracker-br.md](design/tracker-br.md) | the br tracker: beads and runs, rig prefixes, the limits of br |
+| [design/tracker-br.md](design/tracker-br.md) | the br tracker: issues and runs, rig prefixes, the limits of br |
 | [design/experiments.md](design/experiments.md) | what was measured on the real harnesses, and what was not |
 
 ## Working on loop-manager

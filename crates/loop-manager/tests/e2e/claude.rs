@@ -44,7 +44,7 @@ async fn daemon_with(provider: &Provider, orchestrator: &str, agent: &str) -> Da
             ),
             (
                 shop.join("formulas/fix.toml"),
-                "name = \"fix\"\n[inputs]\nbead = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\n\
+                "name = \"fix\"\n[inputs]\nissue = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\n\
                  agent = \"dev\"\n"
                     .to_owned(),
             ),
@@ -83,7 +83,7 @@ async fn a_claude_session_that_calls_the_finisher_passes_its_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_comment_of_a_session_whose_run_has_no_bead_fails_and_says_so() {
+async fn a_comment_of_a_session_whose_run_has_no_issue_fails_and_says_so() {
     let comment = format!(
         "printf 'a note' >note.md; {} comment --file note.md 2>err.txt; echo $? >code.txt",
         common::EXE
@@ -97,8 +97,8 @@ async fn a_comment_of_a_session_whose_run_has_no_bead_fails_and_says_so() {
     let web = d.dir.path().join("config/loop-manager/shop/web");
     assert_eq!(fs::read_to_string(web.join("code.txt")).unwrap(), "1\n");
     let error = fs::read_to_string(web.join("err.txt")).unwrap();
-    let says = format!("the run {run} has no bead to comment on");
-    assert!(error.contains("code: no_bead") && error.contains(&says), "{error}");
+    let says = format!("the run {run} has no issue to comment on");
+    assert!(error.contains("code: no_issue") && error.contains(&says), "{error}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -229,7 +229,7 @@ fn br(project: &Path, args: &[&str]) -> String {
     br_in(project, None, args)
 }
 
-/// br by hand, filing new beads with the id prefix `prefix` (a rig's) if any.
+/// br by hand, filing new issues with the id prefix `prefix` (a rig's) if any.
 fn br_in(project: &Path, prefix: Option<&str>, args: &[&str]) -> String {
     let mut br = common::program("br");
     if let Some(prefix) = prefix {
@@ -251,8 +251,8 @@ fn br_in(project: &Path, prefix: Option<&str>, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
 }
 
-/// The status and assignee of a bead in br.
-fn bead(project: &Path, id: &str) -> (Value, Value) {
+/// The status and assignee of an issue in br.
+fn issue(project: &Path, id: &str) -> (Value, Value) {
     let shown: Value = serde_json::from_str(&br(project, &["show", id, "--json"])).unwrap();
     (shown[0]["status"].clone(), shown[0]["assignee"].clone())
 }
@@ -287,14 +287,14 @@ pub(super) fn of_run(run: &str, dir: &Path) -> Vec<(i32, String)> {
 }
 
 /// Criterion 9: `kill -9` of claude while its Bash tool runs is typed within a second, the session is resumed
-/// and the run reaches its outcome. Criterion 16: the claim on the run's bead holds through the death of the session
+/// and the run reaches its outcome. Criterion 16: the claim on the run's issue holds through the death of the session
 /// and the resumed session closes it; the session has the path of the tracker's database.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
     let finish = format!("{} finish pass --summary built", common::EXE);
     // The resumed session sleeps a while first: time to look at the claim between the death and the outcome.
     let plan = vec![
-        Reply::Bash("printf %s \"$BEADS_DIR\" > beads-dir; sleep 20".into()),
+        Reply::Bash("printf %s \"$BEADS_DIR\" > tracker-dir; sleep 20".into()),
         Reply::Bash("sleep 1".into()),
         Reply::Bash(finish),
         Reply::Text("Done.".into()),
@@ -304,7 +304,7 @@ async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
     let project = d.dir.path().join("config/loop-manager/shop");
     let id = br_in(&project, Some("w"), &["create", "Fix the cart", "--silent"]);
     let mut events = d.client.events(Some(1)).await.unwrap();
-    let body = json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "bead": id } });
+    let body = json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "issue": id } });
     let run = d.post("/v1/runs", body, None).await.unwrap()["run"]
         .as_str()
         .unwrap()
@@ -315,7 +315,7 @@ async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
         let claude = procs.iter().find(|(_, cmd)| cmd.contains("--session-id"));
         // The shell's own command line names `sleep 20` from its start: the file tells the `printf` is done.
         let in_command =
-            project.join("web/beads-dir").exists() && procs.iter().any(|(_, cmd)| cmd.contains("sleep 20"));
+            project.join("web/tracker-dir").exists() && procs.iter().any(|(_, cmd)| cmd.contains("sleep 20"));
         if let Some((pid, _)) = claude.filter(|_| in_command) {
             break *pid;
         }
@@ -341,17 +341,17 @@ async fn a_claude_killed_in_a_command_is_resumed_and_its_run_passes() {
     assert!(typed <= 1000, "typed in {typed} ms");
     let owner = json!(format!("loop-manager:{run}"));
     assert_eq!(
-        bead(&project, &id),
+        issue(&project, &id),
         (json!("in_progress"), owner.clone()),
         "the claim holds"
     );
     d.until_state(&run, "passed").await;
-    // The bead is closed by an effect after the run's own transaction.
-    next(&mut events, "bead.closed").await;
-    assert_eq!(bead(&project, &id), (json!("closed"), owner));
+    // The issue is closed by an effect after the run's own transaction.
+    next(&mut events, "issue.closed").await;
+    assert_eq!(issue(&project, &id), (json!("closed"), owner));
     assert!(provider.requests().len() >= 3, "the resumed session went on");
-    let beads = fs::read_to_string(project.join("web/beads-dir")).unwrap();
-    assert_eq!(Path::new(&beads), project.join(".beads"));
+    let tracker = fs::read_to_string(project.join("web/tracker-dir")).unwrap();
+    assert_eq!(Path::new(&tracker), project.join(".beads"));
 }
 
 /// Criterion 34 on the fake: the finisher is called while a background command of the session runs; the outcome is

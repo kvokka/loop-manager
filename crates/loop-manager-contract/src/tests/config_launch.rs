@@ -102,7 +102,7 @@ fn a_harness_no_layer_names_is_an_error_of_the_formula() {
 fn the_pack_and_the_formula_step_are_layers() {
     let pack = "name = \"kit\"\nversion = \"0.3.0\"\nrequires_addons = [\"mail\"]\n\
                 [[trigger]]\nname = \"nightly\"\ncron = \"0 3 * * *\"\nrun = \"audit\"\n[settings]\nmodel = \"haiku\"\neffort = \"low\"\n";
-    let formula = "name = \"implement\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+    let formula = "name = \"implement\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
                    [[step]]\nkind = \"ai\"\nagent = \"implementer\"\neffort = \"max\"\n";
     let config = load(&[("kit/pack.toml", pack), ("kit/formulas/implement.toml", formula)]).unwrap();
     let (agent, e) = run(&config);
@@ -259,16 +259,6 @@ fn a_retired_key_is_one_line_that_says_where_it_went() {
             &step.replace("\"prompt\"", "\"ai\""),
             "line 5, column 1: an `ai` step has no `prompt`: its agent's template is `agents/<agent>/prompt.template.md`",
         ),
-        (
-            "kit/formulas/implement.toml",
-            "name = \"implement\"\n[inputs]\nbead = { type = \"bead\" }\n",
-            "input type `bead` is `task` now",
-        ),
-        (
-            "config.toml",
-            "bead_failures = 2\n",
-            "`bead_failures` is `bead_failed_runs` now",
-        ),
     ] {
         let errors = load(&[(file, text)]).expect_err(text);
         let error = (errors.iter().find(|e| e.message.contains(hint))).unwrap_or_else(|| panic!("{errors:?}"));
@@ -284,7 +274,7 @@ fn a_formula_step_sets_the_native_settings_of_its_agent() {
                    [settings.native.codex]\napproval_policy = \"on-request\"\n[rigs.backend]\npath = \"backend\"\n";
     let formula = |harness: &str, native: &str| {
         format!(
-            "name = \"implement\"\n[inputs]\nbead = {{ type = \"task\", required = true }}\n\
+            "name = \"implement\"\n[inputs]\nissue = {{ type = \"task\", required = true }}\n\
              [[step]]\nkind = \"ai\"\nagent = \"implementer\"\nharness = \"{harness}\"\nnative = {{ {native} }}\n"
         )
     };

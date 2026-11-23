@@ -1,6 +1,6 @@
 //! Demo 3 (`demos/3-review-gate`) without a model and without GitHub: its pack, its project, the scripts of its steps
 //! and its bridge against a real `loop-manager daemon`, the real `codex` on fake Responses APIs, and a fake `gh`
-//! (`fake_gh.sh`) over local remotes. The planner files one bead for the backend, whose coder adds a file, so a
+//! (`fake_gh.sh`) over local remotes. The planner files one issue for the backend, whose coder adds a file, so a
 //! feature has a pull request in the backend and one in the root.
 
 use crate::common::{self, Daemon, WAIT};
@@ -116,12 +116,12 @@ impl Gate {
     async fn start() -> Self {
         let loop_manager = common::EXE;
         let tools = tempfile::tempdir().unwrap();
-        // The planner files a bead for the backend, and refuses the feature once `refuse` exists.
+        // The planner files an issue for the backend, and refuses the feature once `refuse` exists.
         let refuse = tools.path().join("refuse");
         let plan = format!(
             "set -e\nif [ -e {} ]; then {loop_manager} finish fail --summary refused; exit; fi\n\
-             bead=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .bead)\n\
-             BD_ISSUE_PREFIX=api br create Greet --deps parent-child:$bead -l agent:coder --description Greet --silent\n\
+             issue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
+             BD_ISSUE_PREFIX=api br create Greet --deps parent-child:$issue -l agent:coder --description Greet --silent\n\
              {loop_manager} finish pass --summary planned\n",
             refuse.display()
         );
@@ -226,7 +226,7 @@ impl Gate {
 
     /// The backend's pull request of the feature `view`: its address and its state.
     fn backend_pr(&self, view: &Value) -> (String, String) {
-        let branch = format!("feature/{}", view["bead"].as_str().unwrap());
+        let branch = format!("feature/{}", view["issue"].as_str().unwrap());
         let pr = self.gh_in("gate-demo-backend", "", &["pr", "view", &branch, "--json", "url,state"]);
         let pr: Value = serde_json::from_str(&pr).unwrap();
         (
@@ -293,7 +293,7 @@ async fn a_comment_of_an_allowed_author_sends_the_feature_to_the_reviser() {
     let view = g.waiting(&run, 2).await;
     assert_eq!(view["back_from"], json!(["review"]));
     assert_eq!(view["steps"]["address"]["summary"], "addressed", "{view}");
-    let feedback = format!("root/feedback/{}.md", view["bead"].as_str().unwrap());
+    let feedback = format!("root/feedback/{}.md", view["issue"].as_str().unwrap());
     let feedback = fs::read_to_string(g.demo(&feedback)).unwrap();
     assert!(feedback.contains("Greet in the README too"), "{feedback}");
     assert!(!feedback.contains("Haskell"), "{feedback}");
@@ -303,7 +303,7 @@ async fn a_comment_of_an_allowed_author_sends_the_feature_to_the_reviser() {
     let (backend, _) = g.backend_pr(&view);
     g.gh(ALLOWED, &["pr", "review", &backend, "--comment", "--body", "Say hello"]);
     let view = g.waiting(&run, 3).await;
-    let feedback = format!("root/feedback/{}.md", view["bead"].as_str().unwrap());
+    let feedback = format!("root/feedback/{}.md", view["issue"].as_str().unwrap());
     let feedback = fs::read_to_string(g.demo(&feedback)).unwrap();
     assert!(feedback.contains("Say hello"), "{feedback}");
     assert!(!feedback.contains("README"), "{feedback}");
@@ -333,7 +333,7 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     g.d.until_state(&cleanup, "passed").await;
-    let branch = format!("feature/{}", view["bead"].as_str().unwrap());
+    let branch = format!("feature/{}", view["issue"].as_str().unwrap());
     let root = g.demo("gate-demo");
     assert_eq!(git(&root, &["ls-remote", "--heads", "origin", &branch]), "");
     assert_eq!(git(&root, &["branch", "--show-current"]), "main\n");

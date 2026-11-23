@@ -11,7 +11,7 @@ How the parts of loop-manager fit together and where each lives. The terms are i
 │ CORE: one writer of the state                                            │
 │  input queue → handling in an SQLite transaction → events (outbox)       │
 │  runs and attempts · triggers and timers · config assembly · instances   │
-│  exec hooks of addons · bead ownership · recovery and resync             │
+│  exec hooks of addons · issue ownership · recovery and resync             │
 └──────┬─────────────────────┬─────────────────────┬───────────────────────┘
        │ driver interface    │ tracker interface   │ events → JSONL journal
   harness adapters       br adapter            addons (exec hooks, services)
@@ -24,7 +24,7 @@ These are checked by the build, not kept by agreement.
 
 - The core is two crates: `loop-manager-contract`, the contracts adapters, the tracker adapter, addons and test doubles
   are written against, and `loop-manager-core`, the engine over them. The core depends on no adapter, frontend or addon,
-  and neither crate names a harness or a tracker (`codex`, `br`, `max_sessions`, `BEADS_DIR`, `.beads`): what the core
+  and neither crate names a harness or a tracker (`codex`, `br`, `max_sessions`, br's `bead`): what the core
   needs comes through the driver's capabilities and the tracker interface, and `scripts/core-boundary.sh` checks the
   sources of both in CI, and that the adapters (`loop-manager-claude`, `loop-manager-codex`, `loop-manager-br`,
   `loop-manager-addons`) build without `loop-manager-core`.
@@ -63,12 +63,12 @@ and an agent attaches it with `addons = [{ name, params }]`
 - [`context-budget`](../addons/context-budget/README.md), a context budget for claude and codex sessions: a note to
   wrap up past a soft limit, a stop past a hard one, no compaction;
 - [`conventional-commits`](../addons/conventional-commits/README.md), a Git commit-msg check of Conventional Commits
-  subjects, with the bead's id at the end of each subject in a run on a bead;
+  subjects, with the issue's id at the end of each subject in a run on an issue;
 - [`dcg`](../addons/dcg/README.md), the host's `dcg` (destructive_command_guard) as the `PreToolUse` hook of claude
   and codex sessions: a destructive shell command is denied;
 - [`lessons`](../addons/lessons/README.md), a request to a claude or codex session that has declared the outcome of
-  its run on a bead: in the same conversation, the agent writes the lessons that would have saved tokens, and a
-  useful answer goes on the bead as one comment.
+  its run on an issue: in the same conversation, the agent writes the lessons that would have saved tokens, and a
+  useful answer goes on the issue as one comment.
 
 The [loop-manager marketplace](../plugins/README.md) packages plugins for the operator's harness.
 `plugins/loop-manager/` contains the operator skills. `plugins/t3-run-card/` provides the T3 Code round and session viewer as a stdio MCP App.
@@ -80,7 +80,7 @@ The T3 host imports individual sessions through `loop-manager acp`. Claude Code 
 
 1. **A start.** A run starts by an explicit call (API, CLI, MCP), by a subscription to an event or by a schedule
    ([triggers](design/config.md#trigger)). The start names a project, a formula and its inputs; the task either names
-   an existing bead or becomes a new root bead ([tracker](design/tracker-br.md)).
+   an existing issue or becomes a new root issue ([tracker](design/tracker-br.md)).
 2. **One writer.** Everything that happens enters the core as a message to the single writer and is handled in one
    SQLite transaction together with the events it emits; effects run after the commit
    ([event model](design/event-model.md)).

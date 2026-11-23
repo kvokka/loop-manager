@@ -85,14 +85,14 @@ The behaviour itself is described in the document named under each heading; this
   orchestrator and the project, never the agent's `env`); a repeat of an `ai` step continues
   its session with the script's output as a remark; an infrastructure failure does not spend `max_attempts`.
 - The result of a step is visible to the next steps; a failed step without a return ends the run; checks in a row
-  all run and their remarks go back together; the executor of a bead is the formula named in the `drain` step; a
+  all run and their remarks go back together; the executor of an issue is the formula named in the `drain` step; a
   repeat of a step stays within the round.
 - A template is substitution only, without logic; a missing variable is an error before the start.
-- A prompt names the comments of the run's bead `bead.comments` and its parents `bead.parents`, the root first, each
-  parent with every field of `Bead` and its comments; nothing but a prompt template may name them. All comments are
-  shown unless the `ai` step has `last_comments`, which keeps the last of the bead and of each parent.
-- The bead is read again each time a run enters an `ai` step whose prompt shows its comments or parents; the other
-  steps see the bead as it was last read.
+- A prompt names the comments of the run's issue `issue.comments` and its parents `issue.parents`, the root first, each
+  parent with every field of `Issue` and its comments; nothing but a prompt template may name them. All comments are
+  shown unless the `ai` step has `last_comments`, which keeps the last of the issue and of each parent.
+- The issue is read again each time a run enters an `ai` step whose prompt shows its comments or parents; the other
+  steps see the issue as it was last read.
 - TOON is written by loop-manager's own encoder, the plain forms of spec 4.4 only: the crates that write TOON turn on
   `preserve_order` of `serde_json` for the whole build, which would change the key order of every JSON loop-manager
   writes. An object or array placeholder inside any template text is TOON, in a trigger's `inputs` too.
@@ -111,38 +111,38 @@ The behaviour itself is described in the document named under each heading; this
   `[root]` has no `max_writers`.
 - The states from `preparing` to `finishing` are those of the current step.
 - Cancelling a parent cancels its live child runs.
-- A run whose bead is closed by another actor (a human, an outside tool, another run) ends `cancelled` with reason
-  `bead_closed`, at whatever step, an `await` step included; its release leaves the bead closed. Of the writes one
-  read takes, the last that closed the bead or set its status tells who closed it.
+- A run whose issue is closed by another actor (a human, an outside tool, another run) ends `cancelled` with reason
+  `issue_closed`, at whatever step, an `await` step included; its release leaves the issue closed. Of the writes one
+  read takes, the last that closed the issue or set its status tells who closed it.
 - The outcome of a run is that of its last step; the finisher's data is visible to the next steps, triggers and the
   waiting parent.
 - The finisher is a CLI command with the attempt token; the finisher of a stale attempt is refused.
 - A remark of a `run.finishing` hook on an `ai` step is a return within the step, bounded by the ceiling of invariant
   16; on another step it is a new round (decision 157).
 - A run started by a trigger inherits the correlation of the event; a human's write in the tracker starts a new
-  chain. The depth limit is 10; `bead.ready` adds no depth.
+  chain. The depth limit is 10; `issue.ready` adds no depth.
 - While a run of the same trigger with the same input key is alive, a new firing is skipped (`trigger.skipped`).
-- `bead.ready` is raised when a bead first enters the ready set.
-- `bead.labeled` is raised for a label a bead the core already read gains; its `ready` is true only for a bead that
-  was ready before that read and still is, so one gain never fires both a `bead.ready` and a `bead.labeled` trigger.
+- `issue.ready` is raised when an issue first enters the ready set.
+- `issue.labeled` is raised for a label an issue the core already read gains; its `ready` is true only for an issue that
+  was ready before that read and still is, so one gain never fires both an `issue.ready` and an `issue.labeled` trigger.
 
 ## Tracker — [tracker](../design/tracker-br.md)
 
 - The tracker is a narrow adapter; a project works without one.
-- br has no empty prefix, so the id of a root's bead starts with the database's own prefix (the owner agreed for
+- br has no empty prefix, so the id of a root's issue starts with the database's own prefix (the owner agreed for
   now).
-- A bead filed by an agent of scope `rig` gets the rig's prefix by itself; an agent of scope `root` files a rig's
-  bead with that rig's prefix.
+- An issue filed by an agent of scope `rig` gets the rig's prefix by itself; an agent of scope `root` files a rig's
+  issue with that rig's prefix.
 - There is no `rig:` label. Equal prefixes of two rigs are a config error; a rig prefix equal to the database
   prefix is a `doctor` warning.
-- The input `task` is the id of an existing bead or a text the root bead is filed from; "the next ready bead" is
+- The input `task` is the id of an existing issue or a text the root issue is filed from; "the next ready issue" is
   another form of the same input, resolved by the daemon. Choice and claim are one operation; nothing ready means
   no run and an explicit answer.
-- The `harness:` label shows the harness, it does not set it; a bead whose label differs from the effective config
+- The `harness:` label shows the harness, it does not set it; an issue whose label differs from the effective config
   is not given out, and the reason is visible.
-- Every run that ended `failed` while it held the claim is a failed run of its bead, of any class, `infrastructure`
-  among them: a run fails only when the recovery inside it is spent. After `bead_failed_runs` of them (default 3)
-  the core closes that bead's gate until a human opens it.
+- Every run that ended `failed` while it held the claim is a failed run of its issue, of any class, `infrastructure`
+  among them: a run fails only when the recovery inside it is spent. After `issue_failed_runs` of them (default 3)
+  the core closes that issue's gate until a human opens it.
 
 ## Addons and frontends — [contracts 3](../design/contracts.md#3-orchestrator-hooks-decisions-and-timeouts), [MCP](../api/mcp.md)
 

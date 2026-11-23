@@ -18,9 +18,8 @@ error in every file.
   error the previous config stays in force, and `loop-manager config check` reports the errors without applying anything
   (the daemon's file; `--config <file>` loads a file in the CLI, with no daemon).
 - A retired key is a config error of one line that says where it is written now: `permission_mode` (the native block of
-  the harness), `[overrides.<agent>]` (`[agents.<agent>]`), step kind `prompt` (`ai`), input type `bead` (`task`), the
-  `prompt` key of an `ai` step (the agent's `prompt.template.md`), `config` of an `[[addon]]` (`params` of an attachment),
-  `bead_failures` (`bead_failed_runs`).
+  the harness), `[overrides.<agent>]` (`[agents.<agent>]`), step kind `prompt` (`ai`), the `prompt` key
+  of an `ai` step (the agent's `prompt.template.md`), `config` of an `[[addon]]` (`params` of an attachment).
 - A reload is taken by new runs and by the schedules (a schedule whose `cron`/`every` changed, and every `cron` when
   `timezone` changed, is set again from the reload; a removed one is dropped); the snapshot is per step: a running
   step keeps the one it prepared with, and the next step of the run prepares with the config of that moment; an idle
@@ -98,7 +97,7 @@ does not allow is denied at once, and the agent sees the denial; each denial the
   a policy other than `never`, a command or file change that needs approval is declined.
 - A hook may ask loop-manager or another agent for the decision through the CLI or the MCP of loop-manager: the session
   environment carries `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the run has a
-  bead, `LOOP_MANAGER_BEAD`.
+  issue, `LOOP_MANAGER_ISSUE`.
 
 claude refuses `bypassPermissions` when it runs as root (a container, CI): it exits before `init` with
 "--dangerously-skip-permissions cannot be used with root/sudo privileges", and the attempt fails. Under root, either
@@ -248,7 +247,7 @@ layer (`rounds = 2  # project`; `formula <f>` when the formula sets it, `default
 (`inputs.focus = "security"  # orchestrator`), then the steps one by one: for an ai step a header
 ``# step `<s>` of `<f>` on `<r>`: agent <a>`` (the rig's variant if it maps one) and its effective config, for an exec
 step one line ``# step `<s>` of `<f>`: exec `<command>` ``, for a drain step
-``# step `<s>` of `<f>`: drain, a run of `<formula>` per bead, <pool> at a time`` (with ``; on a failed bead:
+``# step `<s>` of `<f>`: drain, a run of `<formula>` per issue, <pool> at a time`` (with ``; on a failed issue:
 <on_item_failure>`` unless it is `continue`), then for a step with `if` its table with every path quoted, keys
 sorted and a single matcher bare, ``# runs only if { "back_from" = "review", "inputs.n" = [4,5] }``, after a check
 ``# a check: on fail, back to `<step>`, at most <n> rounds``, and for a step with `max_attempts` above 1 or a check
@@ -346,7 +345,7 @@ Checked by acceptance criterion 12 (`crates/loop-manager-acceptance`), the unit 
 ```toml
 projects = ["~/work/shop"]          # project directories, each with a loop-manager.toml
 max_runs = 8                        # runs started at once across all projects (default 8, at least 1)
-bead_failed_runs = 3                # failed runs of one bead before the core closes its gate (default 3, at least 1)
+issue_failed_runs = 3                # failed runs of one issue before the core closes its gate (default 3, at least 1)
 api_tcp = "127.0.0.1:7171"          # the API on TCP too (off by default; loopback only; a reload cannot change it)
 timezone = "Europe/Berlin"          # IANA zone `cron` is read in (default: the system zone; an unknown name is an error)
 rounds = 3                          # the rounds of a formula that sets none (default 3, see "Formula")
@@ -369,7 +368,7 @@ backoff_cap_s = 300
 silence = "15m"                     # no event after the ack, the model thinking, after a turn ended
 tool_silence = "40m"                # a tool running
 background_silence = "120m"         # background work after the turn
-start_timeout = "120s"              # the bead claim, then the ack of the first prompt
+start_timeout = "120s"              # the issue claim, then the ack of the first prompt
 queue_timeout = "168h"              # a run not started
 park_timeout = "168h"               # a parked run on a gate without `until`
 
@@ -429,7 +428,7 @@ path = "."                          # the default: the directory of loop-manager
 
 [rigs.backend]
 path = "../backend"                 # must exist
-prefix = "be"                       # optional: the id prefix of the rig's beads; default, the acronym of the name (`b`)
+prefix = "be"                       # optional: the id prefix of the rig's issues; default, the acronym of the name (`b`)
 vars = { test_cmd = "cargo test" }   # `{{ rig.test_cmd }}` in a prompt; `name` and `path` are taken by the rig
 triggers = ["nightly-audit"]        # pack triggers that run on this rig (a pack does not know rig names)
 agents = { implementer = "codex-implementer" }  # on this rig the variant runs where a formula names `implementer`
@@ -446,8 +445,8 @@ rig = "backend"
 
 A rig's name is ASCII letters, digits, `-` and `_`. Its prefix is lowercase ASCII letters, digits and `-` inside; it
 is the acronym of the words of the name (split on `-` and `_`: `backend` is `b`, `my-project` is `mp`) unless `prefix`
-is set. Two rigs of a project with one prefix are a config error. The prefix makes the rig of a bead: its id up to the
-last `-` ([tracker-br.md](tracker-br.md#the-rig-of-a-bead)); changing it makes the rig's existing beads beads of the
+is set. Two rigs of a project with one prefix are a config error. The prefix makes the rig of an issue: its id up to the
+last `-` ([tracker-br.md](tracker-br.md#the-rig-of-a-issue)); changing it makes the rig's existing issues issues of the
 root.
 
 `max_writers` bounds the runs that work in the rig's own directory at once; a run past it waits in `queued` with
@@ -464,12 +463,12 @@ to theirs down such a chain: against them it does not count, against any other r
 it waits for the parent to end; give its formula `worktree = true` or raise the limit. A run that continues the
 session of a run in a worktree (`continue_from`) counts by its own formula alone. A reload that changes the
 limit ends no run; the queue takes the new limit at once. Two drains of formulas that count, both alive when a reload
-lowers the limit to 1, hold back each other's beads until one is cancelled or the limit is raised again.
+lowers the limit to 1, hold back each other's issues until one is cancelled or the limit is raised again.
 
 The project root is itself a pack named after the project: `agents/` and `formulas/` next to `loop-manager.toml` belong
 to it, and its triggers are the `[[trigger]]` of `loop-manager.toml`.
 
-The root is where a project works besides its rigs: a run started without a rig works there (unless the id of a bead an
+The root is where a project works besides its rigs: a run started without a rig works there (unless the id of an issue an
 input names has the prefix of a rig), and so does every session of an agent of scope `root`. It is a place like a rig,
 under its own name: the run's `rig` in events, its gate `rig:<project>/<root name>`, its workdir, `worktree` and limits
 all take it the same way; `{{ rig.name }}` and `{{ rig.path }}` of a run in the root are the root's. The root has these
@@ -541,10 +540,10 @@ model = "sonnet"
 
 [[trigger]]
 name = "implement-next"
-on = "bead.ready"
-where = { "bead.labels" = "auto" }
+on = "issue.ready"
+where = { "issue.labels" = "auto" }
 run = "implement"
-inputs = { bead = { next_ready = true, epic = "{{ event.bead.epic }}" } }
+inputs = { issue = { next_ready = true, epic = "{{ event.issue.epic }}" } }
 ```
 
 Content: `agents/<agent>/agent.toml` (plus `prompt.md`, `prompt.template.md` and any other files of the agent, see
@@ -571,7 +570,7 @@ list of names.
 
 `scope` (`rig`, the default, or `root`: where the agent works. An agent of a rig is an executor bound to one
 repository and works in its rig's directory, or in the root on a run without a rig; an agent of the root is bound to
-no repository, works over all the rigs of the project and their beads, so planning across several repositories is the
+no repository, works over all the rigs of the project and their issues, so planning across several repositories is the
 job of a `root` agent, and a `rig` planner plans inside its one repository. An agent of the root works in the
 project root whatever the rig of its run, its session there while the run keeps its own workdir, and takes no
 rig's layer, so "explain config" of it is the same with a rig or without; `explain` prints `scope = "root"`; a
@@ -588,7 +587,7 @@ A role prompt file that is empty or only whitespace is a load error naming the f
 `prompt.template.md` is the template of the agent's prompt, in the agent's own directory, so the agent is
 self-contained: an `ai` step names the agent and its run gets
 this template, rendered (contracts 2.3); the step has no prompt file of its own. A run whose agent a variant or a
-bead's `agent:` label gives renders that agent's template (a variant's is its base agent's). An agent that an `ai` step
+issue's `agent:` label gives renders that agent's template (a variant's is its base agent's). An agent that an `ai` step
 names and that has no template is a config error naming the path to put it at. The template is checked against every
 formula whose steps name the agent, with that formula's inputs and earlier steps.
 
@@ -667,7 +666,7 @@ variant named like an agent of a pack of the project.
 
 ```toml
 name = "implement"
-description = "Implement the task of a bead"
+description = "Implement the task of an issue"
 worktree = true                     # optional (default false): each run works in a git worktree of its own
 rounds = 3                          # optional: the most rounds a check may send the run through (default: the
                                     # project's `rounds`, else the orchestrator's, else 3)
@@ -686,7 +685,7 @@ timeout = "4h"                      # optional (default 4h)
 model = "opus"                      # optional, ai steps only: layer 8, the launch settings `harness`,
                                     # `model`, `effort`
 native.claude = { permission_mode = "dontAsk" }  # optional, ai steps only: layer 8, merged by key
-last_comments = 6                   # optional, ai steps only: the prompt shows the last 6 comments of the bead
+last_comments = 6                   # optional, ai steps only: the prompt shows the last 6 comments of the issue
                                     # and of each of its parents (default: all)
 
 [[step]]
@@ -705,9 +704,9 @@ if = { "inputs.quick" = false }     # optional, any step: a `where` table; unles
 [[step]]
 name = "children"
 kind = "drain"
-formula = "fix"                     # the formula of each bead's run
+formula = "fix"                     # the formula of each issue's run
 timeout = "24h"                     # optional (default 24h)
-pool = 2                            # optional (default 1): the most beads in work at once
+pool = 2                            # optional (default 1): the most issues in work at once
 on_item_failure = "soft_stop"       # optional: continue (default) | soft_stop | hard_stop
 worktree = true                     # optional (default false): each child on a branch of its own from the base of its
                                     # rig, merged back on its final pass
@@ -735,7 +734,7 @@ is a turn of the agent in a harness session, and its outcome comes from the fini
 own, under the step timeout; exit 0 is `pass`, 75 (`EX_TEMPFAIL`) a failed attempt (not an outcome), any other `fail`,
 and a bounded tail of its output is kept in the result (contracts 6.2). An `exec` step has
 `command = ["prog", "arg", ..]` (non-empty) and `timeout` instead of `agent`. Nothing is substituted into the command;
-it gets the run in its environment: `LOOP_MANAGER_RUN`, `LOOP_MANAGER_BEAD` (when the run has a bead),
+it gets the run in its environment: `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ISSUE` (when the run has an issue),
 `LOOP_MANAGER_SOCKET` (the API socket, so the command can call `loop-manager`) and `LOOP_MANAGER_INPUT_<NAME>` per input
 (the name upper-cased, other characters than letters and digits as `_`; a string as it is, any other value as JSON). Two
 inputs that give one variable (`note-text` and `note_text`) are a config error. The environment is clean by default and
@@ -747,44 +746,44 @@ step's, else the project's `[exec]`, else the orchestrator's; default false); th
 tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and `LOOP_MANAGER_STEP_*` below),
 so an `env` key cannot replace them. A rig has no `[exec]`.
 
-A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read of
-the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root owns
-the beads of every rig under its root. Any other bead is foreign — of another place, or outside the subtree: it is not
-given and is no error, it is the work of others with their own acceptance. Each own bead gets the same start as
-`loop-manager run start` with the bead as the formula's input of type `task`, no rig named (the prefix of the bead's id
+A `drain` step gives every ready issue of its own under the run's issue, at any depth, a run of `formula`, on each read of
+the tracker, until none is left. A run of a rig owns the issues of its rig under its root; a run of the project root owns
+the issues of every rig under its root. Any other issue is foreign — of another place, or outside the subtree: it is not
+given and is no error, it is the work of others with their own acceptance. Each own issue gets the same start as
+`loop-manager run start` with the issue as the formula's input of type `task`, no rig named (the prefix of the issue's id
 gives it, the project root when it matches no rig, and its `agent:`/`harness:` labels apply as to any run), the run's
-correlation, one level deeper, the run as `parent_run`. A bead goes out once per entry of the step: a child that failed
+correlation, one level deeper, the run as `parent_run`. An issue goes out once per entry of the step: a child that failed
 is not run again in it, and an attempt cut by a restart (`daemon_crash`) starts no new entry; a round back to the step
-does. A bead whose start is refused (a `rig:` label, a `harness:` label the config does not give) gets no run and stays
+does. An issue whose start is refused (a `rig:` label, a `harness:` label the config does not give) gets no run and stays
 open. The step has no process (contracts 6.2): it ends once nothing was given, no child is alive and no later read of
-the tracker is queued, with `data = {closed, failed, refused}` — the beads whose runs passed, those whose runs failed or
-were cancelled, and the refused ones with the reason. The step does not end while an open bead of its own it has not
+the tracker is queued, with `data = {closed, failed, refused}` — the issues whose runs passed, those whose runs failed or
+were cancelled, and the refused ones with the reason. The step does not end while an open issue of its own it has not
 given in this entry waits on an open foreign blocker, directly or through its parents (a blocked epic holds all its
 descendants; a `deferred` or `in_progress` blocker holds too), or has a `blocked` status set by hand on itself or a
-parent: a lock. Its own failed beads do not hold it. The tracker's watcher wakes it (`bead.closed` of the blocker); the
+parent: a lock. Its own failed issues do not hold it. The tracker's watcher wakes it (`issue.closed` of the blocker); the
 wait ends at the step's `timeout`, which fails the attempt as for any step (`runaway_turn`). `pool` (default 1) is the
-most beads of the step in work at once: a child holds its place from its creation, queued or running, and the end of one
-gives out the next ready bead. `on_item_failure` says what a failed run of a bead does: `continue` (default) — the other
-beads go on and the step passes; `soft_stop` — no new bead goes out, the started ones end; `hard_stop` — the started
+most issues of the step in work at once: a child holds its place from its creation, queued or running, and the end of one
+gives out the next ready issue. `on_item_failure` says what a failed run of an issue does: `continue` (default) — the other
+issues go on and the step passes; `soft_stop` — no new issue goes out, the started ones end; `hard_stop` — the started
 ones are cancelled too (reason `drain_hard_stop`), on the read of the tracker that the failed run's end queues. A
-stopped step ends `fail` once no child is alive, its `data` adds `stopped_on` (the failed beads) and `not_started` (the
-ready beads under the root it did not give), and its summary is `stopped on <beads>: <n> closed, <n> failed, <n> not
-started`. The stop follows from the children of the entry, so a restart keeps it: no new bead goes out after one; a
-repeat of the step or a round back to it is a new entry and gives the beads again. A cancelled child stops nothing.
+stopped step ends `fail` once no child is alive, its `data` adds `stopped_on` (the failed issues) and `not_started` (the
+ready issues under the root it did not give), and its summary is `stopped on <issues>: <n> closed, <n> failed, <n> not
+started`. The stop follows from the children of the entry, so a restart keeps it: no new issue goes out after one; a
+repeat of the step or a round back to it is a new entry and gives the issues again. A cancelled child stops nothing.
 `formula` must take exactly one input of type `task` and need no other; a formula with a `drain` step needs a required
-`task` input. An epic under the root is not ready while it has open beads; once they are closed it is given out as any
-bead (with an id of no rig prefix: in the root).
+`task` input. An epic under the root is not ready while it has open issues; once they are closed it is given out as any
+issue (with an id of no rig prefix: in the root).
 
 A `formula` step runs `formula`, a formula of the run's project (a formula of another project is not in its reach,
 whatever its name), as one child run: the same rig, the run's correlation, one level deeper, the run as
 `parent_run`. The child's outcome (result, summary, data) is the step's. Its inputs are those of the parent it
 declares (a `task` input too), and on top of them the step's `inputs`: a table as a trigger's, each string a template
-over `inputs`, `steps`, `run`, `bead` and `project`. The child works on the bead its parent holds without owning it
-(an explicit `task` naming that bead works the same way): it makes no claim and at its end neither closes nor releases
-the bead, the parent does that at its own end; `bead` in the child's templates is the parent's snapshot of it (a step
-of the child whose prompt shows the comments or the parents of the bead reads them itself), and a child of that child
+over `inputs`, `steps`, `run`, `issue` and `project`. The child works on the issue its parent holds without owning it
+(an explicit `task` naming that issue works the same way): it makes no claim and at its end neither closes nor releases
+the issue, the parent does that at its own end; `issue` in the child's templates is the parent's snapshot of it (a step
+of the child whose prompt shows the comments or the parents of the issue reads them itself), and a child of that child
 may borrow it on. A child that cannot start (the start is refused, or `next_ready` finds no ready
-bead) fails the parent at once with class `infrastructure`, with no count toward `max_attempts`; a parent that fails in
+issue) fails the parent at once with class `infrastructure`, with no count toward `max_attempts`; a parent that fails in
 the step cancels its live child. The step has no process: it ends when the child does; a cancelled parent cancels the
 child, and a restart finds the child it made and makes no second one. `max_attempts` and `step_check_script_path`
 apply as to any step. A formula with `internal = true` runs only from such a step or a `drain` step: a start by
@@ -825,7 +824,7 @@ the nearest `ai` step before it, as a round of its own counted in `rounds`; with
 vetoes the `pass` (class `check`).
 
 Any step may have `if`, a `where` table (contracts 2.2: the same matchers, all entries must match) over what a prompt
-template sees of the run — `inputs`, `bead`, `rig`, `run`, `project` and `steps` of the steps before it — and
+template sees of the run — `inputs`, `issue`, `rig`, `run`, `project` and `steps` of the steps before it — and
 `back_from`, the names of the checks that sent the run back into its current round (empty in the first round). A path
 is a key with dots, quoted in TOML (`if = { "inputs.deploy" = true }`); paths are checked at load, as those of a
 template, and each value of `back_from` must be the name of a check of the formula. The `if` is asked when the run
@@ -882,12 +881,12 @@ error of the file that gives it (`` `inputs.n` for formula `kit.flow`: must be a
 
 A run start checks the inputs: no undeclared one, every `required` one present (`null` is no value), an `integer` input
 a JSON integer or its text, a `boolean` one a JSON boolean or `true`/`false` as text, a `string` one a string (the CLI
-sends `--input` values as text). A `task` input (there is no input type `bead`: nobody files a bead for the user beforehand) is a string or
-`{ next_ready = true, epic = <id> }`. A string that is the id of a bead has the run take that bead up; any other text
-(not blank) has the tracker create the run's root bead as the run prepares, titled with the first line of the text and
-described by all of it; either way the input then holds the bead id ([tracker-br.md](tracker-br.md#beads-and-runs)). A bead named
+sends `--input` values as text). A `task` input (there is no input type `issue`: nobody files an issue for the user beforehand) is a string or
+`{ next_ready = true, epic = <id> }`. A string that is the id of an issue has the run take that issue up; any other text
+(not blank) has the tracker create the run's root issue as the run prepares, titled with the first line of the text and
+described by all of it; either way the input then holds the issue id ([tracker-br.md](tracker-br.md#issues-and-runs)). An issue named
 by id that belongs to another rig, by the prefix of its id, is refused at the start if the core has seen it, else at
-its claim (the run fails with `bead_of_another_rig` and the claim is released). `worktree = true` gives each run of the formula, of either step kind,
+its claim (the run fails with `issue_of_another_rig` and the claim is released). `worktree = true` gives each run of the formula, of either step kind,
 a git worktree that loop-manager makes and removes (the bundled `worktree`, see below). loop-manager does not lock a
 directory: without a worktree, runs of one rig share its directory, and keeping them apart is the user's choice
 (`worktree`, the rig's `max_writers`, `pool`, `max_runs`).
@@ -907,31 +906,31 @@ HEAD of the base of its rig, whatever the child's formula says (the step's key w
 back. When the parent's formula has no key, that base is the checkout on its branch, the one the run started from, and
 the merges go there. On the final `pass` of the child (the `pass` of the last step of its formula, no check of that
 step's row failed before it: `final` of `run.finishing`, contracts 1.3) the bundled `worktree` merges the branch into
-the HEAD of the base with `git merge --no-ff` and the subject `chore(merge): <bead title> [<bead id>]`, one merge of a
+the HEAD of the base with `git merge --no-ff` and the subject `chore(merge): <issue title> [<issue id>]`, one merge of a
 repository at a time. Uncommitted changes in the child's worktree, untracked files among them, are a remark to commit
 them. A conflict aborts the merge and is a remark naming the files and the base's branch: bring that branch in
 (`git merge` with a Conventional Commits message, or `git rebase`), resolve, commit, finish again. A git hook of the
 project that refuses the merge (`pre-merge-commit`, `commit-msg`) has it aborted and vetoes with its output. A remark on
-a step other than `ai` is a failed check (contracts 3.3). Then the bead closes and the step reads the tracker again: the
-next ready bead branches from the base with the merge in it. A merge run again after a restart aborts one left
+a step other than `ai` is a failed check (contracts 3.3). Then the issue closes and the step reads the tracker again: the
+next ready issue branches from the base with the merge in it. A merge run again after a restart aborts one left
 halfway and accepts a branch already merged. A child that failed for good leaves its branch unmerged, to a human; a
-later entry of the step gives its bead a new run, on a new branch from the base's tip. The check script of the last
+later entry of the step gives its issue a new run, on a new branch from the base's tip. The check script of the last
 step runs after the merge; when it fails, the step runs again and the next merge adds the new commits. A formula a
 `drain` step with the key runs has no `if` on its last step (a config error): a run that ended on an earlier step would
 merge nothing.
 
 A prompt template is checked at load against each formula whose steps name its agent (contracts 2.3):
-`inputs.<name>` must be a declared input; `bead.<field>` needs a `task` input and a field of `Bead` (contracts 5.2),
+`inputs.<name>` must be a declared input; `issue.<field>` needs a `task` input and a field of `Issue` (contracts 5.2),
 or `comments` or `parents`, which only a prompt template may name; `run.<field>` a field of `RunView` (1.3); `project.name`,
 `project.path` (the directory of `loop-manager.toml`); `rig.name`, `rig.path` and `rig.<var>` (a variable of the run's
 rig, checked when the run starts); `agent.<name>` (a file of the agent, see "Agent").
 
-A prompt shows what was said on the task: `{{ bead.comments }}` is the comments of the run's bead, `{{ bead.parents }}`
+A prompt shows what was said on the task: `{{ issue.comments }}` is the comments of the run's issue, `{{ issue.parents }}`
 its parents from the root down, each with its fields and its comments — the whole picture and the place of the task in
 it. Both are TOON (contracts 2.3), so a template puts each on a line of its own. The run reads them from the tracker
 each time it enters the step: a comment an earlier step of the same run left, or a human meanwhile, is in the prompt
-of the next step and of the next round. `last_comments` on the step keeps the last comments of the bead and of each
-parent, and the agent reads the older ones itself (`br comments <id>`). A bead with no comments shows `[]`.
+of the next step and of the next round. `last_comments` on the step keeps the last comments of the issue and of each
+parent, and the agent reads the older ones itself (`br comments <id>`). An issue with no comments shows `[]`.
 
 ```
 [2]{author,created_at,text}:
@@ -964,10 +963,10 @@ payload, as do the paths of `where`. `rig` is allowed only in a project's `[[tri
 - A trigger on `trigger.skipped` is a config error: a skip that fires a trigger could skip again forever.
 - A run started by a trigger is one level deeper than the run of its event (1 without one, a schedule included);
   past depth 10 the firing is skipped with `depth`. Loops are bounded by this depth, not by the length of a chain:
-  a long epic is legal. A `bead.ready` event does not add a level: a bead made ready by the run that closed its
+  a long epic is legal. An `issue.ready` event does not add a level: an issue made ready by the run that closed its
   blocker is the tracker's next work, not a run that run started, so its run keeps the depth of the event's run
-  (at least 1) and an epic of beads each blocked by the last runs to its end. Repeated runs over one bead are
-  bounded by its failed runs (`bead_failed_runs`).
+  (at least 1) and an epic of issues each blocked by the last runs to its end. Repeated runs over one issue are
+  bounded by its failed runs (`issue_failed_runs`).
 
 ### How runs start and what a firing guarantees
 
@@ -985,33 +984,33 @@ off fires neither on its schedule nor on events, only by hand, and stays off acr
 - A run started by a trigger inherits the correlation of its event. A tracker event carries the correlation of the
   run whose attempt made the write, known from the br actor `loop-manager:<run>[:<attempt>]`; a write by a human starts
   a new chain ([contracts 5](contracts.md#5-tracker-interface)).
-- Tracker events are `bead.created`, `bead.updated`, `bead.closed`, `bead.labeled` and `bead.ready`; `bead.ready` is
-  raised when a bead first enters the ready set: open, unclaimed, every blocker closed. `bead.labeled` is raised for
-  each label a bead the core already read gains later, once per gain, with `label` and `ready`: `ready` is true when
-  the bead is ready and already was, so a bead that becomes ready with the label in the same read is
-  `bead.ready`'s alone ([contracts 5.1](contracts.md#51-operations)).
-- Work on a bead with a label, whenever it got the label, takes two triggers: one on `bead.ready` for a bead that becomes
-  ready with it (filed with it, freed by its blockers with it, released by a run) and one on `bead.labeled` for a bead
-  that is ready already and gains it. A label added to a bead that is not ready starts nothing then; the bead is
-  `bead.ready`'s when it becomes ready. A bead held by a live run refuses another run (`trigger.skipped{rejected}`),
-  and a bead's closed gate holds the run in `queued`:
+- Tracker events are `issue.created`, `issue.updated`, `issue.closed`, `issue.labeled` and `issue.ready`; `issue.ready` is
+  raised when an issue first enters the ready set: open, unclaimed, every blocker closed. `issue.labeled` is raised for
+  each label an issue the core already read gains later, once per gain, with `label` and `ready`: `ready` is true when
+  the issue is ready and already was, so an issue that becomes ready with the label in the same read is
+  `issue.ready`'s alone ([contracts 5.1](contracts.md#51-operations)).
+- Work on an issue with a label, whenever it got the label, takes two triggers: one on `issue.ready` for an issue that becomes
+  ready with it (filed with it, freed by its blockers with it, released by a run) and one on `issue.labeled` for an issue
+  that is ready already and gains it. A label added to an issue that is not ready starts nothing then; the issue is
+  `issue.ready`'s when it becomes ready. An issue held by a live run refuses another run (`trigger.skipped{rejected}`),
+  and an issue's closed gate holds the run in `queued`:
 
   ```toml
   [[trigger]]
   name = "review-ready"
-  on = "bead.ready"
-  where = { "bead.labels" = "review" }
+  on = "issue.ready"
+  where = { "issue.labels" = "review" }
   run = "review"
   rig = "web"
-  inputs = { bead = "{{ event.bead.id }}" }
+  inputs = { issue = "{{ event.issue.id }}" }
 
   [[trigger]]
   name = "review-labeled"
-  on = "bead.labeled"
+  on = "issue.labeled"
   where = { label = "review", ready = true }
   run = "review"
   rig = "web"
-  inputs = { bead = "{{ event.bead.id }}" }
+  inputs = { issue = "{{ event.issue.id }}" }
   ```
 - The event schema and its version, the `where` and `inputs` language, hook decisions and timeouts and the outbox
   lifetime are fixed in `docs/design/contracts.md`.
@@ -1116,7 +1115,7 @@ or for a project.
   saying so. The core gives its hook the place of the run as its parameters, not in the event: the directory of its
   base, the ancestors whose lazy worktree is that base, whether it gets a worktree of its own (its formula or the
   `drain` step that made it has the key), whether it continues a session, the other places it had children in, and, for
-  a child of a `drain` step with the key, the title of its bead. On `run.preparing` the addon moves a child of a step to
+  a child of a `drain` step with the key, the title of its issue. On `run.preparing` the addon moves a child of a step to
   its base (see "Formula"), making a lazy base that is not there yet, and gives each run that gets one a git worktree on
   the branch `loop-manager/<run>`, in `<git common dir>/loop-manager/worktrees/<run>`, from the HEAD of that base, as
   its workdir. The hooks of declared addons come first and see the directory the run was created in. A base in a

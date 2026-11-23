@@ -15,7 +15,8 @@ case ${1:-} in
     ;;
   *) echo 'owner-answer: expected code or review' >&2; exit 75 ;;
 esac
-bead=${LOOP_MANAGER_BEAD:?}
+# shortcut: a daemon installed before the rename sets LOOP_MANAGER_BEAD; drop the fallback once it runs a newer build.
+issue=${LOOP_MANAGER_ISSUE:-${LOOP_MANAGER_BEAD:?}}
 if ! printf '%s' "$data" | jq -e --arg summary "$summary" '
   ($summary | test("\\S")) or (. != null and . != {} and . != [] and
     (if type == "string" then test("\\S") else true end))' >/dev/null; then
@@ -31,12 +32,12 @@ answer=$(mktemp "$dir/answer.XXXXXX") || exit 75
   if [ "$data" != null ]; then printf '%s' "$data" | loop-manager format || exit 75; fi
 } >"$answer" || exit 75
 # A process may be retried after its comment reached the tracker; do not append that answer twice.
-existing=$(br comments "$bead" --json) || exit 75
+existing=$(br comments "$issue" --json) || exit 75
 recorded=$(printf '%s' "$existing" | jq -r --arg id "$id" --rawfile answer "$answer" '
   [.[] | select((.text | split("\n")[0]) as $header |
     ["QUESTION: " + $id, "DECISION: " + $id, "ANSWER: " + $id] | index($header))]
   | last | .text == $answer or .text == ($answer | rtrimstr("\n"))') || exit 75
-if [ "$recorded" != true ]; then br comments add "$bead" -f "$answer" -q || exit 75; fi
+if [ "$recorded" != true ]; then br comments add "$issue" -f "$answer" -q || exit 75; fi
 # Other concerns may remain unresolved; the label is reconciled from all the comments, not removed here.
 cat "$answer" || exit 75
 exit 1

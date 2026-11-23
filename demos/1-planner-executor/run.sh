@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the demo from the request to its report on a daemon of the demo's own. What the run creates stays in this
-# directory and in .gitignore: the coders' work in frontend/ and backend/, the beads in root/.beads, the daemon's
+# directory and in .gitignore: the coders' work in frontend/ and backend/, the issues in root/.beads, the daemon's
 # state in .loop-manager/ and RESULT.md. EXAMPLE=1 also keeps the result as the author's frontend-example/, backend-example/
 # and RESULT-example.md. LOOP_MANAGER names the loop-manager binary.
 set -eu
@@ -69,10 +69,10 @@ tokens=$(jq -rs '[.[] | select(.type == "run.passed" or .type == "run.failed") |
   echo
   echo "The request: \"$request\"."
   echo
-  echo "The beads under the request (\`br dep tree <root> --direction up\`):"
+  echo "The issues under the request (\`br dep tree <root> --direction up\`):"
   echo
   echo '```'
-  (cd root && br dep tree "$("$loop_manager" --json run show "$run" | jq -r .bead)" --direction up --no-color)
+  (cd root && br dep tree "$("$loop_manager" --json run show "$run" | jq -r .issue)" --direction up --no-color)
   echo '```'
   echo
   echo "The runs, oldest first:"

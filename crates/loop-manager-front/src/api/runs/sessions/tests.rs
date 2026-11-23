@@ -2,7 +2,7 @@ use super::identify;
 use serde_json::json;
 
 #[test]
-fn beadless_ids_match_imported_sessions_across_unicode_paths_and_resumes() {
+fn issueless_ids_match_imported_sessions_across_unicode_paths_and_resumes() {
     let mut run = json!({"id":"run_7","project":"work","attempts":[
         {"n":1,"step":"read","round":1,"harness":"a","session":{"z":"©🐍\u{7f}","path":"tmp/\"a\""}},
         {"n":2,"step":"read","round":1,"harness":"a","session":{"path":"tmp/\"a\"","z":"©🐍\u{7f}"}},

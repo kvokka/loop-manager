@@ -77,8 +77,8 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "20",
-        title: "demo 1: a request, a planner that files beads, a drain to coders on claude and codex, a report that \
-            every bead under the root is closed, unattended",
+        title: "demo 1: a request, a planner that files issues, a drain to coders on claude and codex, a report that \
+            every issue under the root is closed, unattended",
         launch: Launch::Request,
         run: |env| Box::pin(demo(env, "1-planner-executor", 1)),
     },
@@ -99,7 +99,7 @@ pub(crate) const ALL: &[Scenario] = &[
     Scenario {
         criterion: "20",
         title: "demo 4: an agent on claude reads past the soft limit of the context-budget addon, wraps up and leaves \
-            a summary comment on the bead of its run, unattended",
+            a summary comment on the issue of its run, unattended",
         launch: Launch::Request,
         run: |env| Box::pin(demo(env, "4-context-budget", 1)),
     },
@@ -131,7 +131,7 @@ pub(crate) const ALL: &[Scenario] = &[
     Scenario {
         criterion: "32",
         title: "an ai step of an agent of scope root works in the root, of scope rig in the rig, and no rig edits it; \
-            a project of one repository runs without rigs, its beads in the root; a rig's beads carry its prefix, the \
+            a project of one repository runs without rigs, its issues in the root; a rig's issues carry its prefix, the \
             acronym of its name or its `prefix` key, and `drain` takes the rig of a child from it",
         launch: Launch::Ci,
         run: |env| {
@@ -139,29 +139,29 @@ pub(crate) const ALL: &[Scenario] = &[
                 env,
                 "-p loop-manager-contract -p loop-manager-testkit -p loop-manager-br -E test(/an_agent_of_scope_root_takes_no_rig_layer\
                  |a_project_of_one_repository_checks_its_formulas_on_the_root|a_run_without_a_rig_works_in_the_root\
-                 |a_root_agent_works_in_the_root_whatever_the_rig|a_bead_of_the_root_runs_in_the_root\
+                 |a_root_agent_works_in_the_root_whatever_the_rig|an_issue_of_the_root_runs_in_the_root\
                  |a_rig_neither_edits_nor_maps_an_agent_of_the_root|a_rig_takes_the_acronym_of_its_name_or_its_prefix_key\
                  |two_rigs_with_one_prefix_or_a_prefix_br_rewrites_are_an_error|the_tracker_variables_come_under_every_layer\
-                 |a_bead_filed_with_a_rig_prefix_under_a_root_keeps_it_and_parent_loses_it\
-                 |a_drain_gives_every_ready_bead_under_the_root_a_run\
-                 |a_start_without_a_rig_takes_it_from_the_prefix_of_the_bead_id_or_runs_in_the_root/)",
+                 |an_issue_filed_with_a_rig_prefix_under_a_root_keeps_it_and_parent_loses_it\
+                 |a_drain_gives_every_ready_issue_under_the_root_a_run\
+                 |a_start_without_a_rig_takes_it_from_the_prefix_of_the_issue_id_or_runs_in_the_root/)",
                 12,
             ))
         },
     },
     Scenario {
         criterion: "28",
-        title: "a task: a text files one root bead, also across a crash, an id of a bead takes that bead up and files \
-            none, on the real br and a real daemon too; a formula declares no input of type `bead`",
+        title: "a task: a text files one root issue, also across a crash, an id of an issue takes that issue up and files \
+            none, on the real br and a real daemon too; a formula declares no input of type `issue`",
         launch: Launch::Ci,
         run: |env| {
             Box::pin(tests(
                 env,
-                "-p loop-manager-contract -p loop-manager-testkit -p loop-manager-br -p loop-manager -E test(/a_text_task_becomes_one_root_bead\
-                 |a_root_bead_created_before_a_crash_is_the_one_the_run_gets|a_blank_task_or_another_form_is_refused\
-                 |a_task_naming_a_bead_takes_it_up_and_files_no_second_bead|a_drain_step_names_a_formula_that_takes_one_bead\
-                 |a_task_naming_a_bead_gives_it_and_a_text_files_a_root_of_the_database_prefix\
-                 |a_task_takes_up_the_bead_it_names_and_a_text_files_one_root/)",
+                "-p loop-manager-contract -p loop-manager-testkit -p loop-manager-br -p loop-manager -E test(/a_text_task_becomes_one_root_issue\
+                 |a_root_issue_created_before_a_crash_is_the_one_the_run_gets|a_blank_task_or_another_form_is_refused\
+                 |a_task_naming_an_issue_takes_it_up_and_files_no_second_issue|a_drain_step_names_a_formula_that_takes_one_issue\
+                 |a_task_naming_an_issue_gives_it_and_a_text_files_a_root_of_the_database_prefix\
+                 |a_task_takes_up_the_issue_it_names_and_a_text_files_one_root/)",
                 7,
             ))
         },
@@ -208,15 +208,15 @@ pub(crate) const ALL: &[Scenario] = &[
     },
     Scenario {
         criterion: "30",
-        title: "a drain step keeps at most `pool` beads in work, 1 unless set; `on_item_failure` stops it softly or \
-                hard and fails it, a restart giving no new bead, a repeat giving them again",
+        title: "a drain step keeps at most `pool` issues in work, 1 unless set; `on_item_failure` stops it softly or \
+                hard and fails it, a restart giving no new issue, a repeat giving them again",
         launch: Launch::Ci,
         run: |env| {
             Box::pin(tests(
                 env,
                 "-p loop-manager-contract -p loop-manager-testkit -E test(/a_drain_step_takes_pool_and_on_item_failure\
-                 |without_pool_one_bead_is_in_work_at_a_time|pool_two_keeps_two_of_five_in_work\
-                 |soft_stop_gives_no_new_bead|hard_stop_cancels_the_started_beads|a_restart_mid_stop_gives_no_new_bead\
+                 |without_pool_one_issue_is_in_work_at_a_time|pool_two_keeps_two_of_five_in_work\
+                 |soft_stop_gives_no_new_issue|hard_stop_cancels_the_started_issues|a_restart_mid_stop_gives_no_new_issue\
                  |a_repeat_after_a_stop_is_a_new_entry/)",
                 7,
             ))
@@ -225,7 +225,7 @@ pub(crate) const ALL: &[Scenario] = &[
     Scenario {
         criterion: "31",
         title: "a formula step runs its formula as a child run with the inputs it declares and the step's, the \
-                task among them on the bead the parent holds, its outcome the step's, cancelled with its parent and \
+                task among them on the issue the parent holds, its outcome the step's, cancelled with its parent and \
                 not doubled by a restart; an internal formula \
                 starts only from a step; the config refuses a step short of an input, one the formula lacks, a \
                 formula that runs itself and a trigger on an internal formula",

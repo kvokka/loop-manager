@@ -129,22 +129,22 @@ pub(crate) fn check(w: &World, play: &mut Play) -> Result<(), String> {
     stepped(&conn, play)?;
     crate::repeat::counted(&conn, play)?;
     crate::drain::drained(&conn, play)?;
-    // One live owner per bead, and the owner the state records is a live run on that bead (invariants 2, 3).
+    // One live owner per issue, and the owner the state records is a live run on that issue (invariants 2, 3).
     let owners: Vec<(String, Option<String>, i64)> = conn
         .prepare(
-            "SELECT b.id, b.owner, (SELECT COUNT(*) FROM runs r WHERE r.bead = b.id \
-             AND r.state NOT IN ('passed', 'failed', 'cancelled')) FROM beads b",
+            "SELECT b.id, b.owner, (SELECT COUNT(*) FROM runs r WHERE r.issue = b.id \
+             AND r.state NOT IN ('passed', 'failed', 'cancelled')) FROM issues b",
         )
         .unwrap()
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .unwrap()
         .map(Result::unwrap)
         .collect();
-    for (bead, owner, live) in owners {
+    for (issue, owner, live) in owners {
         let held = owner.as_ref().and_then(|o| all.iter().find(|r| &r.0 == o));
         let bad = live > 1 || owner.is_some() && held.is_none_or(|r| TERMINAL.contains(&r.1.as_str()));
         if bad {
-            return Err(format!("{bead}: owner {owner:?}, {live} live runs on it"));
+            return Err(format!("{issue}: owner {owner:?}, {live} live runs on it"));
         }
     }
     Ok(())

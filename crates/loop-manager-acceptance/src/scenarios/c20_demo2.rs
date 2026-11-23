@@ -1,7 +1,7 @@
 //! Criterion 20, without a model: demo 2's pack, word for word, on the real `codex` against fake Responses APIs, laid
-//! out as the demo lays itself out. Round 1: the planner files one bead for the frontend, the coder writes a README
+//! out as the demo lays itself out. Round 1: the planner files one issue for the frontend, the coder writes a README
 //! rumdl cannot fix, `format` fails, `qa` passes, and the run goes back to `plan`. Round 2: the planner sees rumdl's
-//! findings in its prompt and files a fix, the drain runs only the new bead, `format` passes and so does `qa`, which
+//! findings in its prompt and files a fix, the drain runs only the new issue, `format` passes and so does `qa`, which
 //! gets the project's conditions.
 
 use crate::{
@@ -18,12 +18,12 @@ use std::{fs, path::Path, process::Command, sync::Arc, time::Duration};
 
 const WITHIN: Duration = Duration::from_secs(120);
 
-/// The first planner files a README; the second, after `format` failed, files its fix, each a bead of `frontend` by
+/// The first planner files a README; the second, after `format` failed, files its fix, each an issue of `frontend` by
 /// its prefix `f`. `{dir}` keeps the state.
-const PLAN: &str = "set -e\nbead=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .bead)\n\
+const PLAN: &str = "set -e\nissue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
     if [ -e {dir}/planned ]; then title='Fix the README'; else title='Write a README'; touch {dir}/planned; fi\n\
-    BD_ISSUE_PREFIX=f br create \"$title\" --deps \"parent-child:$bead\" -l agent:coder --description \"$title.\" --silent \
-    >> {dir}/beads\n{loop_manager} finish pass --summary \"$title\"\n";
+    BD_ISSUE_PREFIX=f br create \"$title\" --deps \"parent-child:$issue\" -l agent:coder --description \"$title.\" --silent \
+    >> {dir}/issues\n{loop_manager} finish pass --summary \"$title\"\n";
 
 /// In its rig, the first coder writes a reference without a definition, which rumdl cannot fix (MD052); the second
 /// fixes it.
@@ -124,16 +124,16 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     let conditions = "keeps high scores across a restart";
     assert!(carries(&qa, conditions).iter().any(|&c| c), "qa saw no conditions");
 
-    let beads = fs::read_to_string(state.path().join("beads")).unwrap();
-    let beads: Vec<&str> = beads.lines().collect();
-    assert_eq!(beads.len(), 2, "{beads:?}");
+    let issues = fs::read_to_string(state.path().join("issues")).unwrap();
+    let issues: Vec<&str> = issues.lines().collect();
+    assert_eq!(issues.len(), 2, "{issues:?}");
     let out = d.cli(&["--json", "run", "list", "--project", "multirepo-qa"]);
     let runs: Value = serde_json::from_slice(&out.stdout).expect("run list");
-    let on = |bead: &str| runs.as_array().unwrap().iter().filter(|r| r["bead"] == bead).count();
-    assert_eq!((on(beads[0]), on(beads[1])), (1, 1), "{runs}");
+    let on = |issue: &str| runs.as_array().unwrap().iter().filter(|r| r["issue"] == issue).count();
+    assert_eq!((on(issues[0]), on(issues[1])), (1, 1), "{runs}");
     format!(
         "round 1: {} failed format with MD052, back to plan; round 2: the planner saw the remarks, the drain ran only \
          {}, format and qa passed",
-        beads[0], beads[1]
+        issues[0], issues[1]
     )
 }

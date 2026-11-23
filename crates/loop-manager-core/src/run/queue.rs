@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 impl RunHandler {
     /// The agent of `step` of a run of `formula` on `rig` — the one the rig runs for it, a variant by its name — and
     /// the model key of its config; an exec step has none, and the runs table keeps an empty name. `as_agent`: the
-    /// agent the run's bead names in place of the step's.
+    /// agent the run's issue names in place of the step's.
     pub(super) fn step_agent(
         &self,
         project: &str,
@@ -35,26 +35,26 @@ impl RunHandler {
         }
     }
 
-    /// What the bead `bead` of a run of `formula` on `rig` makes of it: the bead, the agent its `agent:` label names,
-    /// and the agent and model key of the first step. Refused when the bead has a `rig:` label, when a `harness:`
+    /// What the issue `issue` of a run of `formula` on `rig` makes of it: the issue, the agent its `agent:` label names,
+    /// and the agent and model key of the first step. Refused when the issue has a `rig:` label, when a `harness:`
     /// label differs from the harness the config gives an ai step, or when the named agent does not resolve
     /// (docs/design/config.md).
     #[expect(clippy::type_complexity, reason = "a private tuple read at its one call site")]
-    fn bead_agent(
+    fn issue_agent(
         &self,
         tx: &Tx<'_>,
         project: &str,
         rig: &str,
         name: &str,
         formula: &Formula,
-        bead: Option<&str>,
+        issue: Option<&str>,
     ) -> Result<(Option<String>, Option<String>, (String, Option<String>)), Error> {
-        let label = |prefix| bead.map_or(Ok(None), |id| Self::label(tx, project, id, prefix));
-        // The rig of a bead was once its `rig:` label; such a bead is refused, not run on the root unnoticed.
+        let label = |prefix| issue.map_or(Ok(None), |id| Self::label(tx, project, id, prefix));
+        // The rig of an issue was once its `rig:` label; such an issue is refused, not run on the root unnoticed.
         if !matches!(label("rig"), Ok(None)) {
             return Err(rejected(format!(
-                "bead `{}` has a `rig:` label: the rig of a bead is the prefix of its id",
-                bead.unwrap_or_default()
+                "issue `{}` has a `rig:` label: the rig of an issue is the prefix of its id",
+                issue.unwrap_or_default()
             )));
         }
         let (as_agent, harness) = (label("agent")?, label("harness")?);
@@ -66,8 +66,8 @@ impl RunHandler {
                     .map_err(rejected)?;
                 if &config.harness != harness {
                     return Err(rejected(format!(
-                        "bead `{}` is labelled `harness:{harness}`: the config gives `{}` to `{agent}` on `{rig}`",
-                        bead.unwrap_or_default(),
+                        "issue `{}` is labelled `harness:{harness}`: the config gives `{}` to `{agent}` on `{rig}`",
+                        issue.unwrap_or_default(),
                         config.harness
                     )));
                 }
@@ -76,7 +76,7 @@ impl RunHandler {
         let first = self
             .step_agent(project, rig, name, &formula.steps[0], as_agent.as_deref())
             .map_err(rejected)?;
-        Ok((bead.map(str::to_owned), as_agent, first))
+        Ok((issue.map(str::to_owned), as_agent, first))
     }
 
     pub(super) fn create(&mut self, tx: &mut Tx<'_>, mut c: Create) -> Result<Value, Error> {
@@ -92,28 +92,28 @@ impl RunHandler {
         let rig_name = c.select_rig(project, formula)?;
         c.validate_inputs(&name, formula)?;
         let first = &formula.steps[0];
-        // A run holds at most one bead (docs/design/contracts.md 5); its task input becomes the id of the bead it works
+        // A run holds at most one issue (docs/design/contracts.md 5); its task input becomes the id of the issue it works
         // on.
-        let bead_input = formula
+        let issue_input = formula
             .inputs
             .iter()
             .find(|(k, i)| i.kind == InputType::Task && c.inputs.contains_key(*k));
-        // A bead the run cannot take as labelled is passed over by a pick and refused when named
+        // An issue the run cannot take as labelled is passed over by a pick and refused when named
         // (docs/design/contracts.md 5).
         let mut passed_over = serde_json::Map::new();
-        let (bead, as_agent, (agent, model)) = match bead_input {
+        let (issue, as_agent, (agent, model)) = match issue_input {
             Some(_) if !self.trackers.contains_key(&c.project) => {
                 return Err(rejected(format!("`{}` has no tracker", c.project)));
             }
-            // A text gets its bead as the run prepares (docs/design/contracts.md 5).
+            // A text gets its issue as the run prepares (docs/design/contracts.md 5).
             Some((key, _)) if Self::is_text(tx, &c.project, &c.inputs[key])? => {
-                self.bead_agent(tx, &c.project, &rig_name, &name.to_string(), formula, None)?
+                self.issue_agent(tx, &c.project, &rig_name, &name.to_string(), formula, None)?
             }
             Some((key, _)) => {
                 let named = c.inputs[key].is_string();
                 let mut picked = None;
-                for id in Self::pick_bead(project, tx, &rig_name, &c.inputs[key])? {
-                    match self.bead_agent(tx, &c.project, &rig_name, &name.to_string(), formula, Some(&id)) {
+                for id in Self::pick_issue(project, tx, &rig_name, &c.inputs[key])? {
+                    match self.issue_agent(tx, &c.project, &rig_name, &name.to_string(), formula, Some(&id)) {
                         Ok(found) => {
                             picked = Some(found);
                             break;
@@ -130,7 +130,7 @@ impl RunHandler {
                 c.inputs.insert(key.clone(), json!(found.0));
                 found
             }
-            None => self.bead_agent(tx, &c.project, &rig_name, &name.to_string(), formula, None)?,
+            None => self.issue_agent(tx, &c.project, &rig_name, &name.to_string(), formula, None)?,
         };
         let workdir = workdir(tx, project, &c, &rig_name, direct)?;
         let n: i64 = tx
@@ -138,17 +138,17 @@ impl RunHandler {
             .query_row("SELECT COALESCE(MAX(n), 0) + 1 FROM runs", [], |r| r.get(0))?;
         let id = format!("run_{n}");
         let correlation = c.correlation.unwrap_or_else(|| format!("cor_{n}"));
-        // A formula step lends its child the bead the parent holds: the child neither claims nor lets go of it.
-        let lent = match (&bead, direct) {
-            (Some(bead), false) => Self::lent(tx, c.parent_run.as_deref(), bead)?,
+        // A formula step lends its child the issue the parent holds: the child neither claims nor lets go of it.
+        let lent = match (&issue, direct) {
+            (Some(issue), false) => Self::lent(tx, c.parent_run.as_deref(), issue)?,
             _ => None,
         };
-        if let Some(bead) = bead.as_ref().filter(|_| lent.is_none()) {
-            Self::own_bead(tx, &c.project, bead, &id)?;
+        if let Some(issue) = issue.as_ref().filter(|_| lent.is_none()) {
+            Self::own_issue(tx, &c.project, issue, &id)?;
         }
         tx.sql().execute(
             "INSERT INTO runs (n, id, project, rig, formula, agent, inputs, correlation, depth, parent_run, \
-             workdir, state, created_ms, continue_from, bead, step, as_agent, step_kind, bead_data) \
+             workdir, state, created_ms, continue_from, issue, step, as_agent, step_kind, issue_data) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 n,
@@ -164,7 +164,7 @@ impl RunHandler {
                 workdir,
                 tx.now_ms(),
                 c.continue_from,
-                bead,
+                issue,
                 first.name,
                 as_agent,
                 first.kind.name(),
@@ -305,7 +305,7 @@ fn started() -> String {
     format!("state NOT IN ('queued', 'parked', 'passed', 'failed', 'cancelled') AND NOT {NO_PROCESS}")
 }
 
-/// `reply` with the beads a pick passed over and why, when there are any.
+/// `reply` with the issues a pick passed over and why, when there are any.
 fn with_passed_over(mut reply: Value, passed_over: serde_json::Map<String, Value>) -> Value {
     if !passed_over.is_empty() {
         reply["passed_over"] = Value::Object(passed_over);
@@ -331,10 +331,10 @@ impl Create {
     }
 
     fn select_rig(&mut self, project: &Project, formula: &Formula) -> Result<String, Error> {
-        // A start that names no rig runs on the rig of the bead its task names, else on the root.
+        // A start that names no rig runs on the rig of the issue its task names, else on the root.
         let rig_name = self.rig.take().unwrap_or_else(|| {
-            let beads = formula.inputs.iter().filter(|(_, i)| i.kind == InputType::Task);
-            let named = beads.filter_map(|(k, _)| self.inputs.get(k)?.as_str()).next();
+            let issues = formula.inputs.iter().filter(|(_, i)| i.kind == InputType::Task);
+            let named = issues.filter_map(|(k, _)| self.inputs.get(k)?.as_str()).next();
             named
                 .and_then(|id| project.rig_of(id))
                 .unwrap_or(&project.root.0)

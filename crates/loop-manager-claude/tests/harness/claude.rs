@@ -80,7 +80,7 @@ async fn turn(
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let mut config = config(&provider);
     edit(&mut config);
@@ -270,7 +270,7 @@ async fn a_command_left_in_the_background_is_stopped_and_the_session_takes_the_n
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let mut config = config(&provider);
     config.native = Some(sourced(serde_json::json!({ "permission_mode": "bypassPermissions" })));

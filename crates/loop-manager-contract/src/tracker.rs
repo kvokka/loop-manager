@@ -6,9 +6,9 @@ use crate::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A bead (contracts 5.2); `epic` is computed by the adapter, the rig of a bead is the prefix of its id.
+/// An issue (contracts 5.2); `epic` is computed by the adapter, the rig of an issue is the prefix of its id.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Bead {
+pub struct Issue {
     pub id: String,
     pub title: String,
     pub description: String,
@@ -24,7 +24,7 @@ pub struct Bead {
     pub closed_at: Option<String>,
 }
 
-/// A comment on a bead (contracts 5.2).
+/// A comment on an issue (contracts 5.2).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Comment {
     pub author: String,
@@ -32,20 +32,20 @@ pub struct Comment {
     pub text: String,
 }
 
-/// A bead with its comments, oldest first.
+/// An issue with its comments, oldest first.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Commented {
     #[serde(flatten)]
-    pub bead: Bead,
+    pub issue: Issue,
     pub comments: Vec<Comment>,
 }
 
-/// What a prompt shows of a bead beyond its fields (contracts 5.2): its comments, and its parents with theirs, from
+/// What a prompt shows of an issue beyond its fields (contracts 5.2): its comments, and its parents with theirs, from
 /// the root down to its own parent.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Lineage {
     #[serde(flatten)]
-    pub bead: Commented,
+    pub issue: Commented,
     pub parents: Vec<Commented>,
 }
 
@@ -58,17 +58,17 @@ pub struct Change {
     pub kind: String,
     pub actor: String,
     pub changed: Vec<String>,
-    /// The bead as it is when the change is read.
-    pub bead: Bead,
+    /// The issue as it is when the change is read.
+    pub issue: Issue,
 }
 
-/// An open bead under a root and what holds it (contracts 5.2).
+/// An open issue under a root and what holds it (contracts 5.2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wait {
-    /// The waiting bead: under the root at any depth (not the root), with any status but `closed` and `tombstone`.
-    pub bead: String,
-    /// What holds it: an open blocker (any status but `closed` and `tombstone`) of a blocking dependency of the bead or
-    /// of one of its parents at any height, the root and the beads above it included; or the bead itself or one of
+    /// The waiting issue: under the root at any depth (not the root), with any status but `closed` and `tombstone`.
+    pub issue: String,
+    /// What holds it: an open blocker (any status but `closed` and `tombstone`) of a blocking dependency of the issue or
+    /// of one of its parents at any height, the root and the issues above it included; or the issue itself or one of
     /// its parents when its status is `blocked`.
     pub blocker: String,
     /// The type of that dependency, `blocks`, `conditional-blocks` or `waits-for`; `status` when a `blocked` status
@@ -83,7 +83,7 @@ pub struct Wait {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrackerError {
     NotFound,
-    /// Someone else holds the bead: told by the state of the bead after the call.
+    /// Someone else holds the issue: told by the state of the issue after the call.
     Claimed {
         holder: String,
     },
@@ -104,7 +104,7 @@ pub enum TrackerError {
 impl fmt::Display for TrackerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotFound => f.write_str("no such bead"),
+            Self::NotFound => f.write_str("no such issue"),
             Self::Claimed { holder } => write!(f, "claimed by `{holder}`"),
             Self::OwnerMismatch { holder } => write!(f, "held by `{}`", holder.as_deref().unwrap_or("nobody")),
             Self::Unavailable { text } => write!(f, "tracker unavailable: {text}"),
@@ -115,42 +115,42 @@ impl fmt::Display for TrackerError {
 
 /// The operations of contracts 5.1, those the core calls; `owner` is `loop-manager:<run id>`.
 pub trait Tracker: Send + Sync {
-    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>>;
-    /// Conditional on `assignee == owner`; clears the assignee and sets `open`, but a closed bead stays closed.
+    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>>;
+    /// Conditional on `assignee == owner`; clears the assignee and sets `open`, but a closed issue stays closed.
     fn release<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
     /// Conditional on `assignee == owner`.
     fn close<'a>(&'a self, owner: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
-    /// Every ready bead, in the tracker's order (the core picks within an epic itself).
-    fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>>;
-    /// The ids of the ready beads under `root`, at any depth, in the tracker's order; `NotFound` with no `root`.
+    /// Every ready issue, in the tracker's order (the core picks within an epic itself).
+    fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>>;
+    /// The ids of the ready issues under `root`, at any depth, in the tracker's order; `NotFound` with no `root`.
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>>;
-    /// The open beads under `root` that wait, each with what holds it: one entry per bead, blocker and kind, ordered
+    /// The open issues under `root` that wait, each with what holds it: one entry per issue, blocker and kind, ordered
     /// by them; `NotFound` with no `root`.
     fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>>;
     /// The writes after `after` (a `seq`, 0 for all), oldest first.
     fn changes(&self, after: i64) -> BoxFuture<'_, Result<Vec<Change>, TrackerError>>;
-    /// The root bead of a task (docs/design/contracts.md 5): the bead whose id is exactly `description`, else an open
-    /// epic without labels created as `actor`, once per `key` — a repeat returns the bead of the first call.
+    /// The root issue of a task (docs/design/contracts.md 5): the issue whose id is exactly `description`, else an open
+    /// epic without labels created as `actor`, once per `key` — a repeat returns the issue of the first call.
     fn create<'a>(
         &'a self,
         actor: &'a str,
         key: &'a str,
         title: &'a str,
         description: &'a str,
-    ) -> BoxFuture<'a, Result<Bead, TrackerError>>;
-    /// The bead `id` with its comments and its parents with theirs (contracts 5.1); a parent the tracker no longer
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>>;
+    /// The issue `id` with its comments and its parents with theirs (contracts 5.1); a parent the tracker no longer
     /// has ends the line, `NotFound` with no `id`.
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>>;
-    /// Appends the end of an attempt on the bead `id` to the tracker's audit trail as `actor`
+    /// Appends the end of an attempt on the issue `id` to the tracker's audit trail as `actor`
     /// (`loop-manager:<run>:<attempt>`), with `entry`, a JSON object of what the attempt did (contracts 5.1). No write
-    /// of the bead: `changes` sees nothing of it. Not idempotent: a repeated call appends the entry again.
+    /// of the issue: `changes` sees nothing of it. Not idempotent: a repeated call appends the entry again.
     fn attempt_ended<'a>(
         &'a self,
         actor: &'a str,
         id: &'a str,
         entry: &'a serde_json::Value,
     ) -> BoxFuture<'a, Result<(), TrackerError>>;
-    /// Adds the comment `text` to the bead `id` as `actor` (`loop-manager:<run>:<attempt>`, contracts 5.1). Not
+    /// Adds the comment `text` to the issue `id` as `actor` (`loop-manager:<run>:<attempt>`, contracts 5.1). Not
     /// idempotent: a repeated call adds it again.
     fn comment<'a>(&'a self, actor: &'a str, id: &'a str, text: &'a str) -> BoxFuture<'a, Result<(), TrackerError>>;
 }

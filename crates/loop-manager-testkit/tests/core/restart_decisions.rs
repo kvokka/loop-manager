@@ -4,7 +4,7 @@
 
 use crate::common;
 
-use common::{Hanging, Lost, POLICY, World, beads::FIX, hollow_turn, last, world, world_with};
+use common::{Hanging, Lost, POLICY, World, hollow_turn, issues::FIX, last, world, world_with};
 use loop_manager_core::{
     driver::{Failure, FailureKind, Normalized, Source},
     run::{Create, Decision, GateSpec, HookRunner, MAX_ATTEMPTS, Msg, Reader},
@@ -82,15 +82,15 @@ async fn an_interrupted_run_waits_for_the_policy_after_a_long_restart() {
     assert_eq!(states.iter().filter(|s| *s == "starting").count(), 2, "{states:?}");
 }
 
-/// The claim of the bead is retried after the restart: a tracker that answers is not taken for one that is down.
+/// The claim of the issue is retried after the restart: a tracker that answers is not taken for one that is down.
 #[tokio::test(start_paused = true)]
 async fn a_claim_waits_for_the_tracker_after_a_long_restart() {
     let mut w = world(FIX);
-    let bead = w.tracker.add(&[], None);
+    let issue = w.tracker.add(&[], None);
     w.changed().await;
     w.tracker.set_down(true);
     w.driver.script(hollow_turn());
-    let run = w.fix(json!(bead)).await.unwrap()["run"].as_str().unwrap().to_owned();
+    let run = w.fix(json!(issue)).await.unwrap()["run"].as_str().unwrap().to_owned();
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(w.last_state(&run).await, "preparing");
     w.tracker.set_down(false);

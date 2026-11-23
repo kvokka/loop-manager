@@ -160,7 +160,7 @@ fn implementer() -> Name {
     }
 }
 
-/// A rig's beads carry the acronym of its name, or its `prefix` (docs/design/tracker-br.md); a bead of no rig prefix is
+/// A rig's issues carry the acronym of its name, or its `prefix` (docs/design/tracker-br.md); an issue of no rig prefix is
 /// the root's.
 #[test]
 fn a_rig_takes_the_acronym_of_its_name_or_its_prefix_key() {
@@ -180,12 +180,12 @@ fn a_rig_takes_the_acronym_of_its_name_or_its_prefix_key() {
     );
     assert_eq!(prefix("web_api").as_deref(), Some("api"));
     assert_eq!(shop.root.1.prefix, None);
-    let rig_of = |bead: &str| shop.rig_of(bead);
+    let rig_of = |issue: &str| shop.rig_of(issue);
     assert_eq!(
         [rig_of("api-x1"), rig_of("api-x1.2"), rig_of("mp-q59")],
         [Some("web_api"), Some("web_api"), Some("my-project")]
     );
-    // The prefix is all before the last `-`: a root bead of a database prefix `mp-shop` is not `my-project`'s.
+    // The prefix is all before the last `-`: a root issue of a database prefix `mp-shop` is not `my-project`'s.
     assert_eq!(
         [rig_of("root-79u.1"), rig_of("b"), rig_of("x-b-1"), rig_of("mp-shop-x1")],
         [None; 4]
@@ -197,7 +197,7 @@ fn two_rigs_with_one_prefix_or_a_prefix_br_rewrites_are_an_error() {
     let both = project("[rigs.billing]\npath = \"backend\"\n");
     fails(
         &[("shop/loop-manager.toml", &both)],
-        "rigs `backend` and `billing` both give their beads the prefix `b`",
+        "rigs `backend` and `billing` both give their issues the prefix `b`",
     );
     let upper = project("[rigs.web]\npath = \"backend\"\nprefix = \"API\"\n");
     fails(&[("shop/loop-manager.toml", &upper)], "rig `web`: prefix `API`");

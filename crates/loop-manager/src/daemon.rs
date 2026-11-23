@@ -112,13 +112,13 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         drivers.push(driver);
     }
     // A project with a `.beads` directory has br as its tracker (docs/design/tracker-br.md).
-    let beads: Vec<(String, PathBuf)> = config
+    let issues: Vec<(String, PathBuf)> = config
         .projects
         .iter()
         .map(|p| (p.name.clone(), p.dir.join(".beads")))
         .filter(|(_, dir)| dir.is_dir())
         .collect();
-    let trackers = trackers(&paths.config, &beads);
+    let trackers = trackers(&paths.config, &issues);
     let config = Arc::new(config);
     let (core, mut task) = run::start(
         conn,
@@ -132,7 +132,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         }),
         journal,
     );
-    let watchers = watch_trackers(core.clone(), beads).await;
+    let watchers = watch_trackers(core.clone(), issues).await;
     let token = config.api_token.clone();
     let api = Api {
         core: core.clone(),
@@ -215,9 +215,9 @@ async fn bind_tcp(config: &mut Config, state: &Path) -> Result<Option<TcpListene
         .map_err(|e| format!("api_tcp {addr}: {e}"))
 }
 
-fn trackers(config_file: &Path, beads: &[(String, PathBuf)]) -> BTreeMap<String, Arc<dyn Tracker>> {
+fn trackers(config_file: &Path, issues: &[(String, PathBuf)]) -> BTreeMap<String, Arc<dyn Tracker>> {
     let br = binary("br", None).0;
-    let trackers = beads
+    let trackers = issues
         .iter()
         .map(|(name, dir)| {
             (
@@ -226,24 +226,24 @@ fn trackers(config_file: &Path, beads: &[(String, PathBuf)]) -> BTreeMap<String,
             )
         })
         .collect();
-    if let Some(why) = (!beads.is_empty())
+    if let Some(why) = (!issues.is_empty())
         .then(|| loop_manager_core::tested_version(&br, loop_manager_br::TESTED).err())
         .flatten()
     {
         eprintln!("loop-manager daemon: warning: {why}");
     }
-    if let Err(e) = bv_workspace(config_file, &br, beads) {
+    if let Err(e) = bv_workspace(config_file, &br, issues) {
         eprintln!("loop-manager daemon: warning: the bv workspace file: {e}");
     }
     trackers
 }
 
 /// Keeps filesystem watches active until the daemon drops the returned guard.
-async fn watch_trackers(core: CoreHandle<Msg>, beads: Vec<(String, PathBuf)>) -> impl Drop {
+async fn watch_trackers(core: CoreHandle<Msg>, issues: Vec<(String, PathBuf)>) -> impl Drop {
     // Each watched write tells the core to read its project's tracker; a burst of writes is one read.
     let (changed, mut changes) = mpsc::unbounded_channel::<String>();
     let mut watchers = Vec::new();
-    for (name, dir) in beads {
+    for (name, dir) in issues {
         let (changed, project) = (changed.clone(), name.clone());
         match loop_manager_br::watch(&dir, move || drop(changed.send(project.clone()))) {
             Ok(w) => watchers.push(w),
@@ -328,15 +328,15 @@ fn stop_signal() -> io::Result<impl Future<Output = ()> + Send + 'static> {
 }
 
 /// Writes `.bv/workspace.yaml` next to the orchestrator config: one repository per project with a tracker, so `bv`
-/// run there (or with `--workspace`) shows every project's beads (docs/design/tracker-br.md). The trackers are fixed
+/// run there (or with `--workspace`) shows every project's issues (docs/design/tracker-br.md). The trackers are fixed
 /// for the daemon's life (a reload changing them is refused), so the file is written at start only.
-fn bv_workspace(config: &Path, br: &Path, beads: &[(String, PathBuf)]) -> Result<(), String> {
-    if beads.is_empty() {
+fn bv_workspace(config: &Path, br: &Path, issues: &[(String, PathBuf)]) -> Result<(), String> {
+    if issues.is_empty() {
         return Ok(());
     }
     let mut yaml =
         "# Written by loop-manager at daemon start from the project configs; edits are lost.\nname: loop-manager\nrepos:\n".to_owned();
-    for (name, dir) in beads {
+    for (name, dir) in issues {
         let root = dir.parent().unwrap_or(dir);
         // JSON strings are YAML double-quoted scalars.
         yaml.push_str(&format!("  - name: {}\n    path: {}\n", json!(name), json!(root)));

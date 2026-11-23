@@ -48,7 +48,7 @@ set one, and the call graph there: `subagents`, the agents and variants its sess
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
 formulas, packs, addons (list), config check, explain and reload; runs
 (start, list, state, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
-instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
+instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
 account); events; daemon status, drain and planned restart.
 
 ## CLI
@@ -65,7 +65,7 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
 - `--key` on a mutating command sets the idempotency key.
 - `loop-manager run start <project> [<rig>] <formula>` (options after the positionals) prints the bare run id.
   With `--json`, read the id from the reply's `run` field. Without the rig the run takes the rig of the id prefix of
-  the bead its task names, else works in the project root. When a task input `{"next_ready": true}` finds nothing
+  the issue its task names, else works in the project root. When a task input `{"next_ready": true}` finds nothing
   ready it exits 3, with a message on stderr by default or `"nothing_ready": true` in the JSON reply. Inside an agent
   session (`LOOP_MANAGER_RUN` and `LOOP_MANAGER_ATTEMPT_TOKEN` set, as for `loop-manager finish`) it sends them as
   `parent` of `POST /v1/runs`: the run is a child of the session's run, with its
@@ -107,8 +107,8 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
 - `loop-manager comment --file <file>` (`POST /v1/runs/{id}/comment`) puts the text of the file as a comment on the
-  bead of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
-  A run without a bead (`no_bead`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
+  issue of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
+  A run without an issue (`no_issue`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - Without a daemon only `loop-manager format`, `loop-manager daemon`, `loop-manager cache clear`, `loop-manager --version`, and
@@ -146,7 +146,7 @@ tokens in every session, so an agent names it in its own config
   `{session_id, config_dir, workdir}`, codex `{thread_id, codex_home}`). After the run a human may open that conversation
   with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
-  bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).
+  issue with or without a note, or abandon the issue ([recovering a failed run](../guide/recovery.md)).
 - Joining a live session and handing control over to a human are not in the first release: it has no operation, no
   state and no stub for them, and the driver interface has none either
   ([contracts](../design/contracts.md#41-shape)).

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the demo from its two requests to its report on a daemon of the demo's own. What the run creates stays in this
-# directory and in .gitignore: the documents and what the agents wrote in library/, the beads in root/.beads, the
+# directory and in .gitignore: the documents and what the agents wrote in library/, the issues in root/.beads, the
 # daemon's state in .loop-manager/ and RESULT.md. EXAMPLE=1 also keeps the result as the author's library-example/ and
 # RESULT-example.md. LOOP_MANAGER names the loop-manager binary.
 set -eu
@@ -33,7 +33,7 @@ until "$loop_manager" status >/dev/null 2>&1; do
   sleep 0.2
 done
 
-# The two runs side by side, each with its own request and so its own bead.
+# The two runs side by side, each with its own request and so its own issue.
 started=$(date +%s)
 "$loop_manager" run start library study.glossary --input "task=$glossary" >.loop-manager/glossarist.run
 "$loop_manager" run start library study.index --input "task=$index" >.loop-manager/indexer.run
@@ -43,10 +43,10 @@ for agent in glossarist indexer; do
 done
 seconds=$(($(date +%s) - started))
 for agent in glossarist indexer; do
-  "$loop_manager" --json run show "$(cat .loop-manager/$agent.run)" | jq -r .bead >".loop-manager/$agent.bead"
+  "$loop_manager" --json run show "$(cat .loop-manager/$agent.run)" | jq -r .issue >".loop-manager/$agent.issue"
 done
-# The demo shows the wrap-up of the glossarist at the addon's soft limit: a bead without its summary comment fails it.
-(cd root && br comments list --json "$(cat ../.loop-manager/glossarist.bead)") >.loop-manager/glossarist.comments
+# The demo shows the wrap-up of the glossarist at the addon's soft limit: an issue without its summary comment fails it.
+(cd root && br comments list --json "$(cat ../.loop-manager/glossarist.issue)") >.loop-manager/glossarist.comments
 jq -e 'length > 0' .loop-manager/glossarist.comments >/dev/null || result=failed
 
 versions="loop-manager-$("$loop_manager" --version | cut -d' ' -f2)@$sha"
@@ -71,7 +71,7 @@ done
     echo "The request: \"$(if [ $agent = glossarist ]; then echo "$glossary"; else echo "$index"; fi)\"."
     echo
     if [ $agent = glossarist ]; then
-      echo "The comments on its bead \`$(cat .loop-manager/$agent.bead)\` (\`br comments list\`):"
+      echo "The comments on its issue \`$(cat .loop-manager/$agent.issue)\` (\`br comments list\`):"
       echo
       echo '```'
       jq -r '.[] | "[\(.author)] at \(.created_at)\n\(.text)\n"' .loop-manager/glossarist.comments

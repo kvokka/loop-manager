@@ -211,7 +211,7 @@ impl Inputs {
 
     /// The `inputs` of a `formula` step: placeholders start with what the parent run shows (docs/design/config.md).
     pub fn parse_step(value: &Value) -> Result<Self, SyntaxError> {
-        Self::parse_in(value, &["inputs", "steps", "run", "bead", "project"], true)
+        Self::parse_in(value, &["inputs", "steps", "run", "issue", "project"], true)
     }
 
     fn parse_in(value: &Value, roots: &[&str], has_event: bool) -> Result<Self, SyntaxError> {

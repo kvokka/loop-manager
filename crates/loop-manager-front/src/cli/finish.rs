@@ -22,7 +22,7 @@ fn session() -> Option<(String, String)> {
     Some((run, std::env::var("LOOP_MANAGER_ATTEMPT_TOKEN").ok()?))
 }
 
-/// `loop-manager comment --file <f>`: the text of `file` goes on the bead of the session's run (contracts 6.3).
+/// `loop-manager comment --file <f>`: the text of `file` goes on the issue of the session's run (contracts 6.3).
 pub(super) async fn comment(client: &Client, json: bool, file: &Path) -> Result<ExitCode, ClientError> {
     let Some((run, token)) = session() else {
         return Ok(fail(
@@ -45,7 +45,7 @@ pub(super) async fn comment(client: &Client, json: bool, file: &Path) -> Result<
             print(json, if json { &reply } else { &reply["answer"] });
             return Ok(ExitCode::SUCCESS);
         }
-        "no_bead" => format!("the run {run} has no bead to comment on"),
+        "no_issue" => format!("the run {run} has no issue to comment on"),
         "stale_attempt" => "this session's attempt is no longer the run's current one".to_owned(),
         "run_terminal" => format!("the run {run} has ended"),
         _ => "the daemon refused the comment: an unknown run or token, or a text over 64 KiB".to_owned(),

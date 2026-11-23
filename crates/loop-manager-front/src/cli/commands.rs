@@ -13,12 +13,12 @@ pub enum RunCommand {
     #[command(allow_missing_positional = true)]
     Start {
         project: String,
-        /// Optional: without it the run works in the project root, or on the rig of the bead its task names (its
+        /// Optional: without it the run works in the project root, or on the rig of the issue its task names (its
         /// id prefix).
         rig: Option<String>,
         formula: String,
         /// An input as `name=value`: text, which an integer or a boolean input takes as its number or `true`/`false`
-        /// and a task input as the task or the id of the bead it takes up; a JSON object or array (a task input's
+        /// and a task input as the task or the id of the issue it takes up; a JSON object or array (a task input's
         /// `{"next_ready": true}`) is taken as JSON.
         #[arg(long = "input", value_name = "NAME=VALUE", value_parser = name_value)]
         inputs: Vec<String>,
@@ -169,10 +169,10 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             match reply["run"].as_str() {
                 _ if json => print(json, &reply),
                 Some(run) => println!("{run}"),
-                None => eprintln!("loop-manager: nothing ready: no ready bead to take, no run started"),
+                None => eprintln!("loop-manager: nothing ready: no ready issue to take, no run started"),
             }
-            for (bead, why) in reply["passed_over"].as_object().into_iter().flatten().filter(|_| !json) {
-                eprintln!("loop-manager: passed over {bead}: {}", why.as_str().unwrap_or_default());
+            for (id, why) in reply["passed_over"].as_object().into_iter().flatten().filter(|_| !json) {
+                eprintln!("loop-manager: passed over {id}: {}", why.as_str().unwrap_or_default());
             }
             if reply["nothing_ready"] == true {
                 return Ok(ExitCode::from(3));

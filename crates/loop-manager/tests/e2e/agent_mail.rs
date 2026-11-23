@@ -572,7 +572,7 @@ own() {
   echo "$me" >>"$me-changed.txt"
   git rm -q "$me-gone.txt"
   git add -A
-  git commit -q -m "feat: own paths of $me [$LOOP_MANAGER_BEAD]"
+  git commit -q -m "feat: own paths of $me [$LOOP_MANAGER_ISSUE]"
 }
 wait_for "$t/$peer.name"
 if [ "$me" = a ]; then
@@ -582,7 +582,7 @@ if [ "$me" = a ]; then
   touch "$t/a.reserved"
   own
   echo a >>shared.txt
-  git commit -q -a -m "feat: shared path of a [$LOOP_MANAGER_BEAD]"
+  git commit -q -a -m "feat: shared path of a [$LOOP_MANAGER_ISSUE]"
   wait_for "$t/b.replied"
   mail fetch_inbox '{agent_name: $n, include_bodies: true}' >"$t/a.inbox"
   id=$(jq -r '.[0].id' "$t/a.inbox")
@@ -599,7 +599,7 @@ else
   head=$(git rev-parse HEAD)
   echo b >>shared.txt
   git add shared.txt
-  if git commit -q -m "feat: shared path of b [$LOOP_MANAGER_BEAD]" 2>"$t/b.refusal"; then touch "$t/b.accepted"; fi
+  if git commit -q -m "feat: shared path of b [$LOOP_MANAGER_ISSUE]" 2>"$t/b.refusal"; then touch "$t/b.accepted"; fi
   [ "$(git rev-parse HEAD)" = "$head" ] && touch "$t/b.head-kept"
   git reset -q --hard
   if git commit -q --allow-empty -m "no conventional subject"; then touch "$t/b.subject-accepted"; fi
@@ -639,7 +639,7 @@ fn user_config(user_mailbox: &Path) -> String {
 /// The project `shop` of the addon's README in the daemon's tree under `dir`: the addon on every agent beside
 /// `conventional-commits`, with no parameter; the agent `dev` on the fake provider at `base_url`; its worktree formula
 /// `build`, and `epic`, a drain of two runs of `build` at a time; the rig `web` at `rig` with its first commit; a
-/// tracker whose root bead has two ready beads of `web` (their ids); and the user's `config.env`.
+/// tracker whose root issue has two ready issues of `web` (their ids); and the user's `config.env`.
 fn shop(dir: &Path, rig: &Path, base_url: &str) -> (String, [String; 2]) {
     fs::create_dir_all(dir.join("path")).unwrap();
     std::os::unix::fs::symlink(common::EXE, dir.join("path/loop-manager")).unwrap();
@@ -802,7 +802,7 @@ fn check_commits(rig: &Path, runs: [(&str, &str); 2]) {
     }
 }
 
-/// The runs `runs` of the drain `epic` are its children on the ready beads `children` in the rig `web` at `rig`; with no
+/// The runs `runs` of the drain `epic` are its children on the ready issues `children` in the rig `web` at `rig`; with no
 /// parameter of the addon, both sessions got the rig's canonical path as their mail project, shared by the worktrees,
 /// and the drain's chain as their thread: these two.
 async fn check_drain(
@@ -813,7 +813,7 @@ async fn check_drain(
     mut children: [String; 2],
     rig: &Path,
 ) -> (String, String) {
-    let mut beads = Vec::new();
+    let mut issues = Vec::new();
     for run in runs {
         let view = d.get(&format!("/v1/runs/{run}")).await;
         assert_eq!(
@@ -821,11 +821,11 @@ async fn check_drain(
             (&json!(epic), &json!("web")),
             "{view}"
         );
-        beads.push(view["bead"].as_str().unwrap().to_owned());
+        issues.push(view["issue"].as_str().unwrap().to_owned());
     }
-    beads.sort();
+    issues.sort();
     children.sort();
-    assert_eq!(beads, children);
+    assert_eq!(issues, children);
     // With no parameter: the rig's canonical path as the mail project of both worktrees, the drain's chain as their
     // thread.
     let key = rig.canonicalize().unwrap().to_string_lossy().into_owned();
@@ -855,15 +855,15 @@ async fn two_runs_in_worktrees_coordinate_through_one_server() {
     // Agent Mail refuses a project under a directory named as `tempfile` names them, as the daemon's is.
     let rigs = tempfile::Builder::new().prefix("agent-mail-").tempdir().unwrap();
     let rig = rigs.path().join("web");
-    let mut beads = None;
-    let d = Daemon::start(|dir| beads = Some(shop(dir, &rig, &base_url))).await;
-    let (root, children) = beads.unwrap();
+    let mut issues = None;
+    let d = Daemon::start(|dir| issues = Some(shop(dir, &rig, &base_url))).await;
+    let (root, children) = issues.unwrap();
     let dir = d.dir.path().to_owned();
     let data = dir.join("state/loop-manager/addons/agent-mail");
     let config = dir.join(".config/mcp-agent-mail/config.env");
     let user_text = fs::read(&config).unwrap();
 
-    // The drain of the README gives each ready bead a run of `build`: two at once, in the rig `web`.
+    // The drain of the README gives each ready issue a run of `build`: two at once, in the rig `web`.
     let body = json!({"project": "shop", "formula": "epic", "inputs": {"task": root}});
     let epic = d.post("/v1/runs", body, None).await.unwrap()["run"]
         .as_str()

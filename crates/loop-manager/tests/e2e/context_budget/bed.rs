@@ -3,14 +3,14 @@
 use super::*;
 
 /// A hook test bed: a stand-in `loop-manager` that records the outcomes and the comments it is given, a `br` that
-/// fails, so that a comment can reach the bead only through `loop-manager`, and the addon's data directory, with a
+/// fails, so that a comment can reach the issue only through `loop-manager`, and the addon's data directory, with a
 /// budget of 1000 soft, 7000 hard and a note every 500.
 pub(super) struct Bed {
     dir: tempfile::TempDir,
     /// What the hooks printed, to look for the hard limit in.
     said: std::cell::RefCell<String>,
-    /// Whether the run has a bead: `LOOP_MANAGER_BEAD` is set for the hook.
-    pub(super) with_bead: std::cell::Cell<bool>,
+    /// Whether the run has an issue: `LOOP_MANAGER_ISSUE` is set for the hook.
+    pub(super) with_issue: std::cell::Cell<bool>,
 }
 
 impl Bed {
@@ -36,7 +36,7 @@ impl Bed {
         Bed {
             dir,
             said: Default::default(),
-            with_bead: std::cell::Cell::new(true),
+            with_issue: std::cell::Cell::new(true),
         }
     }
 
@@ -87,8 +87,8 @@ impl Bed {
                 "PATH",
                 format!("{}:{}", d.join("bin").display(), std::env::var("PATH").unwrap()),
             );
-        if self.with_bead.get() {
-            command.env("LOOP_MANAGER_BEAD", "t-1");
+        if self.with_issue.get() {
+            command.env("LOOP_MANAGER_ISSUE", "t-1");
         }
         let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         child

@@ -16,10 +16,10 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 | № | Invariant | Where it lives |
 |---|---|---|
 | 1 | One writer of the state: the daemon | `loop-manager-core/src/writer.rs`, [event model](event-model.md) |
-| 2 | Ownership with a generation: a run and a bead have at most one live owner; every effect of an attempt (finisher, close, release) checks the generation, a stale one is dropped | contracts 6.2, 6.3, 5.1 |
-| 3 | The daemon claims a bead in the same transaction as the decision to launch; an agent never claims | contracts 5.1, 6.2 |
-| 4 | A bead is released only conditionally: owner and generation compared | contracts 5.1 |
-| 5 | A session's death loses no work: exit or EOF moves the run to "attempt failed" in one transaction; the bead stays with the run until the run is terminal | contracts 6.2, 4.4 |
+| 2 | Ownership with a generation: a run and an issue have at most one live owner; every effect of an attempt (finisher, close, release) checks the generation, a stale one is dropped | contracts 6.2, 6.3, 5.1 |
+| 3 | The daemon claims an issue in the same transaction as the decision to launch; an agent never claims | contracts 5.1, 6.2 |
+| 4 | An issue is released only conditionally: owner and generation compared | contracts 5.1 |
+| 5 | A session's death loses no work: exit or EOF moves the run to "attempt failed" in one transaction; the issue stays with the run until the run is terminal | contracts 6.2, 4.4 |
 | 6 | Confirmed death before replacement: a new process for the same run or session starts only after nothing is left of the instance it replaces, its marked descendants included; a live shared instance is left alone | contracts 8 |
 | 7 | No descendant of a stopped session survives. A process group is not enough (a claude child orphaned with its own group after `kill -9` kept working); the daemon is a child subreaper and sweeps by the instance marker. Limit: a descendant that dropped the environment (`env -i`, `sudo` without `-E`, a container runtime) carries no marker, so the sweep misses it; the subreaper only reaps it once it exits on its own | contracts 8, [experiments](experiments.md#descendants-after-kill--9-invariant-7) |
 | 8 | One writer per harness session, the daemon: while a run lives nobody else writes into its session | contracts 4 |
@@ -39,17 +39,17 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 How they are checked: the deterministic chaos stand (`loop-manager-testkit/tests/chaos`) plays seeded sequences of
 commands, harness behaviour, policy hooks, operator actions, lost and repeated deliveries and daemon crashes, and
 checks invariants 2, 3, 10, 12, 13, 14, 15, 16 and 17 on the state and the journal after every step. Its formulas
-have several steps, and one starts with a `drain` step over a root bead with two children; besides the invariants
+have several steps, and one starts with a `drain` step over a root issue with two children; besides the invariants
 the stand checks the steps (S1–S4: each step finishes once and in order, attempts follow the steps, no session
-serves two steps, a run passes from its last step) and the drain step (D1: a bead gets at most one child run per
-entry into the step; D2: once the step finished, no child run on a bead is alive; D3: the attempt of a drain step
+serves two steps, a run passes from its last step) and the drain step (D1: an issue gets at most one child run per
+entry into the step; D2: once the step finished, no child run on an issue is alive; D3: the attempt of a drain step
 that a crash of the daemon caught ends with `daemon_crash`). Each full share of seeds kills the daemon mid-drain at least once. Every run
 plays new seeds from a random base it prints; a failure names its seed and `LOOP_MANAGER_CHAOS_SEED=<n>` replays it.
 Invariant 6 runs real marked processes (`loop-manager-testkit/tests/core/old_instances.rs`,
 `process::tests::wait_gone_*`). The others are covered by the integration suites of `loop-manager-testkit/tests` and by
 the acceptance scenarios (criterion 8: 20 `kill -9` of the daemon mid-turn on the scripted driver and 5 on each real
 harness; criterion 24: a `kill -9` of the daemon in each step of a formula of `exec`, `drain` and `exec` steps on the
-real br, no step and no bead run twice).
+real br, no step and no issue run twice).
 
 ## Recovery
 
@@ -69,12 +69,12 @@ At daemon start ([contracts](contracts.md) 6.4 has the exact state rules):
    fails the attempt with `daemon_crash`, as the session it needs is gone (contracts 3.4, 6.4). A run goes on from
    the step it is at: the move to the next step commits with the accepted outcome of the step before, so a finished
    step never runs again, and an exec command the restart killed runs again in a new attempt of its step. The
-   attempt of a `drain` step is interrupted as any: its next attempt gives out no bead the entry into the step has
-   already given (their runs recover as any run), and none at all once a bead of the entry failed under `soft_stop` or
+   attempt of a `drain` step is interrupted as any: its next attempt gives out no issue the entry into the step has
+   already given (their runs recover as any run), and none at all once an issue of the entry failed under `soft_stop` or
    `hard_stop`: the stop follows from the children in the state. A run waiting in an `await` step has no live
    attempt to lose: it keeps waiting with its deadline, and a deadline that passed while the daemon was down fires at
    start.
-4. The deadlines that wait for an effect's answer (a decision, the claim of a bead) count again from the start;
+4. The deadlines that wait for an effect's answer (a decision, the claim of an issue) count again from the start;
    the deadlines of real time stay, and the schedules are armed (a missed schedule fires at most once). Resync, the
    process table included: what carries the marker of an instance this state no longer records is swept.
 

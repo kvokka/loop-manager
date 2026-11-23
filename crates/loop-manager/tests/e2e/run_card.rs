@@ -167,7 +167,7 @@ fn hook(d: &Daemon, name: &str) -> Option<String> {
     Some(reply["hookSpecificOutput"]["additionalContext"].as_str()?.to_owned())
 }
 
-/// A trigger that fires on a bead the call filed opens the card of its run; a call that changes nothing opens none.
+/// A trigger that fires on an issue the call filed opens the card of its run; a call that changes nothing opens none.
 #[tokio::test]
 async fn the_card_opens_for_a_run_a_trigger_started_on_the_change_of_a_tool_call() {
     let epic = "name = \"epic\"\n[inputs]\nepic = { type = \"task\", required = true }\n\

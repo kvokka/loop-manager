@@ -77,7 +77,7 @@ If you cannot do it, run `loop-manager finish fail --summary "<why>"`.
 ```
 
 An agent has one template, and it is checked when the config loads against every formula whose `ai` steps name
-the agent: `inputs.<name>` must be an input each of them declares, `bead.*` needs a `task` input, `steps.<name>.*`
+the agent: `inputs.<name>` must be an input each of them declares, `issue.*` needs a `task` input, `steps.<name>.*`
 an earlier step, and `rig.*`, `project.*` and `run.*` must be fields that exist (see
 [the config reference](../design/config.md)). Formulas that need different prompts name different agents.
 
@@ -182,19 +182,19 @@ loop-manager config explain --project hello --formula summarize-checked
 ## Runs over a tracker
 
 A project with a `.beads` directory uses [br](../../README.md#the-br-tracker-and-its-license) as its task
-tracker. A formula input of `type = "task"` takes the task: its text, the id of a bead to take up, or
-`{ next_ready = true }` to take the next ready bead;
-the prompt then reads its fields as `{{ bead.title }}`, `{{ bead.description }}` and so on, the comments on it as
-`{{ bead.comments }}` and its parents as `{{ bead.parents }}` ([config](../design/config.md#formula-formulasfiletoml)),
-and the run holds the bead's claim until it ends. A trigger on `bead.ready` starts such runs as beads become ready;
-with a label in its `where`, a second trigger on `bead.labeled` also starts one when a bead that is ready already
+tracker. A formula input of `type = "task"` takes the task: its text, the id of an issue to take up, or
+`{ next_ready = true }` to take the next ready issue;
+the prompt then reads its fields as `{{ issue.title }}`, `{{ issue.description }}` and so on, the comments on it as
+`{{ issue.comments }}` and its parents as `{{ issue.parents }}` ([config](../design/config.md#formula-formulasfiletoml)),
+and the run holds the issue's claim until it ends. A trigger on `issue.ready` starts such runs as issues become ready;
+with a label in its `where`, a second trigger on `issue.labeled` also starts one when an issue that is ready already
 gains the label ([config: trigger](../design/config.md#how-runs-start-and-what-a-firing-guarantees)).
 
-A task in plain words, `--input 'task=Add a dark mode'`, creates a root bead (an epic titled by the first line) and
-the run works on it; a task that is the id of a bead files nothing and takes that bead. A planner step files the work as beads under that
+A task in plain words, `--input 'task=Add a dark mode'`, creates a root issue (an epic titled by the first line) and
+the run works on it; a task that is the id of an issue files nothing and takes that issue. A planner step files the work as issues under that
 root, each under the id prefix of its rig (`BD_ISSUE_PREFIX=<prefix> br create ... --deps parent-child:<root>`) and, if it
 wants, with `agent:` and `harness:` labels; a `drain` step then gives every
-ready bead under the root a run of its own formula and ends when none is ready or running:
+ready issue under the root a run of its own formula and ends when none is ready or running:
 
 ```toml
 name = "deliver"
@@ -204,15 +204,15 @@ task = { type = "task", required = true }
 [[step]]
 name = "plan"
 kind = "ai"
-agent = "planner"                     # its template files the beads under {{ bead.id }}
+agent = "planner"                     # its template files the issues under {{ issue.id }}
 
 [[step]]
 name = "work"
 kind = "drain"
-formula = "implement"                 # takes one `task` input; one run per bead, on the rig of its id prefix
-pool = 2                              # two beads given at once (default 1); with no `worktree = true`
+formula = "implement"                 # takes one `task` input; one run per issue, on the rig of its id prefix
+pool = 2                              # two issues given at once (default 1); with no `worktree = true`
                                       # here or in `implement` both work in the rig's own directory
-on_item_failure = "continue"          # a failed bead stops nothing; soft_stop / hard_stop stop the step
+on_item_failure = "continue"          # a failed issue stops nothing; soft_stop / hard_stop stop the step
 
 [[step]]
 name = "verify"
@@ -235,7 +235,7 @@ step_check_script_path = "check.sh"   # beside the formula file; 0 passes, 75 fa
 Exit code 75 of the script is a failure for good: the run fails at once, with no repeat and no `back_to` round.
 
 A step can run another formula of the project as a child run, whose outcome is the step's; the child inherits the
-inputs it declares (a `task` too: the child works on the bead of the parent, which closes it), and the step
+inputs it declares (a `task` too: the child works on the issue of the parent, which closes it), and the step
 adds its own:
 
 ```toml
@@ -256,8 +256,8 @@ directory itself, and keeping runs apart there is yours. Without the key a run w
 
 The key also goes on a `drain` step. Each child then gets a worktree of its own on the branch `loop-manager/<child>`,
 from the base of its rig, whatever its own formula says. On the `pass` of its last step loop-manager merges that branch
-back into the base with `git merge --no-ff` and the subject `chore(merge): <bead title> [<bead id>]`. The bead closes
-after the merge, so the next ready bead branches from a base that holds the work of the ones before it. With the key
+back into the base with `git merge --no-ff` and the subject `chore(merge): <issue title> [<issue id>]`. The issue closes
+after the merge, so the next ready issue branches from a base that holds the work of the ones before it. With the key
 on both the formula and its `drain` step, a run of the root coordinates the rigs:
 
 ```toml

@@ -1,6 +1,6 @@
 # devloop: loop-manager develops loop-manager
 
-A loop-manager project whose rig is this repository. The owner files an epic as a bead; a run of the formula `epic`
+A loop-manager project whose rig is this repository. The owner files an epic as an issue; a run of the formula `epic`
 has a coder work on it, runs the full test gate, has a reviewer review the result, and sends the work back to the
 coder until the review scores 9 or more with the verdict `complete`. Nothing here ships with the binary: it is a pack
 and a config, read by `loop-manager` as any other.
@@ -123,11 +123,11 @@ it immediately, and the daemon picks it up on restart.
 
 ## File an epic
 
-A ready bead with the label `auto` starts a run; a bead without it starts nothing. It does not matter when the bead
-got the label: filed with it or freed by its blockers with it, the bead starts a run as it becomes ready (the trigger
+A ready issue with the label `auto` starts a run; an issue without it starts nothing. It does not matter when the issue
+got the label: filed with it or freed by its blockers with it, the issue starts a run as it becomes ready (the trigger
 `epic-ready`); ready without it, it starts one as it gains it (`br label add <id> auto`, the trigger `epic-labeled`).
-A label added to a bead that is blocked or held waits until the bead is ready. Other edits, and other labels, start
-nothing, nor does a bead a run already holds.
+A label added to an issue that is blocked or held waits until the issue is ready. Other edits, and other labels, start
+nothing, nor does an issue a run already holds.
 
 ```sh
 cd devloop
@@ -138,7 +138,7 @@ Write the description as a plan is written: the documents to read, the result, a
 epic points to a PRD committed in the repository. An epic that waits for another is filed with a dependency
 (`br dep add <epic> <what it waits for>`) and becomes ready when that one is closed.
 
-By hand, without the label: `devloop/lm run start devloop repo epic --input epic=<bead id>`.
+By hand, without the label: `devloop/lm run start devloop repo epic --input epic=<issue id>`.
 
 ## Watch it
 
@@ -171,7 +171,7 @@ See the [owner question procedure](owner-questions.md) for comment queries, answ
 
 The label alone does not pause a run. A discretionary `DECISION` is a notification: work goes on, and closing the
 epic does not mark the decision accepted. To acknowledge or change it, add a comment whose first line is
-`ANSWER: <id>` and whose following lines contain your answer (`br comments add <bead> -f <file>`).
+`ANSWER: <id>` and whose following lines contain your answer (`br comments add <issue> -f <file>`).
 
 A blocking `QUESTION` ends the model session and enters `code_owner` or `review_owner`, an `await` step with a
 seven-day timeout. Inspect it and answer through the existing external-decision API:
@@ -191,21 +191,21 @@ Do not remove `needs-owner` until all questions and decisions have answers: ther
 
 ## Read the result
 
-Use `devloop/lm run show <run>` to find the bead and the CI step outcome. The epic holds the agent reports,
-questions and answers. The plugin’s [recap skill](../plugins/loop-manager/skills/recap/SKILL.md) reads one or more beads in TOON and briefs the user.
+Use `devloop/lm run show <run>` to find the issue and the CI step outcome. The epic holds the agent reports,
+questions and answers. The plugin’s [recap skill](../plugins/loop-manager/skills/recap/SKILL.md) reads one or more issues in TOON and briefs the user.
 Full CI logs and notes for a completed run are local to `devloop/artifacts/<run>/`.
 
 ## When a run fails
 
 A run fails when its rounds run out, when an owner wait times out or is rejected, when a review cannot be written
 twice, when finalization cannot complete (see "The push"), or when the infrastructure fails past its retries. The epic is
-`open` again and, since one failed run is enough (`bead_failed_runs = 1` in `config.toml`), loop-manager closes the
-gate `bead:devloop/<id>`: nothing more starts on that epic until you open it. Read the last comments, answer or
+`open` again and, since one failed run is enough (`issue_failed_runs = 1` in `config.toml`), loop-manager closes the
+gate `issue:devloop/<id>`: nothing more starts on that epic until you open it. Read the last comments, answer or
 change the epic, then:
 
 ```sh
 devloop/lm gate list
-devloop/lm gate open bead:devloop/<id>
+devloop/lm gate open issue:devloop/<id>
 devloop/lm run list --state queued   # with `auto`, a run of the epic may wait here for the gate
 ```
 
@@ -234,7 +234,7 @@ devloop/config.toml --project devloop --formula epic --rig repo` shows what each
 
 ## The addons
 
-The coder also attaches `conventional-commits`. Its Git commit-msg hook checks the subject and bead suffix before each commit in the working repository. See [the addon](../addons/conventional-commits/README.md) for requirements.
+The coder also attaches `conventional-commits`. Its Git commit-msg hook checks the subject and issue suffix before each commit in the working repository. See [the addon](../addons/conventional-commits/README.md) for requirements.
 
 Both roles also attach [lessons](../addons/lessons/README.md). When an agent finishes, it can leave a short
 lesson on its epic. An empty answer leaves no comment.

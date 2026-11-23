@@ -141,7 +141,7 @@ pub enum Command {
         #[arg(long)]
         data: Option<String>,
     },
-    /// Put the text of `--file` as a comment on the bead of this session's run (`LOOP_MANAGER_RUN`,
+    /// Put the text of `--file` as a comment on the issue of this session's run (`LOOP_MANAGER_RUN`,
     /// `LOOP_MANAGER_ATTEMPT_TOKEN`), as its attempt.
     Comment {
         #[arg(long)]

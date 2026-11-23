@@ -1,7 +1,7 @@
 #!/bin/sh
 # The bridge between GitHub and the runs of a project that wait on their review (README, "The bridge"). It follows the
 # daemon's events and, while a run waits, looks every INTERVAL seconds (30 by default) at the pull requests of its
-# feature, the root's from the last line of the step `pr` and the others by the branch `feature/<bead>`:
+# feature, the root's from the last line of the step `pr` and the others by the branch `feature/<issue>`:
 # - the root's merged: `pass`, with who merged it in the data;
 # - the root's closed without a merge: the run is cancelled;
 # - a comment or a review of an author in the run's `feedback_from` that the account of `gh` has not marked with the
@@ -34,7 +34,7 @@ look() {
       return ;;
   esac
   who=$(printf '%s' "$show" | jq -r '.inputs.feedback_from // ""')
-  branch="feature/$(printf '%s' "$show" | jq -r .bead)"
+  branch="feature/$(printf '%s' "$show" | jq -r .issue)"
   places=$("$loop_manager" --json project list --project "$project")
   for repo in $(printf '%s' "$places" | jq -r '.[0] | .root.path, .rigs[].path'); do
     url=$(cd "$repo" && gh pr view "$branch" --json url -q .url 2>/dev/null) || continue

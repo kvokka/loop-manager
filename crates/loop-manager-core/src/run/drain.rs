@@ -1,25 +1,25 @@
-//! The root bead of a run started from a task (docs/design/config.md, docs/design/contracts.md 5): a text in a task
-//! input that names no bead the core knows makes the tracker, as the run prepares and once per key, return the bead
-//! whose id it is or create an epic for it; the run then claims that bead as any other.
+//! The root issue of a run started from a task (docs/design/config.md, docs/design/contracts.md 5): a text in a task
+//! input that names no issue the core knows makes the tracker, as the run prepares and once per key, return the issue
+//! whose id it is or create an epic for it; the run then claims that issue as any other.
 //!
 //! The drain step (docs/design/config.md): an attempt with no process that, on every read of the tracker, gives each
-//! ready bead of its own under the run's bead, at any depth, a run of the step's formula — the one creation every
-//! start goes through — once per entry of the step, and waits while a bead of its own waits on a foreign blocker.
+//! ready issue of its own under the run's issue, at any depth, a run of the step's formula — the one creation every
+//! start goes through — once per entry of the step, and waits while an issue of its own waits on a foreign blocker.
 
 use super::{
-    Create, Outcome, RunHandler, Verdict, beads::tracker_key, new_token, render::DRAIN_TIMEOUT_MS, row::Row,
+    Create, Outcome, RunHandler, Verdict, issues::tracker_key, new_token, render::DRAIN_TIMEOUT_MS, row::Row,
     triggers::MAX_DEPTH,
 };
 use crate::{
     config::{InputType, OnItemFailure},
-    tracker::{Bead, TrackerError, Wait},
+    tracker::{Issue, TrackerError, Wait},
     writer::{Error, Tx},
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
-/// The longest title of a root bead, in characters.
+/// The longest title of a root issue, in characters.
 const TITLE_CHARS: usize = 80;
 
 /// A run in a drain step.
@@ -32,8 +32,8 @@ impl RunHandler {
     /// The attempt of a drain step: the read of the tracker it asks for makes the first pass; its deadline is the
     /// step's timeout. A run that held a slot before (an attempt cut by a restart) frees it here.
     pub(super) fn start_drain(&mut self, tx: &mut Tx<'_>, mut row: Row) -> Result<(), Error> {
-        if row.bead.is_none() || !self.trackers.contains_key(&row.project) {
-            let reason = "a drain step needs the bead of the run";
+        if row.issue.is_none() || !self.trackers.contains_key(&row.project) {
+            let reason = "a drain step needs the issue of the run";
             return self.terminal(tx, row, "failed", Some("infrastructure"), reason);
         }
         Self::run_attempt(tx, &mut row, "drain")?;
@@ -44,8 +44,8 @@ impl RunHandler {
         self.schedule(tx)
     }
 
-    /// One pass of every run of `project` in a drain step, after a read of its tracker that found the ready beads
-    /// `under` each root and the open beads that wait (`waits`) under it.
+    /// One pass of every run of `project` in a drain step, after a read of its tracker that found the ready issues
+    /// `under` each root and the open issues that wait (`waits`) under it.
     pub(super) fn drained(
         &mut self,
         tx: &mut Tx<'_>,
@@ -64,12 +64,12 @@ impl RunHandler {
         Ok(())
     }
 
-    /// Gives each ready bead of its own under the run's bead that this entry of the step has not given yet a run of
-    /// the step's formula, at most `pool` in work at once; a refused bead gets no run and stays open. A bead is its
-    /// own when the run is on the root, or the bead is of the run's rig; a foreign one is passed over, no error. The
-    /// step passes once nothing was given, no child is alive, no later read is queued and no bead of its own it has
-    /// not given waits on a foreign blocker or a `blocked` status, with `{closed, failed, refused}` of the beads of
-    /// this entry. Once a bead failed under `soft_stop` no bead is given; under `hard_stop` the alive children are
+    /// Gives each ready issue of its own under the run's issue that this entry of the step has not given yet a run of
+    /// the step's formula, at most `pool` in work at once; a refused issue gets no run and stays open. An issue is its
+    /// own when the run is on the root, or the issue is of the run's rig; a foreign one is passed over, no error. The
+    /// step passes once nothing was given, no child is alive, no later read is queued and no issue of its own it has
+    /// not given waits on a foreign blocker or a `blocked` status, with `{closed, failed, refused}` of the issues of
+    /// this entry. Once an issue failed under `soft_stop` no issue is given; under `hard_stop` the alive children are
     /// cancelled too; the step then fails with `stopped_on` and `not_started` besides. A restart starts a new
     /// attempt, not a new entry; a round does.
     fn pass(
@@ -79,7 +79,7 @@ impl RunHandler {
         under: &BTreeMap<String, Vec<String>>,
         waits: &BTreeMap<String, Vec<Wait>>,
     ) -> Result<(), Error> {
-        let Some(root) = row.bead.clone().filter(|_| row.state == "running") else {
+        let Some(root) = row.issue.clone().filter(|_| row.state == "running") else {
             return Ok(());
         };
         // A read asked before this attempt began does not know the root and decides nothing.
@@ -89,24 +89,24 @@ impl RunHandler {
         let config = std::sync::Arc::clone(&self.config);
         let project = config.projects.iter().find(|p| p.name == row.project);
         let on_root = project.is_some_and(|p| p.root.0 == row.rig);
-        let own = |bead: &str| on_root || project.and_then(|p| p.rig_of(bead)) == Some(row.rig.as_str());
+        let own = |issue: &str| on_root || project.and_then(|p| p.rig_of(issue)) == Some(row.rig.as_str());
         let step: Value = (row.config.as_deref())
             .and_then(|c| serde_json::from_str(c).ok())
             .unwrap_or_default();
         let formula = step["drain"].as_str().unwrap_or_default().to_owned();
         let Some(input) = self.task_key(&row.project, &formula) else {
-            let reason = format!("formula `{formula}` of the drain step is gone or takes no bead");
+            let reason = format!("formula `{formula}` of the drain step is gone or takes no issue");
             return self.terminal(tx, row, "failed", Some("infrastructure"), &reason);
         };
-        // `(id, bead, state, given by this entry)` of every child on a bead. The entry is the tail of the run's
+        // `(id, issue, state, given by this entry)` of every child on an issue. The entry is the tail of the run's
         // attempts on this step after its last execution: a round back to it passes through an attempt of another
         // step, a repeat through an attempt of it with an outcome (docs/design/config.md).
         let kids: Vec<(String, String, String, bool)> = {
             let mut stmt = tx.sql().prepare(
-                "SELECT r.id, r.bead, r.state, r.created_ms >= (SELECT MIN(a.started_ms) FROM attempts a \
+                "SELECT r.id, r.issue, r.state, r.created_ms >= (SELECT MIN(a.started_ms) FROM attempts a \
                  WHERE a.run = ?1 AND a.n > (SELECT COALESCE(MAX(n), 0) FROM attempts WHERE run = ?1 \
                  AND (step != ?2 OR (outcome IS NOT NULL AND failure IS NULL)))) \
-                 FROM runs r WHERE r.parent_run = ?1 AND r.bead IS NOT NULL ORDER BY r.n",
+                 FROM runs r WHERE r.parent_run = ?1 AND r.issue IS NOT NULL ORDER BY r.n",
             )?;
             let rows = stmt.query_map(params![row.id, row.step], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
@@ -115,7 +115,7 @@ impl RunHandler {
         };
         let live = |state: &str| !matches!(state, "passed" | "failed" | "cancelled");
         let policy: OnItemFailure = serde_json::from_value(step["on_item_failure"].clone()).unwrap_or_default();
-        // Stopped: a bead of this entry failed under a policy that stops. Derived from the children, so a restart
+        // Stopped: an issue of this entry failed under a policy that stops. Derived from the children, so a restart
         // keeps it and a new entry (a repeat, a round) clears it.
         let stopped =
             policy != OnItemFailure::Continue && (kids.iter()).any(|(_, _, state, mine)| *mine && state == "failed");
@@ -129,24 +129,24 @@ impl RunHandler {
         let mut free = pool.saturating_sub(kids.iter().filter(|(_, _, state, _)| live(state)).count());
         let depth = row.depth + 1;
         let (mut given, mut refused, mut not_started) = (0, Map::new(), Vec::new());
-        for bead in Self::ready_in(tx, &row.project, None)? {
-            if !under.contains(&bead) || !own(&bead) || kids.iter().any(|(_, b, _, mine)| *mine && *b == bead) {
+        for issue in Self::ready_in(tx, &row.project, None)? {
+            if !under.contains(&issue) || !own(&issue) || kids.iter().any(|(_, b, _, mine)| *mine && *b == issue) {
                 continue;
             }
             if stopped || free == 0 {
-                not_started.push(bead);
+                not_started.push(issue);
                 continue;
             }
             if depth > MAX_DEPTH {
-                refused.insert(bead, json!(format!("depth {depth} is over {MAX_DEPTH}")));
+                refused.insert(issue, json!(format!("depth {depth} is over {MAX_DEPTH}")));
                 continue;
             }
             let create = Create {
                 project: row.project.clone(),
-                // The rig of the bead's id prefix.
+                // The rig of the issue's id prefix.
                 rig: None,
                 formula: formula.clone(),
-                inputs: [(input.clone(), json!(bead))].into_iter().collect(),
+                inputs: [(input.clone(), json!(issue))].into_iter().collect(),
                 correlation: Some(row.correlation.clone()),
                 depth: u32::try_from(depth).unwrap_or(u32::MAX),
                 parent_run: Some(row.id.clone()),
@@ -158,26 +158,26 @@ impl RunHandler {
                     given += 1;
                     free -= 1;
                 }
-                Err(Error::Rejected(why) | Error::NotFound(why)) => drop(refused.insert(bead, json!(why))),
+                Err(Error::Rejected(why) | Error::NotFound(why)) => drop(refused.insert(issue, json!(why))),
                 Err(e) => return Err(e),
             }
         }
         // The list is of before the cancels above: a child they ended is still alive in it, and its end queues the
         // read that ends the step.
         let alive = (kids.iter()).any(|(_, _, state, _)| live(state));
-        // The read in hand is still in the queue. Another one behind it may bring a bead the end of a child made
-        // ready (one the child's bead blocked): the step ends on the last read.
+        // The read in hand is still in the queue. Another one behind it may bring an issue the end of a child made
+        // ready (one the child's issue blocked): the step ends on the last read.
         let reads: i64 = tx.sql().query_row(
             "SELECT COUNT(*) FROM effects WHERE key = ?1 AND dedupe LIKE 'sync:%'",
             [tracker_key(&row.project)],
             |r| r.get(0),
         )?;
-        // A bead of its own this entry has not given waits on a foreign blocker, or a lock by hand: the step waits
+        // An issue of its own this entry has not given waits on a foreign blocker, or a lock by hand: the step waits
         // for the read its end brings. The root is no blocker: it ends with this run.
         let held = !stopped
             && waits.iter().any(|w| {
-                own(&w.bead)
-                    && !kids.iter().any(|(_, b, _, mine)| *mine && *b == w.bead)
+                own(&w.issue)
+                    && !kids.iter().any(|(_, b, _, mine)| *mine && *b == w.issue)
                     && (w.kind == "status" || (w.blocker != root && (!w.under || !own(&w.blocker))))
             });
         if given > 0 || alive || reads > 1 || held {
@@ -195,9 +195,9 @@ impl RunHandler {
         Some(key.clone())
     }
 
-    /// The text of the task of a run that has no bead yet; `None`: it has no task.
+    /// The text of the task of a run that has no issue yet; `None`: it has no task.
     pub(super) fn task_text(&self, row: &Row) -> Option<String> {
-        if row.bead.is_some() {
+        if row.issue.is_some() {
             return None;
         }
         let inputs: Value = serde_json::from_str(&row.inputs).ok()?;
@@ -205,8 +205,8 @@ impl RunHandler {
         Some(inputs.get(&key)?.as_str()?.to_owned())
     }
 
-    /// Queues the creation of the root bead of a run started from `text`; the run waits in `preparing` for it, as
-    /// for a claim. The key is in the payload: a repeat of the effect after a crash creates no second bead.
+    /// Queues the creation of the root issue of a run started from `text`; the run waits in `preparing` for it, as
+    /// for a claim. The key is in the payload: a repeat of the effect after a crash creates no second issue.
     pub(super) fn create_root(&mut self, tx: &mut Tx<'_>, row: Row, text: &str) -> Result<(), Error> {
         let Some(token) = new_token() else {
             return self.terminal(
@@ -214,7 +214,7 @@ impl RunHandler {
                 row,
                 "failed",
                 Some("infrastructure"),
-                "bead_not_created: no randomness",
+                "issue_not_created: no randomness",
             );
         };
         let title: String = (text.lines().map(str::trim).find(|l| !l.is_empty()))
@@ -233,27 +233,27 @@ impl RunHandler {
         )
     }
 
-    /// The answer of the tracker to the creation of the root bead of `run`: the run owns and claims the bead, its
+    /// The answer of the tracker to the creation of the root issue of `run`: the run owns and claims the issue, its
     /// input names it. A repeated answer, or one for a run no longer preparing, is dropped.
     pub(super) fn created(
         &mut self,
         tx: &mut Tx<'_>,
         run: &str,
-        result: Result<Option<Bead>, TrackerError>,
+        result: Result<Option<Issue>, TrackerError>,
     ) -> Result<(), Error> {
         let row = Row::load(tx, run)?;
-        if row.state != "preparing" || row.bead.is_some() {
+        if row.state != "preparing" || row.issue.is_some() {
             return Ok(());
         }
-        let bead = match result {
-            Ok(Some(bead)) => bead.id,
+        let issue = match result {
+            Ok(Some(issue)) => issue.id,
             Ok(None) => return Ok(()),
             Err(e) => {
-                let reason = format!("bead_not_created: {e}");
+                let reason = format!("issue_not_created: {e}");
                 return self.terminal(tx, row, "failed", Some("infrastructure"), &reason);
             }
         };
-        match Self::own_bead(tx, &row.project, &bead, &row.id) {
+        match Self::own_issue(tx, &row.project, &issue, &row.id) {
             Err(Error::Rejected(reason) | Error::NotFound(reason)) => {
                 return self.terminal(tx, row, "failed", Some("infrastructure"), &reason);
             }
@@ -261,18 +261,18 @@ impl RunHandler {
         }
         let mut inputs: Value = serde_json::from_str(&row.inputs).unwrap_or_default();
         if let Some(key) = self.task_key(&row.project, &row.formula) {
-            inputs[key] = json!(bead);
+            inputs[key] = json!(issue);
         }
         tx.sql().execute(
-            "UPDATE runs SET bead = ?2, inputs = ?3 WHERE id = ?1",
-            params![row.id, bead, inputs.to_string()],
+            "UPDATE runs SET issue = ?2, inputs = ?3 WHERE id = ?1",
+            params![row.id, issue, inputs.to_string()],
         )?;
-        self.claim(tx, &Row::load(tx, run)?, &bead)
+        self.claim(tx, &Row::load(tx, run)?, &issue)
     }
 }
 
-/// Reads the tracker's writes after the project's cursor, then its ready set, then the ready beads under the root
-/// bead of each run of the project in a drain step.
+/// Reads the tracker's writes after the project's cursor, then its ready set, then the ready issues under the root
+/// issue of each run of the project in a drain step.
 pub(super) fn sync(tx: &Tx<'_>, project: &str) -> Result<Value, Error> {
     let after: Option<i64> = tx
         .sql()
@@ -280,7 +280,7 @@ pub(super) fn sync(tx: &Tx<'_>, project: &str) -> Result<Value, Error> {
             r.get(0)
         })
         .optional()?;
-    let sql = format!("SELECT bead FROM runs WHERE project = ?1 AND bead IS NOT NULL AND {DRAINING}");
+    let sql = format!("SELECT issue FROM runs WHERE project = ?1 AND issue IS NOT NULL AND {DRAINING}");
     let mut stmt = tx.sql().prepare(&sql)?;
     let under: Vec<String> = stmt.query_map([project], |r| r.get(0))?.collect::<Result<_, _>>()?;
     Ok(
@@ -298,7 +298,7 @@ fn drain_outcome(
     let of = |states: &[&str]| -> Vec<&String> {
         (kids.iter())
             .filter(|(_, _, state, mine)| *mine && states.contains(&state.as_str()))
-            .map(|(_, bead, ..)| bead)
+            .map(|(_, issue, ..)| issue)
             .collect()
     };
     let (closed, failed) = (of(&["passed"]), of(&["failed", "cancelled"]));

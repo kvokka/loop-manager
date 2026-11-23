@@ -133,7 +133,7 @@ impl Driver for ScriptedDriver {
             attempt,
             token,
             actor,
-            bead,
+            issue,
             ..
         }
         | SessionPlan::Resume {
@@ -142,13 +142,13 @@ impl Driver for ScriptedDriver {
             attempt,
             token,
             actor,
-            bead,
+            issue,
             ..
         }) = plan;
-        // The tracker variables and the run's bead join the session's environment, as a harness adapter sets them.
+        // The tracker variables and the run's issue join the session's environment, as a harness adapter sets them.
         let mut env: BTreeMap<_, _> = config.env.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect();
         env.extend(actor.iter().flat_map(|a| a.env(self.harness, config)));
-        env.extend(bead.clone().map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), bead)));
+        env.extend(issue.clone().map(|issue| ("LOOP_MANAGER_ISSUE".to_owned(), issue)));
         let mcp: BTreeMap<_, _> = config.mcp.iter().map(|(n, m)| (n, &m.value)).collect();
         let servers = |c: &EffectiveConfig| -> BTreeMap<String, Value> {
             (c.mcp.iter()).map(|(n, m)| (n.clone(), json!(m.value))).collect()

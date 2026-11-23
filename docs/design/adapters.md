@@ -85,7 +85,7 @@ the core relies on these, and a driver that misses one fails runs by the watchdo
 - **Session events carry the `SessionRef` the adapter returned**, byte for byte: the core finds the attempt by
   the JSON text. Changing the shape of a stored `SessionRef` breaks the attempts in flight across an upgrade.
 - **The attempt environment** — `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, the tracker actor of `SessionPlan`,
-  `LOOP_MANAGER_BEAD` (when the run has a bead), `LOOP_MANAGER_SOCKET` — reaches the session's tools and its harness
+  `LOOP_MANAGER_ISSUE` (when the run has an issue), `LOOP_MANAGER_SOCKET` — reaches the session's tools and its harness
   hooks (contracts 4.6 says how each harness delivers it).
 - **Service URLs and headers stay verbatim in the parts**: until a service is up its port and token are the
   placeholders `${LOOP_MANAGER_SERVICE_PORT:<id>}` and `${LOOP_MANAGER_SERVICE_TOKEN:<id>}`, which the core replaces as
