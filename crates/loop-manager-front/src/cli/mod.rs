@@ -81,6 +81,12 @@ pub enum CacheCommand {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Show the version of this binary.
+    Version {
+        /// Print the full Git commit SHA of this build.
+        #[arg(long)]
+        git_sha: bool,
+    },
     /// Read one JSON value from stdin and print it as TOON (or JSON with --json).
     Format,
     /// Run the daemon in the foreground.
@@ -265,7 +271,8 @@ fn report(json: bool, error: Value) -> ExitCode {
 async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
     let json = cli.json;
     match cli.command {
-        Command::Format
+        Command::Version { .. }
+        | Command::Format
         | Command::Daemon { .. }
         | Command::Cache(_)
         | Command::McpBridge { .. }

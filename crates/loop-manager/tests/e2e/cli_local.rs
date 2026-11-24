@@ -5,6 +5,28 @@ use serde_json::Value;
 use std::{fs, io::Write};
 
 #[test]
+fn version_reports_build_metadata_without_a_daemon() {
+    let dir = tempfile::tempdir().unwrap();
+    for (args, expected) in [
+        (
+            vec!["version"],
+            concat!("loop-manager ", env!("CARGO_PKG_VERSION"), "\n"),
+        ),
+        (vec!["version", "--git-sha"], concat!(env!("LM_BUILD_SHA"), "\n")),
+    ] {
+        let out = common::loop_manager()
+            .args(args)
+            .current_dir(dir.path())
+            .env("PATH", dir.path())
+            .env("LOOP_MANAGER_SOCKET", dir.path().join("missing.sock"))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
 fn format_reads_one_json_value_without_a_daemon() {
     let format = |args: &[&str], input: &str| {
         let (reader, mut writer) = std::io::pipe().unwrap();

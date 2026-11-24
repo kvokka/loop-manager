@@ -21,6 +21,14 @@ fn main() -> ExitCode {
         quiet_on_closed_stdout();
     }
     let config = match cli.command {
+        Command::Version { git_sha } => {
+            if git_sha {
+                println!("{}", env!("LM_BUILD_SHA"));
+            } else {
+                println!("loop-manager {}", env!("CARGO_PKG_VERSION"));
+            }
+            return ExitCode::SUCCESS;
+        }
         Command::Format => {
             let value = match serde_json::from_reader(std::io::stdin().lock()) {
                 Ok(value) => value,
