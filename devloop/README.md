@@ -243,6 +243,9 @@ The coder also attaches `conventional-commits`. Its Git commit-msg hook checks t
 Both roles also attach [lessons](../addons/lessons/README.md). When an agent finishes, it can leave a short
 lesson on its epic. An empty answer leaves no comment.
 
+Both roles also attach [code-search](../addons/code-search/README.md): their system prompt says that the shell has
+`rg` and `ast-grep`, which `mise.toml` pins, and when to use each.
+
 The project attaches [t3-notify](../addons/t3-notify/README.md) in `[settings]`. An epic filed or started from a
 T3 Code thread tells that thread when its run starts, enters `code_owner` or `review_owner`, and ends. The daemon needs
 `t3` on its `PATH`, and the thread's harness the `t3-run-card` plugin with auto-open on.
