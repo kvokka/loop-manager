@@ -182,10 +182,10 @@ version = "0.6.0"
 harnesses = ["claude", "codex"]
 
 [params]
-soft = 300000           # tokens of context past which the agent is told to wrap up
-hard = 420000           # tokens of context past which the session is stopped
-warn_step = 30000       # tokens of growth past `soft` between two notes
-cut = "fail"            # the outcome of a run whose session is stopped: "fail" or "pass"
+soft = 300000     # tokens of context past which the agent is told to wrap up
+hard = 420000     # tokens of context past which the session is stopped
+warn_step = 30000 # tokens of growth past `soft` between two notes
+cut = "fail"      # the outcome of a run whose session is stopped: "fail" or "pass"
 
 [agent]
 # claude compacts at about this window less 33k tokens; the most it takes keeps it past `hard`.
@@ -214,7 +214,7 @@ event = "PreCompact"
 command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}' ${params.soft} ${params.hard} ${params.warn_step} '${params.cut}'"
 
 [dependencies.git]
-minimum = "2.56.1"
+minimum = "2.55.0"
 command = ["git", "--version"]
 pattern = '(?m)^git version (\S+)'
 

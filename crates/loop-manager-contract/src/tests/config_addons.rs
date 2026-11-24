@@ -284,6 +284,23 @@ fn dependency_locks_compare_semver_precedence() {
 }
 
 #[test]
+fn short_dependency_minimum_is_an_inclusive_floor() {
+    for (minimum, below) in [("1", "0.99.99"), ("1.1", "1.0.99")] {
+        let config = load(&with(&[(
+            MAIL,
+            &format!("[dependencies.jq]\ncommand = ['jq', '--version']\nminimum = '{minimum}'"),
+        )]));
+        let dep = &config.addons[0].dependencies["jq"];
+        assert!(dep.check(below).is_err());
+        assert!(dep.check(minimum).is_ok());
+        assert!(dep.check("2").is_ok());
+        for malformed in ["", "1.", ".1", "01", "1.01", "1.x", "1..2"] {
+            assert!(dep.check(malformed).is_err(), "{malformed}");
+        }
+    }
+}
+
+#[test]
 fn malformed_dependency_declarations_fail_config_loading() {
     for (fields, why) in [
         ("command = []\nminimum = '1.0.0'", "version command"),

@@ -413,7 +413,7 @@ version = "0.1.0"
 [dependencies.indexer]
 command = ["custom-indexer", "about"]
 pattern = 'release=(\S+)'
-minimum = "1.10.0"
+minimum = "1.10"
 lock = "minor"
 "#,
     )
@@ -444,6 +444,7 @@ lock = "minor"
             "installed 1.10.0",
             true,
         ),
+        (Some("echo release=1.10"), "installed 1.10.0", true),
         (Some("echo release=1.10.12"), "installed 1.10.12", true),
     ] {
         if let Some(body) = probe {

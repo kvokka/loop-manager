@@ -1059,12 +1059,13 @@ An addon can declare a version probe for each external executable it uses. For e
 
 ```toml
 [dependencies.rg]
-minimum = "16.0.0"
+minimum = "16"
 command = ["rg", "--version"]
 pattern = '^ripgrep (\S+)'
 ```
 
-`minimum` is an inclusive SemVer floor. An optional `lock` restricts the accepted versions further.
+`minimum` is an inclusive SemVer floor. In both `minimum` and the version reported by a probe, a numeric
+`"1"` means `1.0.0` and `"1.1"` means `1.1.0`. Both floors accept `2.0.0` with the default lock. An optional `lock` restricts the accepted versions further.
 For a minimum of `1.2.3`:
 
 | `lock` | Accepted versions |

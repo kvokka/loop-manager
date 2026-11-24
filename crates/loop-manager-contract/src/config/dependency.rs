@@ -9,6 +9,7 @@ use std::fmt;
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
     pub command: Vec<String>,
+    #[serde(deserialize_with = "minimum")]
     pub minimum: Version,
     #[serde(default)]
     lock: Lock,
@@ -35,6 +36,22 @@ enum Lock {
     Major,
     Minor,
     Exact,
+}
+
+/// A numeric major or major.minor has zeroes for its omitted components.
+fn dependency_version(text: &str) -> Result<Version, semver::Error> {
+    if text.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        match text.matches('.').count() {
+            0 => return Version::parse(&format!("{text}.0.0")),
+            1 => return Version::parse(&format!("{text}.0")),
+            _ => {}
+        }
+    }
+    Version::parse(text)
+}
+
+fn minimum<'de, D: Deserializer<'de>>(d: D) -> Result<Version, D::Error> {
+    dependency_version(&String::deserialize(d)?).map_err(D::Error::custom)
 }
 
 fn pattern<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Regex>, D::Error> {
@@ -70,7 +87,7 @@ impl Dependency {
                 .ok_or("version pattern did not match the probe output")?
                 .as_str(),
         };
-        let version = Version::parse(version).map_err(|e| format!("invalid SemVer from probe: {e}"))?;
+        let version = dependency_version(version).map_err(|e| format!("invalid SemVer from probe: {e}"))?;
         let min = &self.minimum;
         let order = version.cmp_precedence(min);
         let within = match self.lock {
