@@ -5,6 +5,9 @@ name = "devloop"
 # The addons of this repository, from this checkout by relative path (README.md, "The addons"). The agents that
 # attach them, with their params, are agents/coder and agents/reviewer.
 [[addon]]
+path = "../addons/code-search"
+
+[[addon]]
 path = "../addons/context-budget"
 
 [[addon]]

@@ -60,11 +60,13 @@ loop-manager's own addons are not crates either: each lives in `addons/<name>/` 
 changes only its declaration. A config declares an addon by `[[addon]]` with a `path`, or with `git` + `rev` + `dir`
 for a directory of a repository ([config: packs and addons from git](design/config.md#packs-and-addons-from-git)),
 and an agent attaches it with `addons = [{ name, params }]`
-([config: addon](design/config.md#addon-addonaddontoml)). There are six:
+([config: addon](design/config.md#addon-addonaddontoml)). There are seven:
 
 - [`agent-mail`](../addons/agent-mail/README.md), coordination of runs that work on one repository at once, each in
   its own worktree, through one Agent Mail server the daemon runs: mail in a shared thread, path reservations, and a
   refused commit of a path another run holds;
+- [`code-search`](../addons/code-search/README.md), a system prompt hint that the shell has `rg` and `ast-grep`, and
+  when to use each for search and rewrites;
 - [`context-budget`](../addons/context-budget/README.md), a context budget for claude and codex sessions: a note to
   wrap up past a soft limit, a stop past a hard one, no compaction;
 - [`conventional-commits`](../addons/conventional-commits/README.md), a Git commit-msg check of Conventional Commits
