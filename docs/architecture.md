@@ -60,7 +60,7 @@ loop-manager's own addons are not crates either: each lives in `addons/<name>/` 
 changes only its declaration. A config declares an addon by `[[addon]]` with a `path`, or with `git` + `rev` + `dir`
 for a directory of a repository ([config: packs and addons from git](design/config.md#packs-and-addons-from-git)),
 and an agent attaches it with `addons = [{ name, params }]`
-([config: addon](design/config.md#addon-addonaddontoml)). There are five:
+([config: addon](design/config.md#addon-addonaddontoml)). There are six:
 
 - [`agent-mail`](../addons/agent-mail/README.md), coordination of runs that work on one repository at once, each in
   its own worktree, through one Agent Mail server the daemon runs: mail in a shared thread, path reservations, and a
@@ -73,7 +73,9 @@ and an agent attaches it with `addons = [{ name, params }]`
   and codex sessions: a destructive shell command is denied;
 - [`lessons`](../addons/lessons/README.md), a request to a claude or codex session that has declared the outcome of
   its run on an issue: in the same conversation, the agent writes the lessons that would have saved tokens, and a
-  useful answer goes on the issue as one comment.
+  useful answer goes on the issue as one comment;
+- [`t3-notify`](../addons/t3-notify/README.md), notices to the T3 Code thread that started a run: the thread's next
+  message tells it that the run started, waits for a decision or ended.
 
 The [loop-manager marketplace](../plugins/README.md) packages plugins for the operator's harness.
 `plugins/loop-manager/` contains the operator skills. `plugins/t3-run-card/` provides the T3 Code round and session viewer as a stdio MCP App.

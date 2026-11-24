@@ -85,6 +85,13 @@ change the daemon reads late. This is a per-user setting, off by default:
 - Codex has no plugin options: trust the `t3-run-card` PreToolUse and PostToolUse hooks in `/hooks` to turn it on. An untrusted
   hook does not run.
 
+With auto-open on, the hook also writes down which thread started each run, in `t3-threads/<run>` beside the daemon's
+socket. A daemon that attaches the addon [`t3-notify`](../addons/t3-notify/README.md) then tells that thread when the
+run leaves the queue, waits for a decision or ends, as the thread's next message: its agent shows the card again, asks
+for your decision or reports the result. A run that waits for a free place gets its card when it starts, and the
+thread needs no watcher. The hook also finds a run whose ID the call printed on a registered daemon, as
+`devloop/lm run start` does.
+
 The T3 run card MCP server requires Python 3.8+ and uses **stdio only** between the host and the plugin.
 It reads the local daemon over its Unix socket. By default it follows `LOOP_MANAGER_SOCKET`, then the
 CLI's XDG socket locations. For another daemon, pass its absolute socket path in the tool's `socket`

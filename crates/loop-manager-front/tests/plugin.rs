@@ -201,6 +201,9 @@ fn auto_open(option: &str, event: Value) -> Option<String> {
         .arg(hook)
         .env("T3CODE_THREAD_ID", "test-thread")
         .env("CLAUDE_PLUGIN_OPTION_AUTO_OPEN", option)
+        // No daemon of the host is the default one here: the hook writes the thread down beside a daemon's socket.
+        .env_remove("LOOP_MANAGER_SOCKET")
+        .env("XDG_RUNTIME_DIR", "/nonexistent")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()

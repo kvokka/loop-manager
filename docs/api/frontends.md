@@ -209,6 +209,8 @@ Prompts, tool invocations, results and replies are readable. Run control stays w
 The optional T3 Code plugin reads the run and its attempts. Select a round and click an agent name to
 open its working session. The card asks T3 to import that session through the registered LM provider.
 See [Follow a run in T3 Code](../../plugins/README.md#follow-a-run-in-t3-code).
+With the addon [`t3-notify`](../../addons/t3-notify/README.md) attached, the daemon tells the thread that started a
+run when the run starts, waits for a decision or ends.
 
 `GET /v1/runs/{id}?all_attempts=true` returns every recorded attempt with its round, result and summary.
 The first attempt of each session in a step and round carries its stable `acp_session_id`.

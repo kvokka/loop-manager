@@ -145,9 +145,14 @@ async fn a_card_tells_what_a_queued_or_awaiting_run_waits_for() {
 
 /// The auto-open hook on the hook event `name` of one tool call: the context it adds.
 fn hook(d: &Daemon, name: &str) -> Option<String> {
+    hook_printing(d, name, "")
+}
+
+/// [`hook`] for a tool call that printed `stdout`.
+pub(crate) fn hook_printing(d: &Daemon, name: &str, stdout: &str) -> Option<String> {
     let hook = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/t3-run-card/hooks/auto_open.py");
     let event = json!({ "hook_event_name": name, "session_id": "s1", "tool_use_id": "t1", "tool_name": "Bash",
-        "tool_input": { "command": "br create" }, "tool_response": { "stdout": "", "stderr": "" } });
+        "tool_input": { "command": "br create" }, "tool_response": { "stdout": stdout, "stderr": "" } });
     let mut child = common::program("python3")
         .arg(hook)
         .env_remove("LOOP_MANAGER_SOCKET")

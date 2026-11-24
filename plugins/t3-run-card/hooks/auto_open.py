@@ -4,6 +4,9 @@ A run is started by the call when the call starts it (`loop-manager run start`, 
 trigger fires on a change the daemon read during the call, such as an issue filed with a label. `pre` (PreToolUse)
 keeps each reachable daemon's journal position; `post` (PostToolUse) reads what the daemons journaled since.
 
+Each run found is also written down with this thread beside its daemon's socket, in `t3-threads/<run>`: the daemon's
+t3-notify addon reads it to tell the thread when the run starts, waits for a decision or ends.
+
 Claude Code: the plugin option auto_open. Codex has no plugin options: a plugin hook runs once the user trusts it
 in /hooks, and its events carry the Codex extension turn_id.
 """
@@ -19,7 +22,7 @@ from contextlib import closing
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from server import Connection, read, registered_sockets, socket_path  # noqa: E402
+from server import TERMINAL, Connection, read, registered_sockets, socket_path  # noqa: E402
 
 START = re.compile(r"\bloop-manager\b.*\brun\s+start\b", re.S)
 SOCKET = re.compile(r"""(?:--socket[= ]|LOOP_MANAGER_SOCKET=)['"]?([^\s'"]+)""")
@@ -100,13 +103,37 @@ def journaled(path, after):
     return events
 
 
-def triggered(events, after):
-    """The runs a trigger started on a change read in this window, but none an LM session's change started."""
+def triggered(events, after, printed):
+    """The runs of this window a trigger started on a change read in it or the call printed, but none an LM session's
+    change started."""
     top = {e["run"] for e in events
            if e["type"] == "run.queued" and not e["data"].get("run", {}).get("parent_run")}
-    return [e["data"]["new_run"] for e in events
-            if e["type"] == "trigger.fired" and (e["data"].get("cause_seq") or 0) > after
-            and e["data"].get("new_run") in top]
+    fired = [e["data"]["new_run"] for e in events
+             if e["type"] == "trigger.fired" and (e["data"].get("cause_seq") or 0) > after
+             and e["data"].get("new_run") in top]
+    return fired + sorted(top & printed - set(fired))
+
+
+def follow(path, run):
+    """Write the thread down for the daemon's t3-notify addon, unless the run has ended. A start that already happened
+    is announced here: this call shows the card."""
+    path = Path(os.path.realpath(path))
+    threads = path.parent / "t3-threads"
+
+    def state():
+        return read(path, "/v1/runs/" + run)["state"]
+
+    if state() in TERMINAL:
+        return
+    threads.mkdir(exist_ok=True)
+    origin = {"thread": os.environ["T3CODE_THREAD_ID"], "home": os.environ.get("T3CODE_HOME")}
+    (threads / run).write_text(json.dumps(origin))
+    # Read the state again after the write: a transition past this read finds the thread.
+    now = state()
+    if now in TERMINAL:
+        (threads / run).unlink(missing_ok=True)
+    elif now != "queued":
+        (threads / f"{run}.started").touch()
 
 
 def started(event):
@@ -138,9 +165,10 @@ def context(event):
     except (OSError, ValueError):
         seqs = {}
     default = str(socket_path(None))
+    printed = {a or b for a, b in RUN.findall("\n".join(strings(event.get("tool_response"))))}
     for path, after in seqs.items():
         try:
-            found = triggered(journaled(path, after), after)
+            found = triggered(journaled(path, after), after, printed)
         except (OSError, ValueError, KeyError):
             continue
         for new in found:
@@ -149,6 +177,11 @@ def context(event):
                 cards.append(args)
     if not cards:
         return None
+    for card in cards:
+        try:
+            follow(card.get("socket", default), card["run"])
+        except (OSError, ValueError, KeyError):
+            pass
     calls = "; ".join(json.dumps(c) for c in cards)
     return (f"This tool call started {', '.join(c['run'] for c in cards)}. The user turned on t3-run-card "
             f"auto-open: call show_run_card now with {calls}.")

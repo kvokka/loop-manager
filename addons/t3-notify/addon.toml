@@ -1,0 +1,23 @@
+name = "t3-notify"
+version = "0.1.0"
+
+# One hook for the five moments of a run its T3 Code thread is told about (README.md).
+[[hook]]
+on = "run.started"
+command = ["hooks/notify"]
+
+[[hook]]
+on = "run.awaiting"
+command = ["hooks/notify"]
+
+[[hook]]
+on = "run.passed"
+command = ["hooks/notify"]
+
+[[hook]]
+on = "run.failed"
+command = ["hooks/notify"]
+
+[[hook]]
+on = "run.cancelled"
+command = ["hooks/notify"]

@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""The orchestrator hook of the t3-notify addon (README.md): the event of a run is on stdin, and the T3 Code thread
+that started the run gets it as its next message."""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+event = json.load(sys.stdin)
+kind, run, data = event["type"], event["run"], event["data"]
+socket = os.path.realpath(os.environ["LOOP_MANAGER_SOCKET"])
+threads = Path(socket).parent / "t3-threads"
+try:
+    origin = json.loads((threads / run).read_text())
+except (OSError, ValueError):
+    sys.exit(0)  # no thread follows this run
+
+# Delivery is at least once, and the thread itself announces a start it saw: each message goes out once.
+sent = threads / f"{run}.{'started' if kind == 'run.started' else event['seq']}"
+try:
+    os.close(os.open(sent, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+except FileExistsError:
+    sys.exit(0)
+
+view = data["run"]
+name = f"{run} ({view['formula']}{', issue ' + view['issue'] if view['issue'] else ''})"
+cli = f"loop-manager --socket '{socket}'"
+card = f"Show its card: call show_run_card with {json.dumps({'socket': socket, 'run': run})}."
+outcome = data.get("outcome") or {}
+report = "".join(f"\n\n{title}:\n{text}" for title, text in (
+    ("Reason", data.get("reason")),
+    (f"Summary of the last step, {view['step']}", outcome.get("summary")),
+) if text)
+steps = f"`{cli} run show {run}` has the outcome of every step."
+text = {
+    "run.started": lambda: f"{name} left the queue and started. {card}",
+    "run.awaiting": lambda: (
+        f"{name} waits for a decision at its step {view['step']} until {data['deadline']}. {card} {steps} Tell the "
+        f"user what the run asks. Their answer goes to the run with `{cli} run resolve {run} {view['step']} pass "
+        f"--summary '<the answer>'`; `fail` in place of `pass` rejects the work and ends the run."
+    ),
+    "run.passed": lambda: f"{name} passed.{report}\n\n{card} {steps} Report to the user what the run did.",
+    "run.failed": lambda: (
+        f"{name} failed ({data['class']}).{report}\n\n{card} {steps} Report to the user what failed and what the "
+        f"run did before that."
+    ),
+    "run.cancelled": lambda: f"{name} was cancelled.{report}\n\n{card}",
+}[kind]()
+
+command = ["t3", "thread", "send"]
+if origin.get("home"):
+    command += ["--base-dir", origin["home"]]
+command += [origin["thread"], "-"]
+try:
+    subprocess.run(command, input=f"[loop-manager] {text}", text=True, check=True, stdout=subprocess.DEVNULL)
+except (OSError, subprocess.CalledProcessError):
+    sent.unlink()  # not delivered: a repeat of the event may try again
+    raise
+if kind != "run.started" and kind != "run.awaiting":
+    for path in [threads / run, *threads.glob(f"{run}.*")]:
+        path.unlink(missing_ok=True)

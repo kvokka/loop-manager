@@ -16,8 +16,13 @@ path = "../addons/conventional-commits"
 [[addon]]
 path = "../addons/lessons"
 
+[[addon]]
+path = "../addons/t3-notify"
+
 # Settings shared by all devloop agents. Claude also reads .claude/settings.json from the repo rig.
 [settings]
+# A run a T3 Code thread started tells that thread of its start, its owner waits and its end (README.md, "The addons").
+addons = [{ name = "t3-notify" }]
 # A session gets PATH, HOME and LANG of the daemon and nothing else of its environment. `cargo` is rustup's proxy:
 # without these it builds with the host's default toolchain, not the one mise.toml pins. mise sets all three; a
 # daemon started outside mise fails the session with `config_error` naming the variable.
