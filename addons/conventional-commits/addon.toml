@@ -12,7 +12,7 @@ on = "run.preparing"
 command = ["hooks/prepare"]
 
 [dependencies.git]
-minimum = "2.56.1"
+minimum = "2.55.0"
 command = ["git", "--version"]
 pattern = '(?m)^git version (\S+)'
 scope = "both"

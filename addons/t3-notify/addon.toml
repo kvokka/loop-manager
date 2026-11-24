@@ -29,7 +29,7 @@ pattern = '(?m)^t3 v(\S+)'
 scope = "daemon"
 
 [dependencies.python3]
-minimum = "3.15.2"
+minimum = "3.14.0"
 command = ["python3", "--version"]
 pattern = '(?m)^Python (\S+)'
 scope = "daemon"

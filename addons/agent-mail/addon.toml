@@ -45,12 +45,17 @@ command = ["bin/lm-agent-mail", "release"]
 name = "agent-mail"
 scope = "orchestrator"
 bind = "${params.bind}"
-command = ["${LOOP_MANAGER_ADDON_DIR}/bin/lm-agent-mail", "serve", "${LOOP_MANAGER_ADDON_DATA}", "${params.multi_repo}"]
+command = [
+  "${LOOP_MANAGER_ADDON_DIR}/bin/lm-agent-mail",
+  "serve",
+  "${LOOP_MANAGER_ADDON_DATA}",
+  "${params.multi_repo}",
+]
 health = { http = "/health/readiness" }
 mcp = { url = "/mcp/" }
 
 [dependencies.git]
-minimum = "2.56.1"
+minimum = "2.55.0"
 command = ["git", "--version"]
 pattern = '(?m)^git version (\S+)'
 scope = "both"
@@ -62,13 +67,13 @@ pattern = '(?m)^jq-(\S+)'
 scope = "both"
 
 [dependencies.curl]
-minimum = "8.23.0"
+minimum = "8.18.0"
 command = ["curl", "--version"]
 pattern = '(?m)^curl (\S+)'
 scope = "both"
 
 [dependencies.python3]
-minimum = "3.15.2"
+minimum = "3.14.0"
 command = ["python3", "--version"]
 pattern = '(?m)^Python (\S+)'
 scope = "daemon"
