@@ -12,7 +12,7 @@ use std::{
 };
 use uuid::Uuid;
 
-/// The process part of a session: `{session_id, resume, workdir, config_dir, run, attempt, token, actor, bead, model,
+/// The process part of a session: `{session_id, resume, workdir, config_dir, run, attempt, token, actor, issue, model,
 /// effort, system_prompt, permission_mode, inherit_host, env, settings, mcp, agents, skills}`; `settings`, `mcp` and
 /// `agents` are the JSON of `--settings`, `--mcp-config` and `--agents`, `skills` the skill directories by name, the
 /// targets' among them.
@@ -29,18 +29,18 @@ pub(crate) fn process(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
             }
         }
     }
-    let (session_id, resume, workdir, run, attempt, token, actor, bead) = match plan {
+    let (session_id, resume, workdir, run, attempt, token, actor, issue) = match plan {
         SessionPlan::New {
             workdir,
             run,
             attempt,
             token,
             actor,
-            bead,
+            issue,
         } => {
             let name = format!("loop-manager:session:{run}/{attempt}");
             let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes()).to_string();
-            (id, false, workdir, run, attempt, token, actor, bead)
+            (id, false, workdir, run, attempt, token, actor, issue)
         }
         SessionPlan::Resume {
             session,
@@ -49,10 +49,10 @@ pub(crate) fn process(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
             attempt,
             token,
             actor,
-            bead,
+            issue,
         } => {
             let id = session.0["session_id"].as_str().unwrap_or_default().to_owned();
-            (id, true, workdir, run, attempt, token, actor, bead)
+            (id, true, workdir, run, attempt, token, actor, issue)
         }
     };
     let inherit = config.inherits_host();
@@ -72,7 +72,7 @@ pub(crate) fn process(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
         "attempt": attempt,
         "token": token,
         "actor": actor.as_ref().map(|a| a.env("claude", config)),
-        "bead": bead,
+        "issue": issue,
         "model": text(&config.model),
         "effort": text(&config.effort),
         "system_prompt": text(&config.system_prompt),
@@ -342,9 +342,9 @@ pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>, host: &Path) -> Re
             .unwrap_or_default(),
     );
     env.extend(
-        p["bead"]
+        p["issue"]
             .as_str()
-            .map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), bead.to_owned())),
+            .map(|issue| ("LOOP_MANAGER_ISSUE".to_owned(), issue.to_owned())),
     );
     env.extend(
         p["config_dir"]

@@ -14,4 +14,4 @@ you with them; your session context names your mail name, the project key and yo
   approved (`request_contact`, `respond_contact`); a direct conversation needs no product.
 - When the product tools are available, use the agreed product key to query linked repositories. Keep path
   reservations scoped to the repository being edited.
-- Task status and dependencies stay in Beads.
+- Task status and dependencies stay in the tracker.

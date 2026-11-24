@@ -66,17 +66,17 @@ fn bad_steps_are_errors() {
     assert_eq!(errors.len(), 1, "one error for one cause: {errors:?}");
 }
 
-/// A drain step names the formula of its runs: one that takes the bead and needs nothing else; its own formula
-/// takes the bead the beads are under.
+/// A drain step names the formula of its runs: one that takes the issue and needs nothing else; its own formula
+/// takes the issue the issues are under.
 #[test]
-fn a_drain_step_names_a_formula_that_takes_one_bead() {
+fn a_drain_step_names_a_formula_that_takes_one_issue() {
     let ship = |inputs: &str, each: &str| {
         format!(
             "name = \"flow\"\n[inputs]\n{inputs}\n[[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"{each}\"\n"
         )
     };
-    let bead = "root = { type = \"task\", required = true }";
-    let config = load_with(&[(FLOW, &ship(bead, "implement"))]).unwrap();
+    let issue = "root = { type = \"task\", required = true }";
+    let config = load_with(&[(FLOW, &ship(issue, "implement"))]).unwrap();
     let step = &config.projects[0].packs[1].formulas["flow"].steps[0];
     let crate::config::StepKind::Drain {
         formula, timeout: None, ..
@@ -88,29 +88,29 @@ fn a_drain_step_names_a_formula_that_takes_one_bead() {
         (formula.to_string().as_str(), step.kind.name()),
         ("kit.implement", "drain")
     );
-    fails(&[(FLOW, &ship(bead, "nothing"))], "step `all`: no formula `nothing`");
+    fails(&[(FLOW, &ship(issue, "nothing"))], "step `all`: no formula `nothing`");
     fails(
-        &[(FLOW, &ship(bead, "audit"))],
+        &[(FLOW, &ship(issue, "audit"))],
         "`kit.audit` needs exactly one input of type `task`",
     );
-    let two = "name = \"two\"\n[inputs]\nbead = { type = \"task\" }\nwhy = { type = \"string\", required = true }\n\
+    let two = "name = \"two\"\n[inputs]\nissue = { type = \"task\" }\nwhy = { type = \"string\", required = true }\n\
                [[step]]\nkind = \"exec\"\ncommand = [\"true\"]\n";
     fails(
-        &[(FLOW, &ship(bead, "two")), ("kit/formulas/two.toml", two)],
+        &[(FLOW, &ship(issue, "two")), ("kit/formulas/two.toml", two)],
         "`kit.two` requires input `why`",
     );
     fails(
         &[(FLOW, &ship("root = { type = \"task\" }", "implement"))],
         "a formula with a `drain` step needs a required input of type `task`",
     );
-    // No input takes a bead: a formula takes a task (docs/design/config.md).
+    // No input takes an issue: a formula takes a task (docs/design/config.md).
     fails(
-        &[(FLOW, &ship("root = { type = \"bead\" }", "implement"))],
-        "input type `bead` is `task` now",
+        &[(FLOW, &ship("root = { type = \"issue\" }", "implement"))],
+        "unknown variant `issue`",
     );
 }
 
-/// A drain step keeps `pool` beads in work, 1 unless set, and stops on a failed bead as `on_item_failure` says,
+/// A drain step keeps `pool` issues in work, 1 unless set, and stops on a failed issue as `on_item_failure` says,
 /// `continue` unless set (docs/design/config.md); a bad value is one error, placed at the step's header.
 #[test]
 fn a_drain_step_takes_pool_and_on_item_failure() {
@@ -172,12 +172,12 @@ fn a_drain_step_with_worktree_runs_a_formula_whose_last_step_always_runs() {
     assert_eq!(keyed("worktree = true\n"), (true, true));
     let implement = |when: &str| {
         format!(
-            "name = \"implement\"\n[inputs]\nbead = {{ type = \"task\", required = true }}\n\
+            "name = \"implement\"\n[inputs]\nissue = {{ type = \"task\", required = true }}\n\
              [[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"true\"]\n{when}\n\
              [[step]]\nname = \"ship\"\nkind = \"exec\"\ncommand = [\"true\"]\n{when}\n"
         )
     };
-    let gated = implement("if = { \"inputs.bead\" = \"b-1\" }");
+    let gated = implement("if = { \"inputs.issue\" = \"b-1\" }");
     let formula = ("kit/formulas/implement.toml", gated.as_str());
     fails(
         &[(FLOW, &ship("worktree = true\n")), formula],
@@ -396,7 +396,7 @@ fn a_formula_step_names_a_formula_whose_inputs_it_has() {
         ],
         "names nothing a run has",
     );
-    // A task is inherited as any input: the child works on the bead its parent holds (docs/design/config.md).
+    // A task is inherited as any input: the child works on the issue its parent holds (docs/design/config.md).
     let task = "goal = { type = \"task\", required = true }";
     let inherited = load_with(&[(FLOW, &flow(task, "")), (SUB, &sub(task, &exec(None)))]);
     assert!(inherited.is_ok(), "{inherited:?}");

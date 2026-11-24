@@ -259,11 +259,11 @@ fn explain_formula(config: &Config, project: &str, formula: &str, rig: Option<&s
             } => {
                 let stop = match on_item_failure {
                     OnItemFailure::Continue => "",
-                    OnItemFailure::SoftStop => "; on a failed bead: soft_stop",
-                    OnItemFailure::HardStop => "; on a failed bead: hard_stop",
+                    OnItemFailure::SoftStop => "; on a failed issue: soft_stop",
+                    OnItemFailure::HardStop => "; on a failed issue: hard_stop",
                 };
                 text += &format!(
-                    "# step `{name}` of `{formula}`: drain, a run of `{each}` per bead, {pool} at a time{stop}\n"
+                    "# step `{name}` of `{formula}`: drain, a run of `{each}` per issue, {pool} at a time{stop}\n"
                 );
                 None
             }

@@ -1,9 +1,9 @@
-//! A prompt shows the comments of the run's bead and its parents with theirs, read from the tracker each time the
+//! A prompt shows the comments of the run's issue and its parents with theirs, read from the tracker each time the
 //! run enters the step, as TOON (docs/design/contracts.md 2.3, 5.1).
 
 use crate::common;
 
-use common::{World, beads::slow_turn, hollow_turn, last, world};
+use common::{World, hollow_turn, issues::slow_turn, last, world};
 use loop_manager_core::run::{Msg, Verdict};
 use loop_manager_core::tracker::Tracker;
 use loop_manager_testkit::Step;
@@ -11,12 +11,12 @@ use serde_json::json;
 use std::time::Duration;
 
 const FIXER: &str =
-    "Fix {{ bead.title }}.\nComments:\n{{ bead.comments }}\nParents:\n{{ bead.parents }}\n{{ remarks }}";
+    "Fix {{ issue.title }}.\nComments:\n{{ issue.comments }}\nParents:\n{{ issue.parents }}\n{{ remarks }}";
 
 /// `fix` on a task: `code` by the fixer (with the keys `code`), then `review` by qa, which sends it back to `code`.
 fn comments_world(code: &str) -> World {
     let formula = format!(
-        "name = \"fix\"\n[inputs]\nbead = {{ type = \"task\", required = true }}\n\
+        "name = \"fix\"\n[inputs]\nissue = {{ type = \"task\", required = true }}\n\
          [[step]]\nname = \"code\"\nkind = \"ai\"\nagent = \"fixer\"\n{code}\n\
          [[step]]\nname = \"review\"\nkind = \"ai\"\nagent = \"qa\"\nback_to = \"code\"\n"
     );
@@ -24,7 +24,7 @@ fn comments_world(code: &str) -> World {
         ("shop/agents/fixer/agent.toml", "harness = \"scripted\"\n"),
         ("shop/agents/fixer/prompt.template.md", FIXER),
         ("shop/agents/qa/agent.toml", "harness = \"scripted\"\n"),
-        ("shop/agents/qa/prompt.template.md", "Review {{ bead.title }}."),
+        ("shop/agents/qa/prompt.template.md", "Review {{ issue.title }}."),
         ("shop/formulas/fix.toml", formula.as_str()),
     ];
     world(&files)
@@ -36,31 +36,31 @@ fn last_prompt(w: &World, run: &str, attempt: u32) -> String {
 }
 
 impl World {
-    /// Starts `fix` on `bead` and plays it to the `review` step: `code` passes, the review's prompt is sent.
-    async fn to_review(&self, bead: &str) -> String {
+    /// Starts `fix` on `issue` and plays it to the `review` step: `code` passes, the review's prompt is sent.
+    async fn to_review(&self, issue: &str) -> String {
         for _ in 0..3 {
             self.driver.script(slow_turn());
         }
-        let run = self.run_on(json!(bead)).await;
+        let run = self.run_on(json!(issue)).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
         self.finish_attempt(&run, 1, Verdict::Pass, "coded").await;
         tokio::time::sleep(Duration::from_secs(12)).await;
-        assert_eq!(last_prompt(self, &run, 2), format!("Review Task {bead}."));
+        assert_eq!(last_prompt(self, &run, 2), format!("Review Task {issue}."));
         run
     }
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_prompt_shows_the_comments_of_the_bead_and_its_parents_from_the_root_down_as_toon() {
+async fn a_prompt_shows_the_comments_of_the_issue_and_its_parents_from_the_root_down_as_toon() {
     let w = comments_world("");
     let root = w.tracker.add(&[], None);
     let mid = w.tracker.add(&[], Some(&root));
-    let bead = w.tracker.add(&[], Some(&mid));
+    let issue = w.tracker.add(&[], Some(&mid));
     w.tracker.comment(&root, "alice", "The goal: ship it");
-    w.tracker.comment(&bead, "bob", "start with the parser");
-    w.tracker.comment(&bead, "carol", "two lines\nhere");
+    w.tracker.comment(&issue, "bob", "start with the parser");
+    w.tracker.comment(&issue, "carol", "two lines\nhere");
     w.driver.script(slow_turn());
-    let run = w.run_on(json!(bead)).await;
+    let run = w.run_on(json!(issue)).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     let prompt = last_prompt(&w, &run, 1);
     let comments = "Comments:\n[2]{author,created_at,text}:\n  bob,\"2026-11-13T00:00:00Z\",start with the parser\n  \
@@ -84,14 +84,14 @@ async fn a_prompt_shows_the_comments_of_the_bead_and_its_parents_from_the_root_d
 async fn a_return_to_a_step_reads_the_comments_written_since_and_last_comments_keeps_the_last() {
     let w = comments_world("last_comments = 1");
     let parent = w.tracker.add(&[], None);
-    let bead = w.tracker.add(&[], Some(&parent));
+    let issue = w.tracker.add(&[], Some(&parent));
     w.tracker.comment(&parent, "alice", "the old goal");
     w.tracker.comment(&parent, "alice", "the new goal");
-    let run = w.to_review(&bead).await;
+    let run = w.to_review(&issue).await;
     let first = &w.driver.sent(&run, 1).1[0];
     assert!(first.contains("Comments:\n[]\n"), "{first}");
-    w.tracker.comment(&bead, "qa", "first pass");
-    w.tracker.comment(&bead, "qa", "redo: the parser drops the last line");
+    w.tracker.comment(&issue, "qa", "first pass");
+    w.tracker.comment(&issue, "qa", "redo: the parser drops the last line");
     w.finish_attempt(&run, 2, Verdict::Fail, "redo").await;
     tokio::time::sleep(Duration::from_secs(12)).await;
     let third = last_prompt(&w, &run, 3);
@@ -112,17 +112,17 @@ async fn a_return_to_a_step_reads_the_comments_written_since_and_last_comments_k
 #[tokio::test(start_paused = true)]
 async fn an_answer_to_an_earlier_entry_of_the_step_is_dropped() {
     let w = comments_world("");
-    let bead = w.tracker.add(&[], None);
-    let earlier = w.tracker.lineage(&bead).await.unwrap();
-    let run = w.to_review(&bead).await;
-    w.tracker.comment(&bead, "qa", "redo: the parser drops the last line");
+    let issue = w.tracker.add(&[], None);
+    let earlier = w.tracker.lineage(&issue).await.unwrap();
+    let run = w.to_review(&issue).await;
+    w.tracker.comment(&issue, "qa", "redo: the parser drops the last line");
     w.tracker.set_down(true);
     w.finish_attempt(&run, 2, Verdict::Fail, "redo").await;
     tokio::time::sleep(Duration::from_secs(12)).await;
     assert_eq!(w.states(&run).await.last().unwrap(), "preparing");
 
     // The read of the first entry of `code` answers late, while the run prepares its second.
-    let payload = json!({ "run": run, "step": "code", "attempt": 1, "bead": bead });
+    let payload = json!({ "run": run, "step": "code", "attempt": 1, "issue": issue });
     let msg = Msg::Lineage {
         payload,
         result: Ok(earlier),
@@ -130,7 +130,7 @@ async fn an_answer_to_an_earlier_entry_of_the_step_is_dropped() {
     w.core.send(None, msg).await.unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(w.states(&run).await.last().unwrap(), "preparing");
-    assert_eq!(last_prompt(&w, &run, 3), format!("Review Task {bead}."));
+    assert_eq!(last_prompt(&w, &run, 3), format!("Review Task {issue}."));
 
     w.driver.script(slow_turn());
     w.tracker.set_down(false);
@@ -148,8 +148,8 @@ async fn an_answer_to_an_earlier_entry_of_the_step_is_dropped() {
 #[tokio::test(start_paused = true)]
 async fn a_run_waiting_for_the_comments_survives_a_restart_and_fails_once_the_tracker_never_answers() {
     let mut w = comments_world("");
-    let bead = w.tracker.add(&[], None);
-    let run = w.to_review(&bead).await;
+    let issue = w.tracker.add(&[], None);
+    let run = w.to_review(&issue).await;
     w.tracker.set_down(true);
     w.finish_attempt(&run, 2, Verdict::Fail, "redo").await;
     tokio::time::sleep(Duration::from_secs(12)).await;
@@ -158,11 +158,11 @@ async fn a_run_waiting_for_the_comments_survives_a_restart_and_fails_once_the_tr
         .iter()
         .find(|d| d["op"] == "lineage")
         .unwrap_or_else(|| panic!("{failed:?}"));
-    assert_eq!(read["bead"], json!(bead));
+    assert_eq!(read["issue"], json!(issue));
     assert!(read["next_retry_at"].is_string(), "{read}");
     assert_eq!(w.states(&run).await.last().unwrap(), "preparing");
     w.restart().await;
-    w.tracker.comment(&bead, "qa", "after the restart");
+    w.tracker.comment(&issue, "qa", "after the restart");
     w.driver.script(slow_turn());
     w.tracker.set_down(false);
     let mut third = String::new();
@@ -191,7 +191,7 @@ async fn a_run_waiting_for_the_comments_survives_a_restart_and_fails_once_the_tr
 #[tokio::test(start_paused = true)]
 async fn a_comment_accepted_before_the_finish_is_in_the_prompt_of_the_next_step_after_a_tracker_outage() {
     let w = comments_world("");
-    let bead = w.tracker.add(&[], None);
+    let issue = w.tracker.add(&[], None);
     w.driver.script(slow_turn());
     // The review's turn ends a few seconds after its finish; the next `code` works on.
     for wait in [15, 3600] {
@@ -199,7 +199,7 @@ async fn a_comment_accepted_before_the_finish_is_in_the_prompt_of_the_next_step_
         turn.insert(1, Step::Wait(Duration::from_secs(wait)));
         w.driver.script(turn);
     }
-    let run = w.run_on(json!(bead)).await;
+    let run = w.run_on(json!(issue)).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     w.finish_attempt(&run, 1, Verdict::Pass, "coded").await;
     tokio::time::sleep(Duration::from_secs(12)).await;

@@ -245,70 +245,74 @@ async fn a_step_with_attempts_left_runs_a_new_child() {
     assert_eq!(last(&events, "run.passed")["outcome"]["summary"], "second time");
 }
 
-/// `deliver` runs the internal `mend` on its bead.
+/// `deliver` runs the internal `mend` on its issue.
 const DELIVER: &[(&str, &str)] = &[
     (
         "shop/formulas/deliver.toml",
-        "name = \"deliver\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        "name = \"deliver\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"formula\"\nformula = \"mend\"\n",
     ),
     (
         "shop/formulas/mend.toml",
-        "name = \"mend\"\ninternal = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
+        "name = \"mend\"\ninternal = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
     ),
 ];
 
-/// Starts `deliver` on a new bead; its child has ended with `verdict` by the return.
+/// Starts `deliver` on a new issue; its child has ended with `verdict` by the return.
 async fn deliver(verdict: Verdict) -> (World, String, String) {
     let w = shipyard_with(DELIVER);
-    let bead = w.tracker.add(&[], None);
-    let reply = w.start_bead("deliver", Some("web"), json!(bead)).await.unwrap();
+    let issue = w.tracker.add(&[], None);
+    let reply = w.start_issue("deliver", Some("web"), json!(issue)).await.unwrap();
     let run = reply["run"].as_str().unwrap().to_owned();
     let child = w.until(None, "run.queued", 1).await["run"].clone();
-    assert_eq!(child["bead"], json!(bead), "the child inherits the task");
+    assert_eq!(child["issue"], json!(issue), "the child inherits the task");
     let kid = child["id"].as_str().unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(
-        w.assignee(&bead),
+        w.assignee(&issue),
         Some(format!("loop-manager:{run}")),
-        "the parent holds the bead"
+        "the parent holds the issue"
     );
     let token = w.driver.token(kid, 1).unwrap();
     assert_eq!(w.finish(kid, &token, verdict, "mended").await, "accepted");
     tokio::time::sleep(Duration::from_secs(11)).await;
-    (w, run, bead)
+    (w, run, issue)
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_child_works_on_the_bead_its_parent_holds() {
-    let (w, run, bead) = deliver(Verdict::Pass).await;
+async fn a_child_works_on_the_issue_its_parent_holds() {
+    let (w, run, issue) = deliver(Verdict::Pass).await;
     let events = w.events(&run, Duration::from_millis(200)).await;
     last(&events, "run.passed");
-    assert_eq!(w.tracker.bead(&bead).unwrap().status, "closed", "closed by the parent");
+    assert_eq!(
+        w.tracker.issue(&issue).unwrap().status,
+        "closed",
+        "closed by the parent"
+    );
     assert!(w.all("resync.diverged").is_empty());
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_failed_child_leaves_the_bead_to_its_parent() {
-    let (w, run, bead) = deliver(Verdict::Fail).await;
+async fn a_failed_child_leaves_the_issue_to_its_parent() {
+    let (w, run, issue) = deliver(Verdict::Fail).await;
     let events = w.events(&run, Duration::from_millis(200)).await;
     last(&events, "run.failed");
-    let left = w.tracker.bead(&bead).unwrap();
+    let left = w.tracker.issue(&issue).unwrap();
     assert_eq!((left.status.as_str(), left.assignee), ("open", None));
     assert!(w.all("resync.diverged").is_empty());
 }
 
-/// `stray` runs `mend` on the bead its `goal` names; `idle` on the next ready one.
+/// `stray` runs `mend` on the issue its `goal` names; `idle` on the next ready one.
 const STRAY: &[(&str, &str)] = &[
     (
         "shop/formulas/stray.toml",
         "name = \"stray\"\n[inputs]\ngoal = { type = \"string\", required = true }\n\
-         [[step]]\nkind = \"formula\"\nformula = \"mend\"\ninputs = { bead = \"{{ inputs.goal }}\" }\n",
+         [[step]]\nkind = \"formula\"\nformula = \"mend\"\ninputs = { issue = \"{{ inputs.goal }}\" }\n",
     ),
     (
         "shop/formulas/idle.toml",
-        "name = \"idle\"\n[[step]]\nkind = \"formula\"\nformula = \"mend\"\ninputs = { bead = { next_ready = true } }\n",
+        "name = \"idle\"\n[[step]]\nkind = \"formula\"\nformula = \"mend\"\ninputs = { issue = { next_ready = true } }\n",
     ),
 ];
 
@@ -321,14 +325,14 @@ async fn a_step_that_cannot_start_its_child_fails_as_infrastructure() {
         ),
         ("shop/api/.keep", ""),
     ];
-    let files: Vec<_> = (DELIVER.iter().chain(STRAY).chain(common::beads::FIX).copied())
+    let files: Vec<_> = (DELIVER.iter().chain(STRAY).chain(common::issues::FIX).copied())
         .chain(rigs)
         .collect();
     let w = shipyard_with(&files);
-    // A bead a run on the other rig holds, and no bead ready besides it.
-    let bead = w.tracker.add(&[], None);
-    w.fix_on(Some("api"), json!(bead)).await.unwrap();
-    for (formula, inputs) in [("stray", json!({ "goal": bead })), ("idle", json!({}))] {
+    // An issue a run on the other rig holds, and no issue ready besides it.
+    let issue = w.tracker.add(&[], None);
+    w.fix_on(Some("api"), json!(issue)).await.unwrap();
+    for (formula, inputs) in [("stray", json!({ "goal": issue })), ("idle", json!({}))] {
         let reply = w.core.send(None, start_with(formula, inputs)).await.unwrap();
         let run = reply["run"].as_str().unwrap();
         let events = w.events(run, Duration::from_millis(200)).await;

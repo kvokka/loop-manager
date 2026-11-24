@@ -41,10 +41,10 @@ triggers = ["nightly"]
 model = "opus"
 [[trigger]]
 name = "implement-next"
-on = "bead.ready"
-where = { "bead.labels" = "auto" }
+on = "issue.ready"
+where = { "issue.labels" = "auto" }
 run = "implement"
-inputs = { bead = { next_ready = true, epic = "{{ event.bead.epic }}" } }
+inputs = { issue = { next_ready = true, epic = "{{ event.issue.epic }}" } }
 "#,
     ),
     ("shop/backend/.keep", ""),
@@ -72,7 +72,7 @@ addons = [{ name = "mail" }]
         "kit/formulas/implement.toml",
         r#"name = "implement"
 [inputs]
-bead = { type = "task", required = true }
+issue = { type = "task", required = true }
 [[step]]
 kind = "ai"
 agent = "implementer"
@@ -81,7 +81,7 @@ timeout = "45m"
     ),
     (
         "kit/agents/implementer/prompt.template.md",
-        "Implement {{ bead.title }} ({{ inputs.bead }}) in {{ rig.path }}, check with `{{ rig.test_cmd }}`.",
+        "Implement {{ issue.title }} ({{ inputs.issue }}) in {{ rig.path }}, check with `{{ rig.test_cmd }}`.",
     ),
     (
         "kit/formulas/audit.toml",
@@ -149,7 +149,7 @@ fn a_valid_config_loads_with_every_reference_resolved() {
     assert_eq!(rig.triggers, [name("kit", "nightly")]);
     let project_trigger = &shop.packs[0].triggers[0];
     assert_eq!(project_trigger.run, name("kit", "implement"));
-    assert!(matches!(&project_trigger.source, Source::Event { on, .. } if on == "bead.ready"));
+    assert!(matches!(&project_trigger.source, Source::Event { on, .. } if on == "issue.ready"));
     let kit = &shop.packs[1];
     assert_eq!(kit.version.as_deref(), Some("0.3.0"));
     assert!(matches!(&kit.triggers[0].source, Source::Cron(c) if *c == crate::cron::Cron::parse("0 3 * * *").unwrap()));

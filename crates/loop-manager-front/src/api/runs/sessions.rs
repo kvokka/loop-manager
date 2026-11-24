@@ -6,7 +6,7 @@ use std::{collections::HashSet, fmt::Write};
 pub(super) fn identify(run: &mut Value) {
     let run_id = run["id"].as_str().expect("run ID").to_owned();
     let project = run["project"].as_str().expect("project");
-    let bead = run["bead"].as_str().map(|b| format!("lm-agent/{project}/{b}"));
+    let issue = run["issue"].as_str().map(|b| format!("lm-agent/{project}/{b}"));
     let prefix = format!("lm-run/{project}/");
     let mut seen = HashSet::new();
     for attempt in run["attempts"].as_array_mut().expect("attempt history") {
@@ -18,7 +18,7 @@ pub(super) fn identify(run: &mut Value) {
         if !seen.insert(key) {
             continue;
         }
-        let base = bead.clone().unwrap_or_else(|| {
+        let base = issue.clone().unwrap_or_else(|| {
             let mut reference = attempt["session"].clone();
             reference.sort_all_objects();
             let digest = Sha256::digest(reference_json(&reference));
@@ -32,7 +32,7 @@ pub(super) fn identify(run: &mut Value) {
     }
 }
 
-// Imported beadless IDs hash the sorted, ASCII-escaped JSON reference with comma-space and colon-space separators.
+// Imported issueless IDs hash the sorted, ASCII-escaped JSON reference with comma-space and colon-space separators.
 fn reference_json(value: &Value) -> String {
     match value {
         Value::Object(fields) => {

@@ -37,7 +37,7 @@ pub(crate) struct Run {
     /// (docs/design/config.md).
     #[schema(minimum = 1)]
     step_attempt: u32,
-    bead: Option<String>,
+    issue: Option<String>,
     workdir: String,
     depth: i64,
     parent_run: Option<String>,
@@ -135,7 +135,7 @@ pub(crate) enum Keyed {
 pub(crate) struct Failed(ErrorReply);
 
 /// A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found
-/// no ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the
+/// no ready issue the run can take; `passed_over`: the ready issues it skipped, each with why (a `harness:` label the
 /// config does not give, an `agent:` label that does not resolve).
 #[derive(ToSchema)]
 pub(crate) struct Started {
@@ -167,8 +167,42 @@ pub(crate) struct Finished {
 
 #[derive(ToSchema)]
 pub(crate) struct Commented {
-    /// `accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`.
+    /// `accepted`, `no_issue`, `stale_attempt`, `run_terminal` or `invalid`.
     answer: String,
+}
+
+/// An issue of a project with its comments, oldest first.
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct IssueReply {
+    #[serde(flatten)]
+    issue: Issue,
+    comments: Vec<IssueComment>,
+}
+
+/// An issue of a project as its tracker gives it (docs/design/contracts.md 5.2).
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct Issue {
+    id: String,
+    title: String,
+    description: String,
+    /// The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's
+    /// tracker policy adds.
+    status: String,
+    priority: i64,
+    labels: Vec<String>,
+    assignee: Option<String>,
+    /// The parent of the issue.
+    epic: Option<String>,
+    created_at: String,
+    updated_at: String,
+    closed_at: Option<String>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct IssueComment {
+    author: String,
+    created_at: String,
+    text: String,
 }
 
 #[derive(ToSchema)]
@@ -319,7 +353,7 @@ pub(crate) struct Project {
 pub(crate) struct Rig {
     name: String,
     path: String,
-    /// The prefix of the ids of the rig's beads; null for the root, whose beads carry the tracker's own.
+    /// The prefix of the ids of the rig's issues; null for the root, whose issues carry the tracker's own.
     prefix: Option<String>,
     vars: BTreeMap<String, String>,
 }

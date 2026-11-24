@@ -1,7 +1,7 @@
 {
   "name": "loop-manager",
   "version": "0.0.1",
-  "description": "Discover, install and create loop-manager addons, recap work from Beads, recover failed runs and answer waiting runs.",
+  "description": "Discover, install and create loop-manager addons, recap work from the tracker, recover failed runs and answer waiting runs.",
   "homepage": "https://github.com/kvokka/loop-manager",
   "repository": "https://github.com/kvokka/loop-manager",
   "license": "MIT",

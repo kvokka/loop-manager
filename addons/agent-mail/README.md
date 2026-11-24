@@ -36,7 +36,7 @@ path = "api"
 max_writers = 2
 ```
 
-The formula of the coding agent works in worktrees, and the drain that hands out the beads runs two children at once:
+The formula of the coding agent works in worktrees, and the drain that hands out the issues runs two children at once:
 
 ```toml
 # formulas/code.toml
@@ -65,7 +65,7 @@ pool = 2
 ```
 
 `max_writers` counts the writing runs in the rig's shared checkout; a run with `worktree = true` works on its own
-branch and is not one of them, so two ready beads overlap. How the branches of the runs are merged and which commit is
+branch and is not one of them, so two ready issues overlap. How the branches of the runs are merged and which commit is
 accepted is the project's: a formula that checks `HEAD`, a clean tree or a review result works as before. Attach the
 addon in `[settings]` of the project rather than on one agent, so that the end of a run whose last step is an `exec`
 step releases its reservations too.

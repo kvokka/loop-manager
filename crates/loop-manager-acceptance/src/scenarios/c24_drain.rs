@@ -1,8 +1,8 @@
-//! Criterion 24 on the real br and the real `claude` against a fake Anthropic API: a task becomes the root bead of
-//! a run of `ship`; its exec step `plan` creates four beads under the root with rig prefixes and agent and harness
-//! labels; the drain step gives each a run of `work` (an exec step, then an ai step on the agent of the bead): A on `web`, B on
+//! Criterion 24 on the real br and the real `claude` against a fake Anthropic API: a task becomes the root issue of
+//! a run of `ship`; its exec step `plan` creates four issues under the root with rig prefixes and agent and harness
+//! labels; the drain step gives each a run of `work` (an exec step, then an ai step on the agent of the issue): A on `web`, B on
 //! `api` once A is closed, F under the epic S fails, H names another harness and gets no run; the exec step `report`
-//! sees what was closed, failed and refused. A `kill -9` of the daemon in each step: no step and no bead runs twice.
+//! sees what was closed, failed and refused. A `kill -9` of the daemon in each step: no step and no issue runs twice.
 
 use super::{br, claude_agent, tracker};
 use crate::{
@@ -24,27 +24,27 @@ const SHIP: &str = "name = \"ship\"\n[inputs]\ntask = { type = \"task\", require
     [[step]]\nname = \"drain\"\nkind = \"drain\"\nformula = \"work\"\npool = 4\n\
     [[step]]\nname = \"report\"\nkind = \"exec\"\ncommand = [\"sh\", \"{dir}/report.sh\"]\ntimeout = \"120s\"\n";
 
-/// The ai step names `ops`; the label `agent:dev` of a bead gives its run `dev`, and with it `dev`'s template.
-const WORK: &str = "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+/// The ai step names `ops`; the label `agent:dev` of an issue gives its run `dev`, and with it `dev`'s template.
+const WORK: &str = "name = \"work\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
     [[step]]\nname = \"do\"\nkind = \"exec\"\ncommand = [\"sh\", \"{dir}/work.sh\"]\ntimeout = \"120s\"\n\
     [[step]]\nname = \"sign\"\nkind = \"ai\"\nagent = \"ops\"\n";
 
-/// The first attempt holds until the daemon dies; the second creates the beads and keeps their ids. A bead of a rig
+/// The first attempt holds until the daemon dies; the second creates the issues and keeps their ids. An issue of a rig
 /// is filed with the rig's prefix (`w`, `a`) and `parent-child`, as `--parent` would give it the parent's id. F is a
 /// grandchild of the root, under the epic S: S keeps an open child and is never ready.
 const PLAN: &str = "set -e\nD={dir}\nif [ ! -e $D/plan.held ]; then touch $D/plan.held; exec sleep 60; fi\n\
-    new() { BD_ISSUE_PREFIX=$1 br create \"$2\" --deps \"parent-child:$LOOP_MANAGER_BEAD$4\" -l \"$3\" --silent; }\n\
+    new() { BD_ISSUE_PREFIX=$1 br create \"$2\" --deps \"parent-child:$LOOP_MANAGER_ISSUE$4\" -l \"$3\" --silent; }\n\
     a=$(new w A agent:dev,harness:claude)\n\
     b=$(new a B agent:dev,harness:claude \",blocks:$a\")\n\
-    s=$(br create S -t epic --parent \"$LOOP_MANAGER_BEAD\" --silent)\n\
+    s=$(br create S -t epic --parent \"$LOOP_MANAGER_ISSUE\" --silent)\n\
     f=$(BD_ISSUE_PREFIX=a br create F --deps \"parent-child:$s\" -l agent:dev,harness:claude --silent)\n\
     h=$(new w H agent:dev,harness:codex)\n\
     printf '%s %s %s %s %s' \"$a\" \"$b\" \"$f\" \"$h\" \"$s\" > $D/ids\n";
 
 /// The first attempt on A holds until the daemon dies; a command that ran to its end is in the log; F fails.
 const WORK_SH: &str = "D={dir}\nset -- $(cat $D/ids)\n\
-    if [ \"$LOOP_MANAGER_BEAD\" = \"$1\" ] && [ ! -e $D/a.held ]; then touch $D/a.held; exec sleep 60; fi\n\
-    echo \"$LOOP_MANAGER_BEAD\" >> $D/work.log\n[ \"$LOOP_MANAGER_BEAD\" != \"$3\" ] || exit 3\n";
+    if [ \"$LOOP_MANAGER_ISSUE\" = \"$1\" ] && [ ! -e $D/a.held ]; then touch $D/a.held; exec sleep 60; fi\n\
+    echo \"$LOOP_MANAGER_ISSUE\" >> $D/work.log\n[ \"$LOOP_MANAGER_ISSUE\" != \"$3\" ] || exit 3\n";
 
 const REPORT: &str = "D={dir}\nif [ ! -e $D/report.held ]; then touch $D/report.held; exec sleep 60; fi\n\
     printf %s \"$LOOP_MANAGER_STEP_DRAIN_DATA\"\n";
@@ -58,7 +58,7 @@ async fn until_file(path: &Path) {
     }
 }
 
-/// The bead `id` as br shows it.
+/// The issue `id` as br shows it.
 fn show(root: &Path, id: &str) -> Value {
     let shown: Value = serde_json::from_str(&br(root, &["show", id, "--json"])).unwrap();
     shown[0].clone()
@@ -120,7 +120,7 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     )
 }
 
-/// Waits until the run on F, the third bead of `ids`, has failed: the restart in the drain step comes after it, so a
+/// Waits until the run on F, the third issue of `ids`, has failed: the restart in the drain step comes after it, so a
 /// drain that gave F again in its next attempt would show a second run on F.
 async fn until_failed(d: &Daemon, ship: &str, ids: &Path) {
     let ids = std::fs::read_to_string(ids).unwrap();
@@ -129,7 +129,7 @@ async fn until_failed(d: &Daemon, ship: &str, ids: &Path) {
     loop {
         let kids = d.get(&format!("/v1/runs?parent={ship}")).await;
         let kids = kids.as_array().expect("runs");
-        if kids.iter().any(|k| k["bead"] == f && k["state"] == "failed") {
+        if kids.iter().any(|k| k["issue"] == f && k["state"] == "failed") {
             return;
         }
         assert!(Instant::now() < deadline, "the run on {f} has not failed: {kids:?}");
@@ -137,9 +137,9 @@ async fn until_failed(d: &Daemon, ship: &str, ids: &Path) {
     }
 }
 
-/// The checks of criterion 24 on the run `ship` that passed and the beads A, B, F, H and the epic S.
-async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value)], beads: [&str; 5]) {
-    let [a, b, f, h, s] = beads;
+/// The checks of criterion 24 on the run `ship` that passed and the issues A, B, F, H and the epic S.
+async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value)], issues: [&str; 5]) {
+    let [a, b, f, h, s] = issues;
     let root = d.dir.path();
     // Two epics: the root, from the task, and S.
     let listed: Value = serde_json::from_str(&br(root, &["list", "--all", "--json", "-t", "epic"])).unwrap();
@@ -150,7 +150,7 @@ async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value
     let epic = epics.iter().find(|e| e["title"] == "Ship it").unwrap()["id"]
         .as_str()
         .unwrap();
-    assert_eq!(view["bead"].as_str(), Some(epic), "{view}");
+    assert_eq!(view["issue"].as_str(), Some(epic), "{view}");
     // Each step finished once; the restart in the drain step ended its attempt, the next attempt finished it.
     let of = |run: &str, kind: &str| -> Vec<&Value> {
         let mine = journal.iter().filter(|(k, e)| k == kind && e["run"] == run);
@@ -171,17 +171,17 @@ async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value
     ];
     let report = [("report", crash, "exec"), ("report", None, "exec")];
     assert_eq!(tried(view), [&steps[..], &report].concat(), "{view}");
-    // Three children, one per bead but H and S; each in the root's correlation one level down.
+    // Three children, one per issue but H and S; each in the root's correlation one level down.
     let kids = d.get(&format!("/v1/runs?parent={ship}")).await;
     let kids = kids.as_array().expect("runs");
-    let kid = |bead: &str| -> Vec<&Value> { kids.iter().filter(|k| k["bead"] == bead).collect() };
+    let kid = |issue: &str| -> Vec<&Value> { kids.iter().filter(|k| k["issue"] == issue).collect() };
     assert_eq!(kids.len(), 3, "{kids:?}");
     assert!(kid(h).is_empty(), "{h} refused, no run: {kids:?}");
     let correlation = &of(ship, "run.queued")[0]["correlation"];
     let mut runs = Vec::new();
-    for (bead, rig, state) in [(a, "web", "passed"), (b, "api", "passed"), (f, "api", "failed")] {
-        let [run] = kid(bead)[..] else {
-            panic!("one run on {bead}: {kids:?}")
+    for (issue, rig, state) in [(a, "web", "passed"), (b, "api", "passed"), (f, "api", "failed")] {
+        let [run] = kid(issue)[..] else {
+            panic!("one run on {issue}: {kids:?}")
         };
         let id = run["id"].as_str().unwrap();
         let queued = of(id, "run.queued")[0];
@@ -197,7 +197,7 @@ async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value
         );
         runs.push(id.to_owned());
     }
-    // A ran on the agent and the harness of its bead.
+    // A ran on the agent and the harness of its issue.
     let view_a = d.get(&format!("/v1/runs/{}", runs[0])).await;
     assert_eq!(view_a["agent"], "shop.dev", "{view_a}");
     let steps = [("do", crash, "exec"), ("do", None, "exec"), ("sign", None, "claude")];
@@ -233,7 +233,7 @@ async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value
     let why = data["refused"][h].as_str().unwrap_or_default();
     assert!(why.contains("codex") && why.contains("claude"), "{data}");
     // br: A and B closed; F, H, S and the root open with no assignee.
-    for (bead, status) in [
+    for (issue, status) in [
         (a, "closed"),
         (b, "closed"),
         (f, "open"),
@@ -241,7 +241,7 @@ async fn checked(d: &Daemon, ship: &str, view: &Value, journal: &[(String, Value
         (s, "open"),
         (epic, "open"),
     ] {
-        until_shown(root, bead, status).await;
+        until_shown(root, issue, status).await;
     }
 }
 
@@ -260,7 +260,7 @@ fn tried(view: &Value) -> Vec<(&str, Option<&str>, &str)> {
         .collect()
 }
 
-/// Waits until br shows the bead `id` with `status`, and with no assignee when open: br is written after the run's
+/// Waits until br shows the issue `id` with `status`, and with no assignee when open: br is written after the run's
 /// transaction.
 async fn until_shown(root: &Path, id: &str, status: &str) {
     let deadline = Instant::now() + WITHIN;

@@ -36,9 +36,9 @@ impl RunHandler {
         )?;
         row.set_state(tx, "preparing", None)?;
         row.emit(tx, "run.started", json!({ "run": row.view() }))?;
-        match (row.bead.clone(), self.task_text(&row)) {
-            // The prompt may show the bead: it renders once the claim returned it.
-            (Some(bead), _) if row.bead_data.is_none() => self.claim(tx, &row, &bead),
+        match (row.issue.clone(), self.task_text(&row)) {
+            // The prompt may show the issue: it renders once the claim returned it.
+            (Some(issue), _) if row.issue_data.is_none() => self.claim(tx, &row, &issue),
             (None, Some(text)) => self.create_root(tx, row, &text),
             _ => self.render_and_prepare(tx, row),
         }
@@ -279,7 +279,7 @@ impl RunHandler {
     ) -> SessionPlan {
         let (run, attempt, workdir) = (row.id.clone(), row.attempt + 1, self.session_dir(row, config));
         let actor = self.config.session_actor(&row.project, &run, attempt, &row.agent);
-        let bead = row.bead.clone();
+        let issue = row.issue.clone();
         match resume {
             Some(session) => SessionPlan::Resume {
                 session,
@@ -288,7 +288,7 @@ impl RunHandler {
                 run,
                 attempt,
                 token,
-                bead,
+                issue,
             },
             None => SessionPlan::New {
                 workdir,
@@ -296,7 +296,7 @@ impl RunHandler {
                 run,
                 attempt,
                 token,
-                bead,
+                issue,
             },
         }
     }
@@ -370,7 +370,7 @@ impl RunHandler {
             "UPDATE attempts SET ended_ms = ?3, failure = ?4 WHERE run = ?1 AND n = ?2",
             params![row.id, row.attempt, tx.now_ms(), failure.map(Value::to_string)],
         )?;
-        super::beads::attempt_ended(tx, row)?;
+        super::issues::attempt_ended(tx, row)?;
         if let Some(handle) = handle {
             let session: Value = session.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let handle: Value = serde_json::from_str(&handle).unwrap_or_default();
@@ -407,7 +407,7 @@ impl RunHandler {
         if state == "failed" {
             self.end_child(tx, &row)?;
         }
-        self.let_go_bead(tx, &row, state, reason)?;
+        self.let_go_issue(tx, &row, state, reason)?;
         let usage = super::row::usage(tx.sql(), &row.id)?;
         let data = match state {
             "passed" => json!({ "run": row.view(), "outcome": outcome, "usage": usage }),

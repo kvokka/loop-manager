@@ -574,7 +574,7 @@
     },
     "/v1/doctor": {
       "get": {
-        "summary": "The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and br\nbinaries it would run with their versions and logins, its private directories and its state. A check failing is an\n`error` level in the reply, not an error reply.",
+        "summary": "The checks of `loop-manager doctor` (docs/guide/install.md) as the daemon's process sees them: its config, the harness and tracker\nbinaries it would run with their versions and logins, its private directories and its state. A check failing is an\n`error` level in the reply, not an error reply.",
         "operationId": "doctor",
         "responses": {
           "200": {
@@ -1253,6 +1253,456 @@
         }
       }
     },
+    "/v1/projects/{project}/issues": {
+      "get": {
+        "summary": "The issues under a root at any depth, the root left out, closed ones too, oldest first, read from the project's\ntracker as the daemon.",
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "under",
+            "in": "query",
+            "description": "The root issue: the issues under it at any depth are listed.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Issue"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the path or the query is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or no such root in its tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the project has no tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`tracker`: the tracker refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`tracker_unavailable`: the tracker cannot be reached now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Files an issue in the project's tracker; the reply is the issue as filed. A repeated idempotency key files nothing\nmore and returns the first reply.",
+        "operationId": "create",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIssue"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Issue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, rig or parent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the project has no tracker, or the session's attempt is not the current one of a live run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`tracker`: the tracker refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{project}/issues/{issue}": {
+      "get": {
+        "summary": "An issue of a project with its comments, oldest first, read from the project's tracker as the daemon.",
+        "operationId": "show",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "issue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueReply"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the path is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or no such issue in its tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the project has no tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`tracker`: the tracker refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`tracker_unavailable`: the tracker cannot be reached now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{project}/issues/{issue}/close": {
+      "post": {
+        "summary": "Closes an issue in the project's tracker, whoever holds it; a closed issue stays closed and answers alike. A\nlive run that holds it is cancelled, unless the session that closes it is that run's.",
+        "operationId": "close",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "issue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseIssue"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done; the body is JSON `null`"
+          },
+          "400": {
+            "description": "`bad_request`: a body unreadable or over 2 MiB, malformed JSON, query or path, or a value the operation refuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or no such issue in its tracker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`rejected`: the project has no tracker, or the session's attempt is not the current one of a live run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`idempotency_key_reused`: the key came with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage`: the state database failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`tracker`: the tracker refused the close (a parent with open children)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`stopped`: the core has stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs": {
       "get": {
         "summary": "Lists runs, newest first.",
@@ -1352,7 +1802,7 @@
         }
       },
       "post": {
-        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready bead to take (docs/design/tracker-br.md). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
+        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready issue to take (docs/design/contracts.md 2.3). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
         "operationId": "create",
         "parameters": [
           {
@@ -1659,7 +2109,7 @@
     },
     "/v1/runs/{id}/comment": {
       "post": {
-        "summary": "A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_bead\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
+        "summary": "A comment of the attempt on the issue of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_issue\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
         "operationId": "comment",
         "parameters": [
           {
@@ -2737,7 +3187,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `bead:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
+            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `issue:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
           },
           "reason": {
             "type": "string"
@@ -2748,6 +3198,28 @@
               "null"
             ],
             "description": "`YYYY-MM-DDTHH:MM:SS[.fff]Z`; absent: until opened by hand."
+          }
+        }
+      },
+      "CloseIssue": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ParentAttempt",
+                "description": "The agent session that closes it, as for a filed issue. Absent: `loop-manager`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -2776,7 +3248,52 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`."
+            "description": "`accepted`, `no_issue`, `stale_attempt`, `run_terminal` or `invalid`."
+          }
+        }
+      },
+      "CreateIssue": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The issue it lies under."
+          },
+          "rig": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rig it is filed for: its id takes the rig's prefix (docs/design/config.md). Absent: an issue of the root,\nwith the tracker's own prefix."
+          },
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ParentAttempt",
+                "description": "The agent session that files it (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`): the tracker records the\nattempt as its author. Absent: `loop-manager`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -2824,7 +3341,7 @@
               "string",
               "null"
             ],
-            "description": "Absent: the rig of the id prefix of the bead its task names; else the run\nworks in the project root."
+            "description": "Absent: the rig of the id prefix of the issue its task names; else the run\nworks in the project root."
           }
         }
       },
@@ -3234,6 +3751,111 @@
           }
         }
       },
+      "Issue": {
+        "type": "object",
+        "description": "An issue of a project as its tracker gives it (docs/design/contracts.md 5.2).",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "priority",
+          "labels",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "assignee": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "epic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent of the issue."
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's\ntracker policy adds."
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "IssueComment": {
+        "type": "object",
+        "required": [
+          "author",
+          "created_at",
+          "text"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "IssueReply": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Issue"
+          },
+          {
+            "type": "object",
+            "required": [
+              "comments"
+            ],
+            "properties": {
+              "comments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IssueComment"
+                }
+              }
+            }
+          }
+        ],
+        "description": "An issue of a project with its comments, oldest first."
+      },
       "JournalHealth": {
         "type": "object",
         "description": "Failed journal writes in a row and the last error.",
@@ -3439,7 +4061,7 @@
               "string",
               "null"
             ],
-            "description": "The prefix of the ids of the rig's beads; null for the root, whose beads carry the tracker's own."
+            "description": "The prefix of the ids of the rig's issues; null for the root, whose issues carry the tracker's own."
           },
           "vars": {
             "type": "object",
@@ -3517,12 +4139,6 @@
               "type": "string"
             }
           },
-          "bead": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "class": {
             "type": [
               "string",
@@ -3564,6 +4180,12 @@
           },
           "inputs": {
             "type": "object"
+          },
+          "issue": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "outcome": {
             "oneOf": [
@@ -3646,7 +4268,7 @@
       },
       "Started": {
         "type": "object",
-        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
+        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready issue the run can take; `passed_over`: the ready issues it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
         "properties": {
           "nothing_ready": {
             "type": [

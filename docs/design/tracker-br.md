@@ -1,9 +1,11 @@
 # The br tracker
 
 How loop-manager uses [br](https://github.com/Dicklesworthstone/beads_rust) (beads_rust) as the tracker of a project.
-The tracker interface and its errors are in [contracts.md, section 5](contracts.md#5-tracker-interface); the bead and
-run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-manager-br` (the adapter), `crates/loop-manager-core/src/run/beads.rs` and
-`run/bead_events.rs` (the core side), `crates/loop-manager/src/daemon.rs` (the bv workspace file).
+br calls an issue a bead; loop-manager and this document say issue. What a user does with issues and with br, and
+how to inspect a br tracker by hand: [issue trackers](../guide/issue-trackers.md).
+The tracker interface and its errors are in [contracts.md, section 5](contracts.md#5-tracker-interface); the issue and
+run relation is below ([Issues and runs](#issues-and-runs)). Code: `crates/loop-manager-br` (the adapter, the bv workspace file and the br checks of `doctor`),
+`crates/loop-manager-core/src/run/issues.rs` and `run/issue_events.rs` (the core side).
 
 ## An external binary, and its license
 
@@ -18,128 +20,142 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
 ## One database per project
 
 - A project with a `<project>/.beads` directory has a br tracker: one database per project, outside the git of its
-  rigs. The rig of a bead is the prefix of its id, so an epic spans rigs, `ready` is shared and an agent of scope
-  `root` sees the beads of every rig ([below](#the-rig-of-a-bead)).
+  rigs. The rig of an issue is the prefix of its id, so an epic spans rigs, `ready` is shared and an agent of scope
+  `root` sees the issues of every rig ([below](#the-rig-of-an-issue)).
 - The database path is always explicit: every br call and every session or exec step gets `BEADS_DIR`. br's own
   discovery walks up to `$HOME`, and an agent without an explicit path silently writes to someone else's tracker.
 - Every attempt has its own actor: the adapter passes `--actor` to br, sessions get `BD_ACTOR=loop-manager:<run>:<n>`.
   br tells claim owners apart only by name, and the actor also carries the correlation of an agent's writes. Experiment
   3 confirmed both: `--actor X` and `BD_ACTOR=X` land in br's `events.actor`. A claim repeated by the same actor
   succeeds (exit 0), which makes the claim effect safe to repeat after a restart; without an actor every caller is
-  `unknown` and two claims of one bead both succeed.
+  `unknown` and two claims of one issue both succeed.
 - A session also gets `BR_AGENT_NAME` (the agent of its step), `BR_HARNESS` (`claude` or `codex`) and `BR_MODEL`
   (the model of its effective config; absent when the config sets none). br records the three on every event of
   `br update` (with `--claim` and `--status`), `close`, `defer` and `undefer`, not on `create`: `br audit log <id>`
   shows them beside the actor. The names are br's, set by the daemon's tracker integration as `BD_ACTOR` is; the core
   knows only that the tracker names them.
-- The orchestrator writes no runs, steps or sessions into the beads. It appends the end of each attempt of a run with a
-  bead to br's audit trail (`attempt_ended`, [contracts 5.1](contracts.md#51-operations)): `br audit record --stdin`
+- The orchestrator writes no runs, steps or sessions into the issues. It appends the end of each attempt of a run with a
+  issue to br's audit trail (`attempt_ended`, [contracts 5.1](contracts.md#51-operations)): `br audit record --stdin`
   as the attempt's actor `loop-manager:<run>:<n>`, one line of `.beads/interactions.jsonl`
-  (`{"kind": "attempt_ended", "issue_id": <bead>, "actor": ..., "extra": {...}}`). It adds no row to `events` and does
-  not rewrite `issues.jsonl`, so the watcher sees nothing and no `bead.*` event follows. The entries are read in
+  (`{"kind": "attempt_ended", "issue_id": <issue>, "actor": ..., "extra": {...}}`). It adds no row to `events` and does
+  not rewrite `issues.jsonl`, so the watcher sees nothing and no `issue.*` event follows. The entries are read in
   `.beads/interactions.jsonl` itself: `br audit log` shows only `events`.
 - A comment of an attempt (`loop-manager comment`, `comment` of [contracts 5.1](contracts.md#51-operations)) is
-  `br comments add <bead> --file /dev/stdin` as the attempt's actor; the text comes on stdin, so no text reads as an
+  `br comments add <issue> --file /dev/stdin` as the attempt's actor; the text comes on stdin, so no text reads as an
   option.
 
-## Beads and runs
+## Issues and runs
 
-- A project works without a tracker too. A run gets its bead from a task input (`type = "task"`); runs without a
-  bead are allowed.
-- The daemon claims, releases and closes; an agent never claims. The run is recorded as the bead's owner in the
+- A project works without a tracker too. A run gets its issue from a task input (`type = "task"`); runs without a
+  issue are allowed.
+- The daemon claims, releases and closes; an agent never claims. The run is recorded as the issue's owner in the
   transaction that creates it, and the tracker claim (owner `loop-manager:<run>`) is made when it leaves `queued`. The
   claim is held for the whole run, through all its attempts, and let go only when the run is terminal: `passed` closes
-  the bead, `failed` and `cancelled` release it conditionally (owner compared). A bead closed outside its run (by a
+  the issue, `failed` and `cancelled` release it conditionally (owner compared). An issue closed outside its run (by a
   human, an outside tool or another run: the last write read that closed it or set its status is theirs) ends that run
-  `cancelled` with reason `bead_closed`, whatever step it is at; its release then clears the assignee and leaves the
-  bead closed, so it raises no `bead.ready`. Transitions: [contracts.md 6.2](contracts.md#62-transitions).
-- A `formula` step lends the bead of its run to the child run: the child makes no claim and at its end neither closes
-  nor releases the bead, the parent run does that at its own end.
-- A prompt that shows the comments or the parents of the run's bead (`{{ bead.comments }}`, `{{ bead.parents }}`,
+  `cancelled` with reason `issue_closed`, whatever step it is at; its release then clears the assignee and leaves the
+  issue closed, so it raises no `issue.ready`. Transitions: [contracts.md 6.2](contracts.md#62-transitions).
+- A `formula` step lends the issue of its run to the child run: the child makes no claim and at its end neither closes
+  nor releases the issue, the parent run does that at its own end.
+- A prompt that shows the comments or the parents of the run's issue (`{{ issue.comments }}`, `{{ issue.parents }}`,
   [contracts.md 2.3](contracts.md#23-substitution-inputs-and-prompt-templates)) gets them from `br show <id> --json`,
-  one call for the bead and one for each parent up to the root: its `comments` (`author`, `created_at`, `text`, in
+  one call for the issue and one for each parent up to the root: its `comments` (`author`, `created_at`, `text`, in
   br's order, oldest first) and its `parent`. The run reads them each time it enters such a step, so the comments that
-  agents and humans leave on a bead are how the steps and rounds of a run, and the runs after it, hand the work over.
-- A bead has at most one live owner run; a second request for it is refused with the reason.
-- A bead named by id that belongs to another rig is refused at the start; the claim checks it again
-  (`failed{infrastructure, bead_of_another_rig}`, the claim released). A start with no rig takes the rig of
-  the bead's id prefix, and works in the project root when the id matches no rig
-  ([contracts.md 6.1](contracts.md#61-states)). A bead that still carries a `rig:` label is refused at the start,
-  with the hint that the rig of a bead is the prefix of its id.
-- Instead of an id the input may ask for the next ready bead, optionally in an epic: `{ next_ready = true, epic }`.
+  agents and humans leave on an issue are how the steps and rounds of a run, and the runs after it, hand the work over.
+  `loop-manager issue show` reads an issue by the same lineage read, the issue and each parent up to the root, and
+  replies with the issue and its comments only; an error reading a parent is an error of the command.
+- `loop-manager issue create` files a bead with `br create` as the command's actor, every value as `--name=value`
+  so that a leading `-` is no option: its labels (a label with a comma is refused, br splits `--labels` at commas),
+  its parent as `--deps parent-child:<parent>` (`--parent` would give it the id `<parent>.<n>` and drop a rig's
+  prefix), the rig's prefix in `BD_ISSUE_PREFIX` (removed for an issue of the root and for every other call), and the
+  request's idempotency key as its `external_ref`, so a repeat finds the bead in `br list -a` and files none.
+  `loop-manager issue list` reads the subtree from the `parent-child` rows of `dependencies` read-only, as `waiting`
+  does, and the beads with `br show`. `loop-manager issue close` is `br close` as the command's actor, whoever is the
+  assignee, which stays; br's exit 3 is told by the bead read after it: closed (already, or by the call) is done, still
+  open (a parent with open children, or a bead with open blockers) is the refusal, with br's message.
+- An issue has at most one live owner run; a second request for it is refused with the reason.
+- An issue named by id that belongs to another rig is refused at the start; the claim checks it again
+  (`failed{infrastructure, issue_of_another_rig}`, the claim released). A start with no rig takes the rig of
+  the issue's id prefix, and works in the project root when the id matches no rig
+  ([contracts.md 6.1](contracts.md#61-states)). An issue that still carries a `rig:` label is refused at the start,
+  with the hint that the rig of an issue is the prefix of its id.
+- Instead of an id the input may ask for the next ready issue, optionally in an epic: `{ next_ready = true, epic }`.
   The ready list comes from the adapter; the daemon picks and records the owner in one transaction, taking the first
-  bead in the tracker's order that is in the epic, of the run's rig or of no rig, without an owner and without a
-  closed gate. A bead whose labels the run cannot take (a `harness:` the config does not give its ai steps, an
+  issue in the tracker's order that is in the epic, of the run's rig or of no rig, without an owner and without a
+  closed gate. An issue whose labels the run cannot take (a `harness:` the config does not give its ai steps, an
   `agent:` that does not resolve) is passed over and the next one taken; the reply lists it with the reason in
-  `passed_over`. A bead named by id with such labels is refused. With none ready no run is created: the caller gets
+  `passed_over`. An issue named by id with such labels is refused. With none ready no run is created: the caller gets
   the explicit answer `{"nothing_ready": true}`, a trigger `trigger.skipped{nothing_ready}` (its detail names the
-  beads passed over).
-- Work is cut into beads and the next one is taken by this ready pick, within an epic too. A chain of several
-  formulas over one bead is not in the first release: `pass` always closes the bead.
-- The failed runs of a bead are counted in the state of the orchestrator: every run that ended `failed` while it held
+  issues passed over).
+- Work is cut into issues and the next one is taken by this ready pick, within an epic too. A chain of several
+  formulas over one issue is not in the first release: `pass` always closes the issue.
+- The failed runs of an issue are counted in the state of the orchestrator: every run that ended `failed` while it held
   the claim is one, of any class; a round or a repeat inside a run is none, nor is a cancelled run
-  ([contracts.md 6.2](contracts.md#62-transitions)). `passed` resets the count. At `bead_failed_runs` (orchestrator
-  config, default 3) the core closes the gate `bead:<project>/<id>` with a `gate.closed` event; the ready pick skips
-  the bead until a human opens the gate, which resets the count. Without it a released bead would raise `bead.ready`
+  ([contracts.md 6.2](contracts.md#62-transitions)). `passed` resets the count. At `issue_failed_runs` (orchestrator
+  config, default 3) the core closes the gate `issue:<project>/<id>` with a `gate.closed` event; the ready pick skips
+  the issue until a human opens the gate, which resets the count. Without it a released issue would raise `issue.ready`
   again and repeat forever.
 - The ownership record in the state is the truth; br's assignee mirrors it. A failed `br close` or release does not
   change the outcome of the run: the operation is retried through the queue `tracker:<project>`, and a difference is
   shown by an event (`tracker.sync_failed`, `resync.diverged`). A `.beads` directory the daemon cannot watch at start
   gives `tracker.sync_failed{op: "watch"}` with no retry: that tracker is then read only by the periodic resync (every 5
   min).
-- The agent uses `br` itself for the content of its work: child beads, comments, dependencies.
-- The daemon creates one kind of bead: the root of a run started from the text of a task, an epic without labels whose
+- An agent files, lists, comments on and closes issues through loop-manager's commands
+  ([issue trackers](../guide/issue-trackers.md#the-commands)); what they do not cover, such as a `blocks` link, it
+  does with `br` itself ([`br dep add`](../guide/issue-trackers.md#links-between-issues)).
+- The daemon creates one kind of issue: the root of a run started from the text of a task, an epic without labels whose
   `external_ref` is the key of the creation (`loop-manager-` and 16 hex digits); everything filed for that task goes
   under it. The adapter first looks the key up in
-  `br list -a`, so a creation repeated after a restart returns the same bead. The children of a claimed root are
+  `br list -a`, so a creation repeated after a restart returns the same issue. The children of a claimed root are
   ready; a released root with open children is not.
-- The ready beads under a root, at any depth (`under`, for `drain`), are one command:
+- The ready issues under a root, at any depth (`under`, for `drain`), are one command:
   `br ready --unassigned --limit 0 --parent <root> --recursive`. br does not call an epic with open children ready,
   so an inner epic joins that list only once its own children are closed. A root br does not have is exit 3.
-- What holds the beads under a root (`waiting`, [contracts 5.1](contracts.md#51-operations)) is one recursive query
+- What holds the issues under a root (`waiting`, [contracts 5.1](contracts.md#51-operations)) is one recursive query
   on br's database, read-only under `.write.lock` held shared, as for `events` (below). It walks the `dependencies`
   table (`issue_id` depends on `depends_on_id`, by `type`): `parent-child` rows down from the root give the subtree,
-  the same rows up from each open bead give its parents, and a `blocks`, `conditional-blocks` or `waits-for` row of
-  the bead or of a parent whose target in `issues` has a status other than `closed` or `tombstone` holds it, as does
-  a `blocked` status of the bead or a parent. A target that has no row in `issues` (an external reference) holds
-  nothing. `br delete` leaves a `tombstone` row and drops the links to it, so a deleted bead neither waits nor holds.
-  br's commands do not give this answer: `br blocked` lists the blocked beads of the whole database, with no option
+  the same rows up from each open issue give its parents, and a `blocks`, `conditional-blocks` or `waits-for` row of
+  the issue or of a parent whose target in `issues` has a status other than `closed` or `tombstone` holds it, as does
+  a `blocked` status of the issue or a parent. A target that has no row in `issues` (an external reference) holds
+  nothing. `br delete` leaves a `tombstone` row and drops the links to it, so a deleted issue neither waits nor holds.
+  br's commands do not give this answer: `br blocked` lists the blocked issues of the whole database, with no option
   for a subtree, and does not count a parent in `blocked` as holding its children (nor does `br ready`); `br graph`
-  and `br dep tree` mix the types of links; `br show` costs one process per bead.
-- A task input holds a string or `{ next_ready = true, epic }`. A string the core knows as a bead (in the last ready
-  set, or one a run owned) is that bead at once. Any other string goes to the tracker when the run leaves `queued`,
-  as an effect on the queue `tracker:<project>`: the adapter returns the bead whose id is exactly the string (looked
+  and `br dep tree` mix the types of links; `br show` costs one process per issue.
+- A task input holds a string or `{ next_ready = true, epic }`. A string the core knows as an issue (in the last ready
+  set, or one a run owned) is that issue at once. Any other string goes to the tracker when the run leaves `queued`,
+  as an effect on the queue `tracker:<project>`: the adapter returns the issue whose id is exactly the string (looked
   up in the same `br list -a`, not by `br show`, which takes partial ids), else creates the root: title the first line
-  of the text that is not blank (at most 80 characters), description the whole text. A bead filed a moment ago is
-  thus taken up, not filed again; while it is `queued`, a gate on `bead:<project>/<the string>` holds it as if it
-  held the bead. Edge: a text that is exactly `<prefix of a rig>-<word>` and names no rig runs on
-  that rig; a bead that another run holds fails the run (`held by`), as the start could not see it. The key is drawn once and kept in the effect, so a repeat after `kill -9` creates nothing new; a repeated
-  answer is dropped. The run then owns and claims the root as any bead, and its prompt sees the text as
-  `{{ bead.description }}`. Known limit: a tracker that answers after `start_timeout` leaves a root without a run.
-- A bead for an executor carries all its work needs: the task text, the rig as the prefix of its id, and the labels
-  `agent:` and `harness:`. Which beads to file, how many and for which agent is the planner's judgment; a pack and a
+  of the text that is not blank (at most 80 characters), description the whole text. An issue filed a moment ago is
+  thus taken up, not filed again; while it is `queued`, a gate on `issue:<project>/<the string>` holds it as if it
+  held the issue. Edge: a text that is exactly `<prefix of a rig>-<word>` and names no rig runs on
+  that rig; an issue that another run holds fails the run (`held by`), as the start could not see it. The key is drawn once and kept in the effect, so a repeat after `kill -9` creates nothing new; a repeated
+  answer is dropped. The run then owns and claims the root as any issue, and its prompt sees the text as
+  `{{ issue.description }}`. Known limit: a tracker that answers after `start_timeout` leaves a root without a run.
+- An issue for an executor carries all its work needs: the task text, the rig as the prefix of its id, and the labels
+  `agent:` and `harness:`. Which issues to file, how many and for which agent is the planner's judgment; a pack and a
   formula know nothing of it.
-- Two labels of a bead shape every run on it. `agent:<name>` runs every ai step with that agent (a variant by its
+- Two labels of an issue shape every run on it. `agent:<name>` runs every ai step with that agent (a variant by its
   name, else the agent of that name) instead of the step's; the name has no pack prefix, as br refuses a dot in a label.
   `harness:<name>` is checked against the effective config of each ai step: a difference refuses the start with
   both harness names. Without `agent:` each step runs its own agent, without `harness:` nothing is checked; several of
   either label refuse the start.
 
-## The rig of a bead
+## The rig of an issue
 
-- The rig of a bead is its id up to the last `-`, matched against the prefixes of the project's rigs (`api-x1.2` is
-  of the rig with prefix `api`). No match: a bead of the root, which runs in the root whatever the agent's scope. br
-  has no empty prefix, so a bead of the root has an id with the br database's own prefix. There is no `rig:` label:
+- The rig of an issue is its id up to the last `-`, matched against the prefixes of the project's rigs (`api-x1.2` is
+  of the rig with prefix `api`). No match: an issue of the root, which runs in the root whatever the agent's scope. br
+  has no empty prefix, so an issue of the root has an id with the br database's own prefix. There is no `rig:` label:
   two sources of one fact would drift apart.
 - A rig's prefix is the acronym of the words of its name (`backend` is `b`, `my-project` is `mp`) or its `prefix`
   key ([config.md](config.md)). A session of a `rig`-scope agent on a rig and an `exec` step on a rig get
   `BD_ISSUE_PREFIX=<prefix>`, so `br create` there gives the rig's prefix. The daemon's own br calls drop it.
-- An agent of scope `root` files a bead for a rig with
-  `BD_ISSUE_PREFIX=<prefix> br create "<title>" --deps parent-child:<root bead> -l agent:<agent>,harness:<harness>`.
-  Not `--parent`: br's `--parent <root>` gives the id `<root>.<n>` and loses the rig prefix. A dependency on another
-  bead: `--deps "parent-child:<root>,blocks:<id>"`.
-- `loop-manager doctor` warns when a rig's prefix equals the br database's own prefix: the root's beads would read as
-  the rig's. Changing a rig's `prefix` makes its existing beads beads of the root.
+- An agent of scope `root` files an issue for a rig with
+  `loop-manager issue create --project <project> --rig <rig> --parent <root issue> --title "<title>"
+  --label agent:<agent> --label harness:<harness>`; the adapter runs `br create` with the rig's prefix in
+  `BD_ISSUE_PREFIX` and `--deps parent-child:<root issue>`. Not `--parent`: br's `--parent <root>` gives the id
+  `<root>.<n>` and loses the rig prefix.
+- `loop-manager doctor` warns when a rig's prefix equals the br database's own prefix: the root's issues would read as
+  the rig's. Changing a rig's `prefix` makes its existing issues issues of the root.
 
 ## Generated from the project configs
 
@@ -148,11 +164,11 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
 - At daemon start, `.bv/workspace.yaml` next to the orchestrator config: one repository per project with a tracker,
   with the id prefix from `br config get issue_prefix` (a project whose prefix br does not give is listed without
   one, and bv assumes `<name>-`). The trackers are fixed for the daemon's life (a reload that changes them is
-  refused), so the file is written at start only. Run `bv --workspace <file>` to see every project's beads.
+  refused), so the file is written at start only. Run `bv --workspace <file>` to see every project's issues.
 
 ## Limits of br the adapter is shaped by
 
-- A label is ASCII letters, digits, `-`, `_` and `:`, at most 50 characters; a bead holds at most 64 labels (the
+- A label is ASCII letters, digits, `-`, `_` and `:`, at most 50 characters; an issue holds at most 64 labels (the
   65th is exit 4). A rig name obeys the same character rules.
 - The adapter never passes `--no-auto-flush` (it removes the rename of `issues.jsonl` the watcher relies on, and that
   file is br's only backup), `--no-db`, `--allow-stale` or `--force`. A stderr warning `AUTO_FLUSH_FAILED` with exit 0
@@ -160,28 +176,28 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
   change up.
 - `PRAGMA user_version` is no guard for br's private schema: 0.7.6 and br's main branch both report 19 with different
   layouts; the guard is the pinned version and the contract test.
-- A bead's JSON has no epic field: the adapter computes the parent.
-- br 0.7.6 has no conditional close and no "give the bead back" command: release and close check the owner first
+- An issue's JSON has no epic field: the adapter computes the parent.
+- br 0.7.6 has no conditional close and no "give the issue back" command: release and close check the owner first
   (`--if-unchanged` on release). br refuses to close a parent with open children (exit 3); the adapter releases it
-  instead, so `passed` leaves such a bead open without an assignee. Closing an already closed bead held by the same
-  owner succeeds without a write; exit 3 from a concurrent close is checked against the bead's status before a
-  release. Replaying a close never reopens a closed bead.
+  instead, so `passed` leaves such an issue open without an assignee. Closing an already closed issue held by the same
+  owner succeeds without a write; exit 3 from a concurrent close is checked against the issue's status before a
+  release. Replaying a close never reopens a closed issue.
 - A status the project's `.beads/policy.yaml` declares (such as `rework`) passes through the adapter as text. A claim
-  sets `in_progress`, a release sets `open` (a closed bead stays closed), and a close goes from any status.
-- `br show` does not find a bead by `external_ref`: the key of a creation is looked up in the whole list.
+  sets `in_progress`, a release sets `open` (a closed issue stays closed), and a close goes from any status.
+- `br show` does not find an issue by `external_ref`: the key of a creation is looked up in the whole list.
 - The exit code of a busy claim differs between versions: the adapter branches on the exit code (4), not on text.
 - `br delete` of a parent removes the link: its children have no parent then, and the line of parents a prompt shows
-  ends there. A comment changes the bead's `updated_at` and reaches the core as `bead.updated` with
+  ends there. A comment changes the issue's `updated_at` and reaches the core as `issue.updated` with
   `changed: ["comments"]`, without its text.
 - br has no events. Changes made through loop-manager raise events at once; changes made by hand are caught by a watcher
   on `.beads/` and read from br's `events` table read-only, under br's `.write.lock` held shared (a stock SQLite
   reader otherwise resets the WAL index under a br write). Reading that table depends on br's schema. Its rows of
-  one bead and one actor in a row are one change while no kind repeats, so `br create` followed by `br label add`
-  read together is a creation with the label: the bead was filed with it, and `bead.labeled` does not tell it
+  one issue and one actor in a row are one change while no kind repeats, so `br create` followed by `br label add`
+  read together is a creation with the label: the issue was filed with it, and `issue.labeled` does not tell it
   ([contracts 5.1](contracts.md#51-operations)). A row says which field changed, not the value: a gained label is
-  told by the core from the bead's labels when read. `waiting` reads the `issues` and `dependencies` tables the same
+  told by the core from the issue's labels when read. `waiting` reads the `issues` and `dependencies` tables the same
   way, and depends on their schema too.
-- Every br command costs time linear in the size of the database: `close` takes 81 ms on 100 beads, 311 ms on
+- Every br command costs time linear in the size of the database: `close` takes 81 ms on 100 issues, 311 ms on
   5 thousand, 3.2–4.4 s on 50 thousand (br 0.7.6).
   <!-- MEASURE id=br-close-latency date=2026-11-10 ver=br-0.7.6 env=linux-arm64-orbstack,9vcpu,12gb src=reports/11 note="medians, synthetic database: 2 % epics, 60 % closed; measure again on every br update" -->
 
@@ -189,7 +205,7 @@ run relation is below ([Beads and runs](#beads-and-runs)). Code: `crates/loop-ma
 
 With `--json` br prints the error envelope `{"error":{"code","message","hint","retryable","context"}}` on stdout.
 Exit codes: 0 success; 1 internal; 2 database (`NOT_INITIALIZED`, `SCHEMA_MISMATCH`, `DATABASE_LOCKED`); 3 issue
-(`ISSUE_NOT_FOUND`, `AMBIGUOUS_ID`, `CLOSE_INCOMPLETE`); 4 validation or policy (a claim of a held bead, a 65th label,
+(`ISSUE_NOT_FOUND`, `AMBIGUOUS_ID`, `CLOSE_INCOMPLETE`); 4 validation or policy (a claim of a held issue, a 65th label,
 bad input); 5 dependency (a cycle, a duplicate, dependents exist); 6 sync and the `--if-unchanged` check
 (`UPDATE_PRECONDITION_FAILED`, `SYNC_CONFLICT`); 7 config (`CONFIG_ERROR`, merge conflict markers among them); 8 I/O;
 130 shutting down. Codes 0, 3, 4 and 6 were seen on 0.7.6; the rest is br's own documentation.
@@ -202,8 +218,8 @@ applied), so the state is read again before a repeat.
 ## Versions
 
 - Development and tests use the br pinned in `mise.toml`. The adapter declares the versions it was tested on
-  (`loop_manager_br::TESTED`); the daemon at start and `loop-manager doctor` warn about a version outside them.
+  (`tested` of `loop_manager_br::ADAPTER`); the daemon at start and `loop-manager doctor` warn about a version outside them.
 - br has had regressions between patch versions, so the adapter has its own contract tests on the pinned br
   (`crates/loop-manager-br/tests/contract.rs`): claim under concurrency, conditional release, close, ready in an epic,
-  the ready beads under a root, the changes of each command, the watcher, creation once per key, the close of a parent
+  the ready issues under a root, the changes of each command, the watcher, creation once per key, the close of a parent
   with an open child.

@@ -65,7 +65,7 @@ impl Live {
                 attempt,
                 token,
                 actor: None,
-                bead: None,
+                issue: None,
             },
             Some(session) => SessionPlan::Resume {
                 session,
@@ -74,7 +74,7 @@ impl Live {
                 attempt,
                 token,
                 actor: None,
-                bead: None,
+                issue: None,
             },
         };
         let native = json!({ "model_provider": "fake", "sandbox_mode": "danger-full-access", "approval_policy": approval,

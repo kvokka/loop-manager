@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 26;
+const VERSION: i32 = 27;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -38,9 +38,9 @@ INSERT INTO consumers (name, seq) VALUES ('journal', 0);
 -- the run waits for; `next` is the attempt kind an `interrupted` run starts when its `after` passes; `waiting_for`
 -- is why a queued run waits; `continue_from` is the run whose session a run continues; `account` and `model` are the
 -- gate keys its attempts reported (contracts 7); `trigger` (`<pack>.<name>`) started it, for the overlap check of
--- docs/design/config.md; `bead` and `bead_data` are its bead as the tracker last gave it; `step` and `step_kind` are
+-- docs/design/config.md; `issue` and `issue_data` are its issue as the tracker last gave it; `step` and `step_kind` are
 -- the step of the formula it is at (a drain step has no agent, and its state is read in SQL); `as_agent` is the
--- agent the `agent:` label of its bead names for its ai steps; `round`, `remarks` and `back_from` (a JSON array of
+-- agent the `agent:` label of its issue names for its ai steps; `round`, `remarks` and `back_from` (a JSON array of
 -- names) are of the checks that sent it back; `step_attempt` and `step_remarks` are the execution of its step and the remark of the one before.
 CREATE TABLE runs (
     n INTEGER PRIMARY KEY,
@@ -70,8 +70,8 @@ CREATE TABLE runs (
     account TEXT,
     model TEXT,
     trigger TEXT,
-    bead TEXT,
-    bead_data TEXT,
+    issue TEXT,
+    issue_data TEXT,
     step TEXT NOT NULL DEFAULT '1',
     as_agent TEXT,
     step_kind TEXT NOT NULL DEFAULT 'ai',
@@ -160,11 +160,11 @@ CREATE TABLE instances (
 );
 CREATE INDEX instances_fingerprint ON instances (fingerprint, state);
 
--- Bead ownership (contracts 5, invariants 2-4): the owner run of a bead (the truth the tracker's assignee mirrors),
+-- Issue ownership (contracts 5, invariants 2-4): the owner run of an issue (the truth the tracker's assignee mirrors),
 -- the generation of its claims and the failed runs counted toward its gate; the last ready set of each project's
--- tracker, in the tracker's order; the labels of each bead as last read, for `bead.labeled`; the last tracker write
+-- tracker, in the tracker's order; the labels of each issue as last read, for `issue.labeled`; the last tracker write
 -- each project's tracker events were read to (`Change::seq`).
-CREATE TABLE beads (
+CREATE TABLE issues (
     project TEXT NOT NULL,
     id TEXT NOT NULL,
     owner TEXT,
@@ -172,14 +172,14 @@ CREATE TABLE beads (
     failures INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (project, id)
 );
-CREATE TABLE ready_beads (
+CREATE TABLE ready_issues (
     project TEXT NOT NULL,
     pos INTEGER NOT NULL,
     id TEXT NOT NULL,
     body TEXT NOT NULL,
     PRIMARY KEY (project, pos)
 );
-CREATE TABLE bead_labels (
+CREATE TABLE issue_labels (
     project TEXT NOT NULL,
     id TEXT NOT NULL,
     labels TEXT NOT NULL,

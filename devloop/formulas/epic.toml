@@ -1,11 +1,11 @@
 name = "epic"
 description = "One epic of loop-manager's own development: rounds of a coder, the full test run and a review, until the review passes"
 # A review under the bar starts another round, whatever the tests say; an answer from the owner also starts a new
-# round. A run still sent back after the last round fails and waits for the owner (`bead_failed_runs = 1`).
+# round. A run still sent back after the last round fails and waits for the owner (`issue_failed_runs = 1`).
 rounds = 50
 
 [inputs]
-epic = { type = "task", required = true }   # the bead of the epic
+epic = { type = "task", required = true }   # the issue of the epic
 
 # The coder of the round: a new session each round, with the epic, its last comments and what the gate said. It hands
 # over whatever it reached; a session stopped at its context limit hands over too (`cut = "pass"` in agent.toml).

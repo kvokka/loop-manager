@@ -170,30 +170,32 @@ subagent's steps out of a turn are no activity.
 
 ## br as an event source (experiment 3)
 
+The br adapter is built on these findings ([tracker-br](tracker-br.md)).
+
 Code: `experiments/05-br-events` (one scenario, fresh workspace with an isolated `HOME`, the `notify` crate on the
 `.beads/` directory, `rusqlite` read-only on `beads.db`), removed from the tree after recording; last in commit
 `1629c3a`. Output: `experiments/05-br-events/logs/run.txt`.
 
-<!-- MEASURE id=br-events-exp3 date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="20 creates, 9 reads, 16 concurrent claims, 4 attribution cases; database of 20 beads; two runs agree" -->
+<!-- MEASURE id=br-events-exp3 date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="20 creates, 9 reads, 16 concurrent claims, 4 attribution cases; database of 20 issues; two runs agree" -->
 
 | Question | Answer |
 |---|---|
 | Signal | Every mutating command rewrites `issues.jsonl` by rename exactly once; `notify` reports it as two events, `Modify(Name(To))` and `Modify(Name(Both))`. 20/20 sequential creates and 16/16 concurrent claims gave one rename each — no loss, no extra. Reads (`list`, `show`, `ready`) gave none; the database files see open/close/write traffic on reads too, so they are not a signal. |
 | Watcher cost | 110 ms of CPU for the whole watching process over steps 1–4 (20 creates, 9 reads, 16 concurrent claims, 4 attribution cases): `notify` plus a read-only `events` query per signal. |
 | Latency | The rename lands 23–62 ms after the command starts (median 41 ms) and always before the command exits. |
-| Change content | The `events` table, read after the cursor (`WHERE id > ?`), with the database opened read-only per signal and closed at once: 0.6–0.7 ms per read including open/close. It held exactly one row per create and two per claim (`status_changed` + `assignee_changed`), 32/32 rows attributed to the right claimer under concurrency. A full snapshot (`br list --all --json`) costs 8–9 ms at 20 beads and grows linearly (60 ms at 5 000 beads in an earlier measurement) and carries no actor. |
+| Change content | The `events` table, read after the cursor (`WHERE id > ?`), with the database opened read-only per signal and closed at once: 0.6–0.7 ms per read including open/close. It held exactly one row per create and two per claim (`status_changed` + `assignee_changed`), 32/32 rows attributed to the right claimer under concurrency. A full snapshot (`br list --all --json`) costs 8–9 ms at 20 issues and grows linearly (60 ms at 5 000 issues in an earlier measurement) and carries no actor. |
 | Attribution | `--actor X` and the environment variable `BD_ACTOR=X` both land in `events.actor`. `BR_ACTOR` does nothing. `BR_AGENT_NAME`, `BR_HARNESS`, `BR_MODEL` are recorded on the events of `br update` (`--claim`, `--status`), `close`, `defer` and `undefer`, and `br audit log <id> --json` shows them; `create` leaves them empty. |
 
-<!-- MEASURE id=br-rename-latency date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="n=20 sequential creates, 20-bead database; grows with database size (auto-flush rewrites the whole file)" -->
+<!-- MEASURE id=br-rename-latency date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="n=20 sequential creates, 20-issue database; grows with database size (auto-flush rewrites the whole file)" -->
 <!-- MEASURE id=br-watcher-cpu date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="getrusage of the experiment process over steps 1–4, n=1; includes the scenario driver itself, so an upper bound" -->
 <!-- MEASURE id=br-events-read-cost date=2026-11-12 ver=br-0.7.6 env=linux-arm64-orbstack src=experiments/05-br-events/logs/run.txt note="rusqlite bundled, open read-only + query + close, mean of 100, ~60 rows" -->
 
-**Chosen method** for `bead.*`:
+**Chosen method** for `issue.*`:
 
 1. Watch the `.beads/` directory (not the file: the rename replaces the inode). Any rename of `issues.jsonl` means
    "something changed"; signals are coalesced, and a missed or duplicate signal costs nothing because of step 2.
-2. On a signal, open `beads.db` read-only, read `events` after the stored cursor, close. Map rows to `bead.*` events;
-   `bead.ready` is derived by re-reading `br ready` and diffing with the last set. On start and after recovery, read
+2. On a signal, open `beads.db` read-only, read `events` after the stored cursor, close. Map rows to `issue.*` events;
+   `issue.ready` is derived by re-reading `br ready` and diffing with the last set. On start and after recovery, read
    from the stored cursor without waiting for a signal.
 3. Attribution: every session gets `BD_ACTOR=<attempt actor>` in its environment, and loop-manager's own calls pass
    `--actor`; `events.actor` then names the run behind every change (correlation, [contracts 5.1](contracts.md#51-operations)).
@@ -577,7 +579,7 @@ For the context-budget addon:
   `result` (`terminal_reason: "hook_stopped"` for `PreToolUse`), today a completed turn. On codex `continue:false` from
   `PostCompact` (or `PreCompact`) ends the turn `interrupted`, today a cancelled turn; in a child it ends only the
   child. On both, then, the run ends only if loop-manager tells the hook's stop from a normal end: the addon's hook
-  leaves its verdict where the core reads it (the run's bead or the finisher), or the adapters map `hook_stopped` and an
+  leaves its verdict where the core reads it (the run's issue or the finisher), or the adapters map `hook_stopped` and an
   unrequested `interrupted` to a stop of their own.
 
 For codex native subagents: per-thread roles (`config.agents.<role>`) and per-thread skill allow-lists

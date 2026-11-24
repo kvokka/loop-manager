@@ -70,7 +70,7 @@ impl RunHandler {
         answer("accepted")
     }
 
-    /// A comment of the attempt whose token is `token` on the bead of its run: an effect on the queue of the project's
+    /// A comment of the attempt whose token is `token` on the issue of its run: an effect on the queue of the project's
     /// tracker, as the attempt's actor, while the token is valid (contracts 6.3).
     pub(super) fn comment(tx: &mut Tx<'_>, run: &str, token: &str, text: &str) -> Result<Value, Error> {
         let answer = |a: &str| Ok(json!({ "answer": a }));
@@ -88,17 +88,17 @@ impl RunHandler {
         if n != row.attempt {
             return answer("stale_attempt");
         }
-        let Some(bead) = &row.bead else {
-            return answer("no_bead");
+        let Some(issue) = &row.issue else {
+            return answer("no_issue");
         };
         if text.len() > MAX_COMMENT {
             return answer("invalid");
         }
-        let payload = json!({ "op": "tracker", "call": "comment", "project": row.project, "bead": bead, "run": run,
+        let payload = json!({ "op": "tracker", "call": "comment", "project": row.project, "issue": issue, "run": run,
             "attempt": n, "text": text });
         // The same text twice while the first is still queued is one comment.
         let dedupe = format!("comment:{run}:{n}:{}", token_sha256(text));
-        tx.effect(&super::beads::queue(&row.project, "comment"), &dedupe, &payload)?;
+        tx.effect(&super::issues::queue(&row.project, "comment"), &dedupe, &payload)?;
         answer("accepted")
     }
 

@@ -1,7 +1,7 @@
 """Tool hooks: ask the agent to show the card of each run a tool call started, when the user turned this on.
 
 A run is started by the call when the call starts it (`loop-manager run start`, the MCP tool `start_run`) or when a
-trigger fires on a change the daemon read during the call, such as a bead filed with a label. `pre` (PreToolUse)
+trigger fires on a change the daemon read during the call, such as an issue filed with a label. `pre` (PreToolUse)
 keeps each reachable daemon's journal position; `post` (PostToolUse) reads what the daemons journaled since.
 
 Claude Code: the plugin option auto_open. Codex has no plugin options: a plugin hook runs once the user trusts it

@@ -1,7 +1,7 @@
-//! Criterion 30 on the real br, with no model: an exec step `plan` files five beads under the root bead of a run, a
-//! drain step gives them runs of `work`. With no `pool` one bead is in work at a time, with `pool = 2` two at once,
-//! each in a worktree; a failed bead stops nothing under `continue`; `soft_stop` lets the started bead end across a
-//! `kill -9` and gives no new one; `hard_stop` cancels the started bead; a stopped step fails the run.
+//! Criterion 30 on the real br, with no model: an exec step `plan` files five issues under the root issue of a run, a
+//! drain step gives them runs of `work`. With no `pool` one issue is in work at a time, with `pool = 2` two at once,
+//! each in a worktree; a failed issue stops nothing under `continue`; `soft_stop` lets the started issue end across a
+//! `kill -9` and gives no new one; `hard_stop` cancels the started issue; a stopped step fails the run.
 
 use super::tracker;
 use crate::{
@@ -19,7 +19,7 @@ use std::{
 
 const WITHIN: Duration = Duration::from_secs(60);
 
-/// Formula `name`: `plan` files five beads under the run's bead, `drain` gives them runs of `work` with `keys`.
+/// Formula `name`: `plan` files five issues under the run's issue, `drain` gives them runs of `work` with `keys`.
 fn ship(name: &str, keys: &str) -> String {
     format!(
         "name = \"{name}\"\n[inputs]\ntask = {{ type = \"task\", required = true }}\n\
@@ -29,23 +29,23 @@ fn ship(name: &str, keys: &str) -> String {
 }
 
 /// Each run of `work` in a worktree of its own, so the runs of a pool never write in one directory.
-const WORK: &str = "name = \"work\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
+const WORK: &str = "name = \"work\"\nworktree = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
     [[step]]\nname = \"do\"\nkind = \"exec\"\ncommand = [\"sh\", \"{dir}/work.sh\"]\n";
 
-const PLAN: &str = "set -e\nfor i in 1 2 3 4 5; do br create \"B$i\" --parent \"$LOOP_MANAGER_BEAD\" --silent; done\n";
+const PLAN: &str = "set -e\nfor i in 1 2 3 4 5; do br create \"B$i\" --parent \"$LOOP_MANAGER_ISSUE\" --silent; done\n";
 
 /// The first run after `fail` appears fails at once (the rename lets one of two runs started together take it); any
-/// other logs its bead in `started` and holds until `go`.
-const WORK_SH: &str = "D={dir}\nif mv $D/fail $D/failed 2>/dev/null; then exit 3; fi\necho \"$LOOP_MANAGER_BEAD\" >> $D/started\n\
+/// other logs its issue in `started` and holds until `go`.
+const WORK_SH: &str = "D={dir}\nif mv $D/fail $D/failed 2>/dev/null; then exit 3; fi\necho \"$LOOP_MANAGER_ISSUE\" >> $D/started\n\
     while [ ! -e $D/go ]; do sleep 0.05; done\n";
 
-/// The children of `run`: `(bead, state)`.
+/// The children of `run`: `(issue, state)`.
 async fn kids(d: &Daemon, run: &str) -> Vec<(String, String)> {
     let kids = d.get(&format!("/v1/runs?parent={run}")).await;
     let kids = kids.as_array().expect("runs");
     let pair = |k: &Value| {
         (
-            k["bead"].as_str().unwrap_or_default().into(),
+            k["issue"].as_str().unwrap_or_default().into(),
             k["state"].as_str().unwrap_or_default().into(),
         )
     };
@@ -142,10 +142,10 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     .await;
     let started = d.path("started");
 
-    // No pool: the bead in work is the only one given.
+    // No pool: the issue in work is the only one given.
     let one = start(&d, "one", false).await;
-    until_kids(&d, &one, "a bead in work", |_| lines(&started) == 1).await;
-    assert_eq!(kids(&d, &one).await.len(), 1, "no pool, one bead at a time");
+    until_kids(&d, &one, "an issue in work", |_| lines(&started) == 1).await;
+    assert_eq!(kids(&d, &one).await.len(), 1, "no pool, one issue at a time");
     write(d.path("go"), "");
     d.until_state(&one, "passed", WITHIN).await;
     assert_eq!(states(&kids(&d, &one).await), ["passed"; 5]);
@@ -162,13 +162,13 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     );
 
     check_stop_policies(&mut d, &started).await;
-    "five beads: no pool one at a time, pool 2 two at work at once, continue ran all; soft_stop ended the started across kill -9 and \
+    "five issues: no pool one at a time, pool 2 two at work at once, continue ran all; soft_stop ended the started across kill -9 and \
      failed with 3 not started; hard_stop cancelled the started"
         .into()
 }
 
 async fn check_stop_policies(d: &mut Daemon, started: &Path) {
-    // `soft_stop`: the started bead ends across a kill -9, no new bead is given, the run fails.
+    // `soft_stop`: the started issue ends across a kill -9, no new issue is given, the run fails.
     let soft = start(d, "soft", true).await;
     until_kids(d, &soft, "the second in work", |k| k.len() == 2 && lines(started) == 1).await;
     d.restart().await;
@@ -181,7 +181,7 @@ async fn check_stop_policies(d: &mut Daemon, started: &Path) {
         "{view}"
     );
 
-    // `hard_stop`: the started bead is cancelled, the run fails.
+    // `hard_stop`: the started issue is cancelled, the run fails.
     let hard = start(d, "hard", true).await;
     let view = d.until_state(&hard, "failed", WITHIN).await;
     assert_eq!(states(&kids(d, &hard).await), ["cancelled", "failed"], "{view}");

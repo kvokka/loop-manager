@@ -1,5 +1,9 @@
 # agent-mail changelog
 
+## 0.5.0
+
+- Say issue in the prompt: task status and dependencies stay in the tracker.
+
 ## 0.4.0
 
 - Sweep idle addresses before server startup with Python 3 and Agent Mail's operator CLI. Returning LM sessions

@@ -80,12 +80,12 @@ value is a variable of the daemon's environment, resolved when the session start
 Harness hooks use the Claude Code dialect (`event`, `matcher`, `command`, `timeout`); claude and codex take them in
 the same form, with differences listed in [settings](../design/config.md#settings-any-layer). A hook runs in the
 session's environment, which has `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the
-run has a bead, `LOOP_MANAGER_BEAD`, so it can call `loop-manager` on the run's behalf: `loop-manager finish` declares
-the outcome, `loop-manager comment --file <file>` leaves a comment on the run's bead.
+run has an issue, `LOOP_MANAGER_ISSUE`, so it can call `loop-manager` on the run's behalf: `loop-manager finish` declares
+the outcome, `loop-manager comment --file <file>` leaves a comment on the run's issue.
 
 An addon depends on no tool it does not bring or adapt. It talks to loop-manager through the CLI and the environment
-it is given, never to the tracker, a harness or another tool it assumes is on the host: a comment on the bead is
-`loop-manager comment`, not `br comments add`, so the addon works whatever the project's tracker. An addon that
+it is given, never to the tracker, a harness or another tool it assumes is on the host: a comment on the issue is
+`loop-manager comment`, not the tracker's own command, so the addon works whatever the project's tracker. An addon that
 adapts a tool, as `dcg` does, names the tool among its needs on the host.
 
 What `hooks/remind` prints on `UserPromptSubmit` joins the prompt:
@@ -117,7 +117,7 @@ MCP servers reach a session only through `[agent]`.
 
 Each `[[hook]]` names one event type (`on`), a `command` (a path with a `/` is relative to the addon directory) and
 an optional `timeout` (default 30 s, at most 300 s). It runs on the events of the runs whose agent attaches the
-addon; the events of no agent (`bead.*`, `service.*`, exec steps) go to the addons attached in `[settings]` of the
+addon; the events of no agent (`issue.*`, `service.*`, exec steps) go to the addons attached in `[settings]` of the
 orchestrator or the project. The full contract is in
 [contracts.md, section 3](../design/contracts.md#3-orchestrator-hooks-decisions-and-timeouts); in short:
 
@@ -144,7 +144,7 @@ case $summary in
 esac
 ```
 
-Hooks on observed events (`run.state_changed`, `run.passed`, `bead.ready`, ...) can only succeed or fail. Hooks on
+Hooks on observed events (`run.state_changed`, `run.passed`, `issue.ready`, ...) can only succeed or fail. Hooks on
 the deciding events may return a decision:
 
 | Event | Decisions |
@@ -171,13 +171,13 @@ Rules worth keeping:
 ## A worked example: `context-budget`
 
 [`addons/context-budget`](../../addons/context-budget/README.md) bounds the context of a claude or codex session: past
-`soft` it tells the agent to wrap up, past `hard` it leaves the state of the work on the run's bead and stops the
+`soft` it tells the agent to wrap up, past `hard` it leaves the state of the work on the run's issue and stops the
 session, and it keeps the harness from compacting. It is all agent side:
 
 ```toml
 # addons/context-budget/addon.toml
 name = "context-budget"
-version = "0.4.0"
+version = "0.5.0"
 harnesses = ["claude", "codex"]
 
 [params]
@@ -224,9 +224,9 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
   subagent past `soft` gets a `PreToolUse` deny with the reason.
 - **State in the data directory.** The context of the last note, the dump and the stop are files of
   `${LOOP_MANAGER_ADDON_DATA}`, by the input's `session_id`.
-- **The bead.** With `LOOP_MANAGER_BEAD` set, the dump past `hard` is a comment on it, left with
+- **The issue.** With `LOOP_MANAGER_ISSUE` set, the dump past `hard` is a comment on it, left with
   `loop-manager comment --file <dump>`: the daemon writes it as the actor of the session's attempt, whatever the
-  tracker, so the addon needs no `br`.
+  tracker, so the addon needs no tracker binary.
 - **Stopping.** Past `hard` it declares the outcome with `loop-manager finish <cut>` and answers `{"continue":
   false}`; the `PreToolUse` hook denies every later tool call of the session. On claude the turn ends there. A codex
   tool hook cannot end a turn, so codex compacts at `hard` (`model_auto_compact_token_limit`) and the stop is the
@@ -240,14 +240,15 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
   `loop-manager config check --config <file>` and
   `loop-manager config explain --config <file> --project <p> --agent <a>`, run without a daemon. `explain` shows each
   string filled in for that agent and each parameter with its layer.
-- **The hooks**: run each one by hand with its input on stdin: a harness hook takes the hook input JSON of the
-  harness and the session environment (`LOOP_MANAGER_BEAD` and the rest); an orchestrator hook takes an event line and
-  `LOOP_MANAGER_ADDON_PARAMS`. Put stand-ins for the commands it calls (`loop-manager`, `br`) first on its `PATH`.
+- **The hooks**: run each one by hand with its input on stdin: a harness hook takes the hook input JSON of the harness
+  and the session environment (`LOOP_MANAGER_ISSUE` and the rest); an orchestrator hook takes an event line and
+  `LOOP_MANAGER_ADDON_PARAMS`. Put stand-ins for the commands it calls (`loop-manager` and any other) first on its
+  `PATH`.
 
 The tests of `context-budget` do both: `crates/loop-manager/tests/e2e/context_budget.rs` checks with `config explain`
 that the params reach the settings and hooks of claude and codex, and drives `hooks/budget` with the hook inputs of
 both harnesses, fake transcripts and rollouts, a stand-in `loop-manager` that records the outcomes and comments, and a
-`br` that fails (`context_budget/codex.rs` for codex).
+stand-in tracker binary that fails if called (`context_budget/codex.rs` for codex).
 
 ## Moving it to its own repository
 

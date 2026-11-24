@@ -5,7 +5,7 @@
 The installed daemon, its socket, state, binary and tracker serve real runs. Only an explicit owner
 request naming the operation on that daemon authorizes an update, a restart, a drain, a signal,
 a config reload, a state change or a test there. A development epic authorizes the agent to report
-on its assigned run and bead. Keep those operations separate from tests.
+on its assigned run and issue. Keep those operations separate from tests.
 
 The devloop CI step runs through `devloop/scripts/test-env`, which removes outer run credentials and gives the
 check private XDG directories and a private tracker path. For targeted checks in a working session use, for
@@ -13,7 +13,8 @@ example, `devloop/scripts/test-env cargo nextest run -p loop-manager -E 'test(dr
 Exercise CLI, API and tracker behavior through the isolated test fixtures described below. Add a
 fixture test if a changed user path lacks coverage. This also applies to reviewers and subagents.
 A temporary working directory or a change to XDG variables alone still leaves the parent's
-`LOOP_MANAGER_SOCKET` and `BEADS_DIR` in each fresh shell call.
+`LOOP_MANAGER_SOCKET` and the tracker's variables in each fresh shell call
+([issue trackers](../guide/issue-trackers.md#how-it-is-wired)).
 
 ## What to run, and when
 
@@ -97,15 +98,15 @@ A temporary working directory or a change to XDG variables alone still leaves th
   the runtime waits for the process the virtual clock jumps to the next timer. Such a test runs on real time with
   short intervals. Where no process runs, use the managed clock (`Clock::managed`, `start_paused`), not the wall
   clock.
-- The repository's own `.beads` is not a fixture: tests of loop-manager make their own temporary br directories.
+- The repository's own tracker is not a fixture: tests of loop-manager make their own temporary tracker directories.
 - Tests may run inside a session or an exec step of a loop-manager (as when loop-manager is developed with itself),
-  which exports `LOOP_MANAGER_SOCKET`, `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `BEADS_DIR` and the like.
-  Every run of loop-manager or br a test of the binary starts directly goes through `common::program` (the binary
-  itself: `common::EXE`, `common::loop_manager`), and the acceptance runner through
+  which exports `LOOP_MANAGER_SOCKET`, `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, the tracker's variables and the
+  like. Every run of loop-manager or of the tracker's binary a test of the binary starts directly goes through
+  `common::program` (the binary itself: `common::EXE`, `common::loop_manager`), and the acceptance runner through
   `loop_manager_testkit::without_outer_session`: they drop what the outer loop-manager exported, so the daemon under
   test does not listen on its socket and the CLI does not report to its run. A script a test starts that calls
-  loop-manager itself (a demo's bridge) gets `LOOP_MANAGER_SOCKET` of the daemon under test from the test.
-  `mise run ci` rejects `CARGO_BIN_EXE_loop-manager` outside `crates/loop-manager/tests/common`.
+  loop-manager itself (a demo's bridge) gets `LOOP_MANAGER_SOCKET` of the daemon under test from the test. `mise run ci`
+  rejects `CARGO_BIN_EXE_loop-manager` outside `crates/loop-manager/tests/common`.
 - The integration tests of the core and those of the binary are modules of one test binary each:
   `crates/loop-manager-testkit/tests/core` and `crates/loop-manager/tests/e2e`; the chaos stand is a binary of its own.
   A new test is a module there, not a new file under `tests/`: every binary is one more link on each change. A test that

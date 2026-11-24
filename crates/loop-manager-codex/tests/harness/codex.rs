@@ -77,7 +77,7 @@ async fn a_prompt_runs_a_command_in_the_thread_and_the_turn_completes() {
         attempt: 1,
         token: "tok".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     // A skill reaches the thread through the process's own `CODEX_HOME/skills`.
     let skill = dir.path().join("skills/mail");
@@ -142,7 +142,7 @@ async fn a_usage_limit_ends_the_turn_with_a_quota_and_its_reset() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let split = driver.split(&config(&provider), &plan).unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -189,7 +189,7 @@ async fn a_thread_resumed_on_its_live_app_server_gets_the_new_attempt_token() {
         attempt: 1,
         token: "one".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let split = driver.split(&config(&provider), &plan).unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -207,7 +207,7 @@ async fn a_thread_resumed_on_its_live_app_server_gets_the_new_attempt_token() {
         attempt: 2,
         token: "two".into(),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let split = driver.split(&config(&provider), &plan).unwrap();
     let resumed = driver.resume_session(&instance, &session, &split.session);
@@ -251,7 +251,7 @@ async fn the_commands_a_thread_left_are_stopped_and_other_threads_keep_theirs() 
             attempt: 1,
             token: name.into(),
             actor: None,
-            bead: None,
+            issue: None,
         };
         let split = driver.split(&config(&provider), &plan).unwrap();
         if instance.is_none() {
@@ -334,7 +334,7 @@ async fn a_detached_command_goes_with_its_thread() {
         attempt: 1,
         token: format!("detached-{}", std::process::id()),
         actor: None,
-        bead: None,
+        issue: None,
     };
     let split = driver.split(&config(&provider), &plan).unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();

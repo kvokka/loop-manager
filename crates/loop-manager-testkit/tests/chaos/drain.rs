@@ -3,28 +3,28 @@
 use crate::steps::Play;
 use rusqlite::OptionalExtension;
 
-/// A drain step gives a bead at most one run per entry into the step (D1); once it finished, no child on a bead is
+/// A drain step gives an issue at most one run per entry into the step (D1); once it finished, no child on an issue is
 /// alive (D2); the attempt of a drain step a crash of the daemon caught ends with `daemon_crash` (D3).
 pub(crate) fn drained(conn: &rusqlite::Connection, play: &Play) -> Result<(), String> {
     let twice: Option<(String, String, i64)> = conn
         .query_row(
-            // The formula `sweep` enters its drain step once: a bead has one run per parent at most.
-            "SELECT parent_run, bead, COUNT(*) FROM runs WHERE parent_run IS NOT NULL AND bead IS NOT NULL \
-             GROUP BY parent_run, bead HAVING COUNT(*) > 1",
+            // The formula `sweep` enters its drain step once: an issue has one run per parent at most.
+            "SELECT parent_run, issue, COUNT(*) FROM runs WHERE parent_run IS NOT NULL AND issue IS NOT NULL \
+             GROUP BY parent_run, issue HAVING COUNT(*) > 1",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .unwrap();
-    if let Some((parent, bead, n)) = twice {
+    if let Some((parent, issue, n)) = twice {
         return Err(format!(
-            "{parent} gave {bead} {n} runs in one entry into its drain step (D1)"
+            "{parent} gave {issue} {n} runs in one entry into its drain step (D1)"
         ));
     }
     for run in &play.drained {
         let alive: Option<String> = conn
             .query_row(
-                "SELECT id FROM runs WHERE parent_run = ?1 AND bead IS NOT NULL \
+                "SELECT id FROM runs WHERE parent_run = ?1 AND issue IS NOT NULL \
                  AND state NOT IN ('passed', 'failed', 'cancelled')",
                 [run],
                 |r| r.get(0),

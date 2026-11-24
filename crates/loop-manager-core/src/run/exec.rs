@@ -30,7 +30,7 @@ pub(super) type Starts = Arc<Mutex<HashMap<String, Arc<OnceCell<Result<InstanceH
 
 pub(super) struct RunExecutor {
     pub drivers: Drivers,
-    pub trackers: super::beads::Trackers,
+    pub trackers: super::issues::Trackers,
     pub core: CoreHandle<Msg>,
     pub sink: EventSink,
     pub hooks: Arc<dyn super::HookRunner>,
@@ -56,7 +56,7 @@ impl Executor for RunExecutor {
                     }
                     self.hooks.run(core, payload).await;
                 }
-                Some("tracker") => return super::beads::execute(&self.trackers, core, payload).await,
+                Some("tracker") => return super::issues::execute(&self.trackers, core, payload).await,
                 Some("exec") => {
                     let msg = match self.hooks.played(payload) {
                         Some(exit) => super::exec_step::done(payload, exit, b"", b""),

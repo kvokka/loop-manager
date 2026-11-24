@@ -220,12 +220,12 @@ pub(super) fn resolve(
     }
 }
 
-/// A formula a drain step runs takes the bead and nothing else it needs: one input of type `task`, no other
+/// A formula a drain step runs takes the issue and nothing else it needs: one input of type `task`, no other
 /// required one; under a step with `worktree = true` its last step has no `if` (docs/design/config.md).
 fn executor(formula: &super::Formula, worktree: bool) -> Result<(), String> {
-    let beads = formula.inputs.iter().filter(|(_, i)| i.kind == super::InputType::Task);
-    if beads.count() != 1 {
-        return Err("needs exactly one input of type `task` to run a drained bead".to_owned());
+    let issues = formula.inputs.iter().filter(|(_, i)| i.kind == super::InputType::Task);
+    if issues.count() != 1 {
+        return Err("needs exactly one input of type `task` to run a drained issue".to_owned());
     }
     // A run merges on the `pass` of its last step: one that ends on an earlier step would merge nothing.
     if let Some(last) = formula.steps.last().filter(|s| worktree && !s.condition.is_empty()) {

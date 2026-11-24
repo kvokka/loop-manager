@@ -1,6 +1,6 @@
 //! Demo 3 (`demos/3-review-gate`) without a model and without GitHub: its pack, its project, the scripts of its steps
 //! and its bridge against a real `loop-manager daemon`, the real `codex` on fake Responses APIs, and a fake `gh`
-//! (`fake_gh.sh`) over local remotes. The planner files one bead for the backend, whose coder adds a file, so a
+//! (`fake_gh.sh`) over local remotes. The planner files one issue for the backend, whose coder adds a file, so a
 //! feature has a pull request in the backend and one in the root.
 
 use crate::common::{self, Daemon, WAIT};
@@ -116,20 +116,23 @@ impl Gate {
     async fn start() -> Self {
         let loop_manager = common::EXE;
         let tools = tempfile::tempdir().unwrap();
-        // The planner files a bead for the backend, and refuses the feature once `refuse` exists.
+        // The planner files an issue for the backend, and refuses the feature once `refuse` exists.
         let refuse = tools.path().join("refuse");
         let plan = format!(
             "set -e\nif [ -e {} ]; then {loop_manager} finish fail --summary refused; exit; fi\n\
-             bead=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .bead)\n\
-             BD_ISSUE_PREFIX=api br create Greet --deps parent-child:$bead -l agent:coder --description Greet --silent\n\
+             issue=$({loop_manager} --json run show \"$LOOP_MANAGER_RUN\" | jq -r .issue)\n\
+             {loop_manager} issue create --project {PROJECT} --rig backend --parent $issue --title Greet \
+             --description Greet --label agent:coder\n\
              {loop_manager} finish pass --summary planned\n",
             refuse.display()
         );
         fs::write(tools.path().join("plan.sh"), plan).unwrap();
         let task = |command: String| Provider::start(vec![Reply::Task(command)]);
         let planner = task(format!("sh {}", tools.path().join("plan.sh").display())).await;
+        // The coder holds while `hold` exists.
         let coder = task(format!(
-            "echo hello >greet.txt && {loop_manager} finish pass --summary coded"
+            "while [ -e {} ]; do sleep 0.1; done; echo hello >greet.txt && {loop_manager} finish pass --summary coded",
+            tools.path().join("hold").display()
         ))
         .await;
         let reviser = task(format!("{loop_manager} finish pass --summary addressed")).await;
@@ -226,7 +229,7 @@ impl Gate {
 
     /// The backend's pull request of the feature `view`: its address and its state.
     fn backend_pr(&self, view: &Value) -> (String, String) {
-        let branch = format!("feature/{}", view["bead"].as_str().unwrap());
+        let branch = format!("feature/{}", view["issue"].as_str().unwrap());
         let pr = self.gh_in("gate-demo-backend", "", &["pr", "view", &branch, "--json", "url,state"]);
         let pr: Value = serde_json::from_str(&pr).unwrap();
         (
@@ -264,6 +267,12 @@ async fn a_merge_of_the_root_pull_request_passes_the_review() {
     let merged = view["outcome"]["data"]["stdout"].as_str().unwrap();
     assert!(merged.contains("MY_AWESOME_ENV_VAR is something"), "{merged}");
     assert_eq!(g.backend_pr(&view).1, "MERGED", "{view}");
+    // `pr` titled the pull requests with the title of the feature's issue.
+    let calls = fs::read_to_string(g.d.dir.path().join("path/github/calls")).unwrap();
+    let titled = calls
+        .lines()
+        .filter(|c| c.starts_with("pr create") && c.contains(" -t Greet the visitor -F "));
+    assert_eq!(titled.count(), 2, "{calls}");
     // `merge` took each repository back to its default branch.
     for repo in REPOS {
         assert_eq!(git(&g.demo(repo), &["branch", "--show-current"]), "main\n", "{repo}");
@@ -293,7 +302,7 @@ async fn a_comment_of_an_allowed_author_sends_the_feature_to_the_reviser() {
     let view = g.waiting(&run, 2).await;
     assert_eq!(view["back_from"], json!(["review"]));
     assert_eq!(view["steps"]["address"]["summary"], "addressed", "{view}");
-    let feedback = format!("root/feedback/{}.md", view["bead"].as_str().unwrap());
+    let feedback = format!("root/feedback/{}.md", view["issue"].as_str().unwrap());
     let feedback = fs::read_to_string(g.demo(&feedback)).unwrap();
     assert!(feedback.contains("Greet in the README too"), "{feedback}");
     assert!(!feedback.contains("Haskell"), "{feedback}");
@@ -303,7 +312,7 @@ async fn a_comment_of_an_allowed_author_sends_the_feature_to_the_reviser() {
     let (backend, _) = g.backend_pr(&view);
     g.gh(ALLOWED, &["pr", "review", &backend, "--comment", "--body", "Say hello"]);
     let view = g.waiting(&run, 3).await;
-    let feedback = format!("root/feedback/{}.md", view["bead"].as_str().unwrap());
+    let feedback = format!("root/feedback/{}.md", view["issue"].as_str().unwrap());
     let feedback = fs::read_to_string(g.demo(&feedback)).unwrap();
     assert!(feedback.contains("Say hello"), "{feedback}");
     assert!(!feedback.contains("README"), "{feedback}");
@@ -333,11 +342,21 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     g.d.until_state(&cleanup, "passed").await;
-    let branch = format!("feature/{}", view["bead"].as_str().unwrap());
+    let branch = format!("feature/{}", view["issue"].as_str().unwrap());
     let root = g.demo("gate-demo");
     assert_eq!(git(&root, &["ls-remote", "--heads", "origin", &branch]), "");
     assert_eq!(git(&root, &["branch", "--show-current"]), "main\n");
     assert_eq!(g.backend_pr(&view).1, "CLOSED", "{view}");
+    // The feature's issue is closed; the backend's issue under it was closed by its coder.
+    let issue = view["issue"].as_str().unwrap();
+    let shown = g.d.get(&format!("/v1/projects/{PROJECT}/issues/{issue}")).await;
+    let under = g.d.get(&format!("/v1/projects/{PROJECT}/issues?under={issue}")).await;
+    let statuses: Vec<&Value> = under.as_array().unwrap().iter().map(|i| &i["status"]).collect();
+    assert_eq!(
+        (&shown["status"], statuses),
+        (&json!("closed"), vec![&json!("closed")]),
+        "{shown} {under}"
+    );
 
     // A failed feature is left as it is: no cleanup.
     fs::write(g.tools.path().join("refuse"), "").unwrap();
@@ -345,4 +364,45 @@ async fn a_close_without_a_merge_cancels_the_feature_and_cleans_it_up() {
     g.d.until_state(&failed, "failed").await;
     // A trigger's run commits with the event it matched (contracts 3.5): none came with `run.failed`.
     assert_eq!(g.runs_of("dev.cleanup").await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feature_cancelled_while_its_issue_is_open_has_the_issue_closed_by_cleanup() {
+    let g = Gate::start().await;
+    fs::write(g.tools.path().join("hold"), "").unwrap();
+    let run = g.feature(json!({ "task": "Greet the visitor" })).await;
+    let deadline = Instant::now() + WAIT;
+    let implement = loop {
+        if let [i] = &g.runs_of("dev.implement").await[..]
+            && i["state"] == "running"
+        {
+            break i["id"].as_str().unwrap().to_owned();
+        }
+        assert!(Instant::now() < deadline, "no implement run in work");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    g.d.post(&format!("/v1/runs/{run}/cancel"), json!({}), None)
+        .await
+        .unwrap();
+    let view = g.d.until_state(&run, "cancelled").await;
+    g.d.until_state(&implement, "cancelled").await;
+    let deadline = Instant::now() + WAIT;
+    let cleanup = loop {
+        if let [cleanup] = &g.runs_of("dev.cleanup").await[..] {
+            break cleanup["id"].as_str().unwrap().to_owned();
+        }
+        assert!(Instant::now() < deadline, "no cleanup");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    g.d.until_state(&cleanup, "passed").await;
+    // No coder closed the backend's issue: `cleanup` did, before the feature's own.
+    let issue = view["issue"].as_str().unwrap();
+    let shown = g.d.get(&format!("/v1/projects/{PROJECT}/issues/{issue}")).await;
+    let under = g.d.get(&format!("/v1/projects/{PROJECT}/issues?under={issue}")).await;
+    let statuses: Vec<&Value> = under.as_array().unwrap().iter().map(|i| &i["status"]).collect();
+    assert_eq!(
+        (&shown["status"], statuses),
+        (&json!("closed"), vec![&json!("closed")]),
+        "{shown} {under}"
+    );
 }

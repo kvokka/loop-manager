@@ -41,8 +41,9 @@ loop-manager starts agents through their own command-line harnesses and never do
   normally do, or give the agents an API key in `env` (see [the first formula](first-formula.md)). A codex whose
   host config selects a model provider with an `env_key` needs no login: `codex login status` then says "Not logged
   in", and `loop-manager doctor` checks that variable instead.
-- `br` (beads_rust): only for projects that keep their tasks in a `.beads` tracker. Read
-  [its license](../../README.md#the-br-tracker-and-its-license) before you install it.
+- `br` (beads_rust): only for projects that keep their issues in a br tracker ([issue
+  trackers](issue-trackers.md#the-br-tracker)). Read [its license](../../README.md#the-br-tracker-and-its-license)
+  before you install it.
 
 Running a harness headless spends the limits of your subscription, and a vendor's terms may restrict how a
 subscription is used through its automation interfaces (OpenAI's terms for the codex app-server limit commercial and
@@ -75,9 +76,6 @@ Disabling Claude telemetry also disables remote feature-flag fetching. The broad
 Explicit Codex OpenTelemetry exporters use their own settings.
 [Claude environment variables](https://code.claude.com/docs/en/env-vars) · [Codex configuration](https://developers.openai.com/codex/config-reference/)
 
-Agent sessions and exec steps get `BR_OUTPUT_FORMAT=toon` from loop-manager. Pass `--json` to `br`
-when a script needs JSON.
-
 ### Installing the harnesses
 
 Install them any way you like. With mise, the daemon finds the same versions you test with, for example from your
@@ -106,14 +104,14 @@ loop-manager doctor --config ~/.config/loop-manager/config.toml   # before the d
 loop-manager doctor                                      # with the daemon running: as the daemon sees it
 ```
 
-`loop-manager doctor` checks the config, each harness binary (where it was found, its version, the login), br and its
-license, the modes of the state and socket directories, and the state with its outbox. Without `--config` it asks
-the running daemon (`GET /v1/doctor`), which makes the checks from inside its process, with its environment, `PATH`
-and config file; with no daemon it fails and says so. With `--config <file>` it needs no daemon and checks that file
-from the shell it runs in. Both modes print the findings in TOON by default and exit non-zero when a check has
-level `error`. Warnings (an unsupported or untested version, no login file) do not fail the command.
-`loop-manager doctor --json` prints the API's array of findings. The API returns HTTP 200 even when a finding has
-level `error`.
+`loop-manager doctor` checks the config, each harness binary (where it was found, its version, the login), the tracker's
+binary and its checks ([br](issue-trackers.md#how-it-is-wired)), the modes of the state and socket directories, and the
+state with its outbox. Without `--config` it asks the running daemon (`GET /v1/doctor`), which makes the checks from
+inside its process, with its environment, `PATH` and config file; with no daemon it fails and says so. With `--config
+<file>` it needs no daemon and checks that file from the shell it runs in. Both modes print the findings in TOON by
+default and exit non-zero when a check has level `error`. Warnings (an unsupported or untested version, no login file)
+do not fail the command. `loop-manager doctor --json` prints the API's array of findings. The API returns HTTP 200 even
+when a finding has level `error`.
 
 ## Directories
 

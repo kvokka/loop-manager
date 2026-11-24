@@ -21,25 +21,25 @@ Each concern is a separate comment with an exact first line and a self-contained
 decision. Only a later matching answer resolves the concern. Read recent coder and review reports along with the
 question; check referenced code or artifacts when its wording alone is insufficient.
 
-Use the bead from `devloop/lm run show <run>` for completed runs as well. From the checkout root,
+Use the issue from `devloop/lm run show <run>` for completed runs as well. From the checkout root,
 set `BEADS_DIR` to the selected project's tracker. Read the epic in TOON. For a narrower selection,
 keep JSON inside the pipeline and return TOON to the caller.
 
 ```sh
 export BEADS_DIR='<project dir>/.beads'
-br show "$bead" --format toon
+br show "$issue" --format toon
 
 # One comment by numeric id
-br comments "$bead" --json | jq --argjson id "$comment_id" 'map(select(.id == $id))' | devloop/lm format
+br comments "$issue" --json | jq --argjson id "$comment_id" 'map(select(.id == $id))' | devloop/lm format
 
 # Latest reviewer comment from this run. For the coder, use startswith("CODER:").
-br comments "$bead" --json |
+br comments "$issue" --json |
   jq --arg actor "loop-manager:$run:" 'map(select(
     (.author | startswith($actor)) and (.text | startswith("REVIEW\n"))
   )) | .[-1:]' | devloop/lm format
 
 # Questions, decisions and answers across the whole epic, in order
-br comments "$bead" --json |
+br comments "$issue" --json |
   jq 'map(select(.text | test("^(QUESTION|DECISION|ANSWER): ")))' | devloop/lm format
 ```
 
@@ -67,22 +67,22 @@ A tracker comment by itself does not resolve an active wait, and opening an issu
 For a discretionary decision with no active wait, record the owner's response as a comment instead: prepare a file
 whose first line is `ANSWER: <id>` and whose following lines contain their answer, then use
 `PATH="$HOME/.local/opt/loop-manager-dev/bin:$PATH" \
-  BEADS_DIR='<project dir>/.beads' br comments add <bead> -f <answer file>`. Remove `needs-owner` only if all concerns
+  BEADS_DIR='<project dir>/.beads' br comments add <issue> -f <answer file>`. Remove `needs-owner` only if all concerns
 have answers. An answer on an already completed epic does not start new implementation work automatically.
 
 ## After an owner wait times out
 
 The await timeout is seven days in this pack. On expiry the run fails with `reason: await_timeout`, releases the
-epic to `open`, and closes its issue gate because `bead_failed_runs = 1`. The question remains unanswered. Do not
+epic to `open`, and closes its issue gate because `issue_failed_runs = 1`. The question remains unanswered. Do not
 describe this as a failed review, and do not attempt to resolve the terminal run.
 
 First reconstruct the question and obtain the owner's answer. Record `ANSWER: <question_id>` on the epic with the
 file procedure above, before opening the gate: an automatic run may already be queued. With the user's choice to
-continue, inspect the queued runs, open `bead:devloop/<bead>`, and use that existing run if it is already queued.
+continue, inspect the queued runs, open `issue:devloop/<issue>`, and use that existing run if it is already queued.
 Only when no replacement run exists, start a new one:
 
 ```sh
-loop-manager run start devloop repo epic --input epic=<bead>
+loop-manager run start devloop repo epic --input epic=<issue>
 ```
 
 The new coder reads the answer from the epic's comments. It does not attach to the old worker's session. Confirm

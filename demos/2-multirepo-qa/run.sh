@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the demo from the request to its report on a daemon of the demo's own. What the run creates stays in this
-# directory and in .gitignore: the coders' work in frontend/ and backend/, the beads in root/.beads, the daemon's
+# directory and in .gitignore: the coders' work in frontend/ and backend/, the issues in root/.beads, the daemon's
 # state in .loop-manager/ and RESULT.md. EXAMPLE=1 also keeps the result as the author's frontend-example/, backend-example/
 # and RESULT-example.md. LOOP_MANAGER names the loop-manager binary.
 set -eu
@@ -19,6 +19,8 @@ export XDG_STATE_HOME="$here/.loop-manager/state" XDG_CONFIG_HOME="$here/.loop-m
 # A socket path has a length limit: it goes to a short temporary directory.
 LOOP_MANAGER_SOCKET="$(mktemp -d)/loop-manager.sock"
 export LOOP_MANAGER_SOCKET
+# The project's tracker, br's, in root/.beads; the runs reach it through loop-manager, and a look into it after the run
+# goes as docs/guide/issue-trackers.md#inspect-and-repair-a-br-tracker says.
 (cd root && br init -q >/dev/null)
 # Each rig is a repository of its own: a coder's commit stays in it, not in the repository the demo sits in. The one
 # of a previous run goes: `git clean` leaves a repository in a directory with a tracked file.
@@ -71,11 +73,12 @@ tokens=$(jq -rs '[.[] | select(.type == "run.passed" or .type == "run.failed") |
   echo
   echo "The request: \"$request\"."
   echo
-  echo "The beads under the request (\`br dep tree <root> --direction up\`):"
+  root=$("$loop_manager" --json run show "$run" | jq -r .issue)
+  echo "The issues under the request \`$root\` (\`loop-manager issue list\`):"
   echo
-  echo '```'
-  (cd root && br dep tree "$("$loop_manager" --json run show "$run" | jq -r .bead)" --direction up --no-color)
-  echo '```'
+  echo '| issue | title | status |'
+  echo '|---|---|---|'
+  "$loop_manager" --json issue list --project multirepo-qa "$root" | jq -r '.[] | "| \(.id) | \(.title) | \(.status) |"'
   echo
   echo "The runs, oldest first:"
   echo

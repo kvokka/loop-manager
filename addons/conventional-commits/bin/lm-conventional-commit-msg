@@ -4,8 +4,8 @@ gitdir=$(git rev-parse --path-format=absolute --git-common-dir)
 [ "$gitdir" = "${LOOP_MANAGER_COMMIT_GIT_DIR:?}" ] || exit 0
 
 subject=$(head -n 1 "$1")
-if [ -n "${LOOP_MANAGER_BEAD:-}" ]; then
-  suffix=" [$LOOP_MANAGER_BEAD]"
+if [ -n "${LOOP_MANAGER_ISSUE:-}" ]; then
+  suffix=" [$LOOP_MANAGER_ISSUE]"
   case "$subject" in
     *"$suffix") subject=${subject%"$suffix"} ;;
     *) echo "End the commit subject with '$suffix'." >&2; exit 1 ;;

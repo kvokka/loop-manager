@@ -1,11 +1,11 @@
-//! A tracker in memory (contracts 5) for core tests: claims, conditional release and close, the ready set in
-//! creation order, creation once per key, blocking dependencies, and an outage switch. As in br, a parent with open
-//! children is not ready and is released, not closed, and a bead held by a dependency of its own or of a parent is not
-//! ready.
+//! A tracker in memory (contracts 5) for core tests: claims, conditional release and close, a close by anyone, the
+//! ready set in creation order, the subtree of a root, creation and filing once per key, blocking dependencies, and an
+//! outage switch. As in br, a parent with open children is not ready and is released, not closed, and an issue held by
+//! a dependency of its own or of a parent is not ready.
 
 use loop_manager_contract::{
     BoxFuture,
-    tracker::{Bead, Change, Comment, Commented, Lineage, Tracker, TrackerError, Wait},
+    tracker::{Change, Comment, Commented, Issue, Lineage, NewIssue, Tracker, TrackerError, Wait},
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -17,15 +17,15 @@ pub struct MemoryTracker {
 
 #[derive(Default)]
 struct State {
-    beads: Vec<Bead>,
+    issues: Vec<Issue>,
     log: Vec<Change>,
-    /// The beads of `create`, by key.
+    /// The issues of `create`, by key.
     keys: Vec<(String, String)>,
-    /// The comments, oldest first, by bead id.
+    /// The comments, oldest first, by issue id.
     comments: Vec<(String, Comment)>,
-    /// The blocking dependencies: the bead, its blocker and the type.
+    /// The blocking dependencies: the issue, its blocker and the type.
     deps: Vec<(String, String, String)>,
-    /// The entries of `attempt_ended`: the actor, the bead and the entry, in order.
+    /// The entries of `attempt_ended`: the actor, the issue and the entry, in order.
     attempts: Vec<(String, String, Value)>,
     down: bool,
     /// The last write the next read of the writes sees; set by `lag`.
@@ -37,24 +37,24 @@ impl MemoryTracker {
         Self::default()
     }
 
-    /// Adds an open bead of the root with `labels` in `epic`; returns its id (`b-<n>`).
+    /// Adds an open issue of the root with `labels` in `epic`; returns its id (`b-<n>`).
     pub fn add(&self, labels: &[&str], epic: Option<&str>) -> String {
         self.add_in("b", labels, epic)
     }
 
-    /// Adds an open bead with the id prefix `prefix` (a rig's, for a bead of that rig); returns its id
+    /// Adds an open issue with the id prefix `prefix` (a rig's, for an issue of that rig); returns its id
     /// (`<prefix>-<n>`, `n` counted across prefixes).
     pub fn add_in(&self, prefix: &str, labels: &[&str], epic: Option<&str>) -> String {
         self.lock().push(prefix, None, "", labels, epic, "human")
     }
 
-    pub fn bead(&self, id: &str) -> Option<Bead> {
-        self.lock().beads.iter().find(|b| b.id == id).cloned()
+    pub fn issue(&self, id: &str) -> Option<Issue> {
+        self.lock().issues.iter().find(|b| b.id == id).cloned()
     }
 
     /// A human claims `id` as `who`, outside loop-manager.
     pub fn assign(&self, id: &str, who: &str) {
-        if let Some(b) = self.lock().beads.iter_mut().find(|b| b.id == id) {
+        if let Some(b) = self.lock().issues.iter_mut().find(|b| b.id == id) {
             b.assignee = Some(who.to_owned());
             b.status = "in_progress".to_owned();
         }
@@ -66,19 +66,19 @@ impl MemoryTracker {
     }
 
     /// A human adds `label` to `id` right after their last write, which is to `id`: br reads the two as one write,
-    /// with the bead as it is now (docs/design/tracker-br.md).
+    /// with the issue as it is now (docs/design/tracker-br.md).
     pub fn label_with_last(&self, id: &str, label: &str) {
         let mut state = self.lock();
         let state = &mut *state;
-        let bead = state.beads.iter_mut().find(|b| b.id == id).expect("no such bead");
-        bead.labels.push(label.to_owned());
+        let issue = state.issues.iter_mut().find(|b| b.id == id).expect("no such issue");
+        issue.labels.push(label.to_owned());
         let last = state.log.last_mut().expect("no write to join");
         assert_eq!(
-            (last.bead.id.as_str(), last.actor.as_str()),
+            (last.issue.id.as_str(), last.actor.as_str()),
             (id, "human"),
-            "the last write is not of the bead"
+            "the last write is not of the issue"
         );
-        last.bead = bead.clone();
+        last.issue = issue.clone();
         last.changed.push("labels".to_owned());
     }
 
@@ -95,9 +95,9 @@ impl MemoryTracker {
     }
 
     /// A write of a human to `id` that changes `changed`.
-    fn edit(&self, id: &str, changed: &[&str], f: impl FnOnce(&mut Bead)) {
+    fn edit(&self, id: &str, changed: &[&str], f: impl FnOnce(&mut Issue)) {
         let mut state = self.lock();
-        if let Some(b) = state.beads.iter_mut().find(|b| b.id == id) {
+        if let Some(b) = state.issues.iter_mut().find(|b| b.id == id) {
             f(b);
             state.record(id, "updated", "human", changed);
         }
@@ -108,14 +108,9 @@ impl MemoryTracker {
         self.edit(id, &["status"], |b| status.clone_into(&mut b.status));
     }
 
-    /// `actor` closes `id` whoever holds it, as `br close` does; the bead keeps its assignee.
+    /// `actor` closes `id` whoever holds it, as `br close` does; the issue keeps its assignee.
     pub fn close_as(&self, id: &str, actor: &str) {
-        let mut state = self.lock();
-        if let Some(b) = state.beads.iter_mut().find(|b| b.id == id) {
-            "closed".clone_into(&mut b.status);
-            b.closed_at = Some(b.updated_at.clone());
-            state.record(id, "closed", actor, &[]);
-        }
+        self.lock().close(id, actor);
     }
 
     /// A human makes `id` depend on `blocker` with the blocking type `kind` (`blocks`, `conditional-blocks`,
@@ -128,7 +123,7 @@ impl MemoryTracker {
 
     /// Deletes `id`, as a human does with `br delete`; its children keep it as their parent.
     pub fn remove(&self, id: &str) {
-        self.lock().beads.retain(|b| b.id != id);
+        self.lock().issues.retain(|b| b.id != id);
     }
 
     /// Someone comments on `id`, as `br comments add` does.
@@ -141,7 +136,7 @@ impl MemoryTracker {
         self.lock().comments.push((id.to_owned(), comment));
     }
 
-    /// The ends of attempts recorded so far, oldest first: the actor, the bead and the entry.
+    /// The ends of attempts recorded so far, oldest first: the actor, the issue and the entry.
     pub fn attempts(&self) -> Vec<(String, String, Value)> {
         self.lock().attempts.clone()
     }
@@ -155,12 +150,12 @@ impl MemoryTracker {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Runs `f` on the bead `id` unless the tracker is down; a success is logged as `kind` by `actor`.
+    /// Runs `f` on the issue `id` unless the tracker is down; a success is logged as `kind` by `actor`.
     fn with<T>(
         &self,
         id: &str,
         (kind, actor): (&str, &str),
-        f: impl FnOnce(&mut Bead) -> Result<T, TrackerError>,
+        f: impl FnOnce(&mut Issue) -> Result<T, TrackerError>,
     ) -> Result<T, TrackerError> {
         let mut state = self.lock();
         if state.down {
@@ -168,8 +163,8 @@ impl MemoryTracker {
                 text: "down".to_owned(),
             });
         }
-        let bead = state.beads.iter_mut().find(|b| b.id == id);
-        let out = f(bead.ok_or(TrackerError::NotFound)?)?;
+        let issue = state.issues.iter_mut().find(|b| b.id == id);
+        let out = f(issue.ok_or(TrackerError::NotFound)?)?;
         let changed: &[&str] = if kind == "updated" {
             &["status", "assignee"]
         } else {
@@ -181,7 +176,7 @@ impl MemoryTracker {
 }
 
 impl State {
-    /// Adds an open bead (titled `Task <id>` without `title`) and logs its creation by `actor`; returns its id.
+    /// Adds an open issue (titled `Task <id>` without `title`) and logs its creation by `actor`; returns its id.
     fn push(
         &mut self,
         prefix: &str,
@@ -191,8 +186,8 @@ impl State {
         epic: Option<&str>,
         actor: &str,
     ) -> String {
-        let id = format!("{prefix}-{}", self.beads.len() + 1);
-        self.beads.push(Bead {
+        let id = format!("{prefix}-{}", self.issues.len() + 1);
+        self.issues.push(Issue {
             id: id.clone(),
             title: title.map_or_else(|| format!("Task {id}"), str::to_owned),
             description: description.to_owned(),
@@ -209,9 +204,18 @@ impl State {
         id
     }
 
-    /// Whether `id` is the parent of a bead not closed.
+    /// `actor` closes `id`, keeping its assignee.
+    fn close(&mut self, id: &str, actor: &str) {
+        if let Some(b) = self.issues.iter_mut().find(|b| b.id == id) {
+            "closed".clone_into(&mut b.status);
+            b.closed_at = Some(b.updated_at.clone());
+            self.record(id, "closed", actor, &[]);
+        }
+    }
+
+    /// Whether `id` is the parent of an issue not closed.
     fn has_open_children(&self, id: &str) -> bool {
-        self.beads
+        self.issues
             .iter()
             .any(|c| c.epic.as_deref() == Some(id) && c.status != "closed")
     }
@@ -219,19 +223,19 @@ impl State {
     /// The parents of `id` at any height, nearest first; a loop of parents ends at its repeat.
     fn parents(&self, id: &str) -> Vec<String> {
         let mut line: Vec<String> = Vec::new();
-        let mut next = self.beads.iter().find(|b| b.id == id).and_then(|b| b.epic.clone());
+        let mut next = self.issues.iter().find(|b| b.id == id).and_then(|b| b.epic.clone());
         while let Some(parent) = next.filter(|p| p != id && !line.contains(p)) {
-            next = self.beads.iter().find(|b| b.id == parent).and_then(|b| b.epic.clone());
+            next = self.issues.iter().find(|b| b.id == parent).and_then(|b| b.epic.clone());
             line.push(parent);
         }
         line
     }
 
     /// What holds `id` (contracts 5.1), as `(blocker, kind, status)`: an open blocker of a blocking dependency of the
-    /// bead or of a parent, and the bead or a parent in `blocked`.
+    /// issue or of a parent, and the issue or a parent in `blocked`.
     fn holds(&self, id: &str) -> Vec<(String, String, String)> {
         let line: Vec<String> = std::iter::once(id.to_owned()).chain(self.parents(id)).collect();
-        let open = |id: &str| self.beads.iter().find(|b| b.id == id && b.status != "closed");
+        let open = |id: &str| self.issues.iter().find(|b| b.id == id && b.status != "closed");
         let deps = self.deps.iter().filter(|(of, _, _)| line.contains(of));
         let deps = deps.filter_map(|(_, on, kind)| Some((on.clone(), kind.clone(), open(on)?.status.clone())));
         let blocked = line.iter().filter_map(|id| open(id)).filter(|b| b.status == "blocked");
@@ -240,7 +244,7 @@ impl State {
     }
 
     fn record(&mut self, id: &str, kind: &str, actor: &str, changed: &[&str]) {
-        let Some(bead) = self.beads.iter().find(|b| b.id == id).cloned() else {
+        let Some(issue) = self.issues.iter().find(|b| b.id == id).cloned() else {
             return;
         };
         let seq = i64::try_from(self.log.len()).unwrap_or(i64::MAX) + 1;
@@ -249,24 +253,24 @@ impl State {
             kind: kind.to_owned(),
             actor: actor.to_owned(),
             changed: changed.iter().map(|c| (*c).to_owned()).collect(),
-            bead,
+            issue,
         });
     }
 }
 
-/// Fails unless `owner` holds `bead`.
-fn held(bead: &Bead, owner: &str) -> Result<(), TrackerError> {
-    if bead.assignee.as_deref() == Some(owner) {
+/// Fails unless `owner` holds `issue`.
+fn held(issue: &Issue, owner: &str) -> Result<(), TrackerError> {
+    if issue.assignee.as_deref() == Some(owner) {
         Ok(())
     } else {
         Err(TrackerError::OwnerMismatch {
-            holder: bead.assignee.clone(),
+            holder: issue.assignee.clone(),
         })
     }
 }
 
 impl Tracker for MemoryTracker {
-    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>> {
+    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         Box::pin(async move {
             self.with(id, ("updated", owner), |b| match &b.assignee {
                 Some(holder) if holder != owner => Err(TrackerError::Claimed { holder: holder.clone() }),
@@ -309,7 +313,34 @@ impl Tracker for MemoryTracker {
         })
     }
 
-    fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>> {
+    fn close_by<'a>(
+        &'a self,
+        actor: &'a str,
+        id: &'a str,
+        _reason: &'a str,
+    ) -> BoxFuture<'a, Result<(), TrackerError>> {
+        Box::pin(async move {
+            let mut state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            let issue = state.issues.iter().find(|b| b.id == id).ok_or(TrackerError::NotFound)?;
+            if issue.status == "closed" {
+                return Ok(());
+            }
+            if state.has_open_children(id) {
+                return Err(TrackerError::Invalid {
+                    text: format!("{id} has open children"),
+                });
+            }
+            state.close(id, actor);
+            Ok(())
+        })
+    }
+
+    fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
         Box::pin(async move {
             let state = self.lock();
             if state.down {
@@ -318,10 +349,10 @@ impl Tracker for MemoryTracker {
                 });
             }
             let open = state
-                .beads
+                .issues
                 .iter()
                 .filter(|b| b.status == "open" && b.assignee.is_none() && !state.has_open_children(&b.id))
-                // As in br, a dependency holds a bead out of the ready set, a parent in `blocked` does not.
+                // As in br, a dependency holds an issue out of the ready set, a parent in `blocked` does not.
                 .filter(|b| state.holds(&b.id).iter().all(|(_, kind, _)| kind == "status"));
             Ok(open.cloned().collect())
         })
@@ -331,14 +362,33 @@ impl Tracker for MemoryTracker {
         Box::pin(async move {
             let ready = self.ready().await?;
             let state = self.lock();
-            let parent = |id: &String| state.beads.iter().find(|b| &b.id == id)?.epic.clone();
-            if !state.beads.iter().any(|b| b.id == root) {
+            let parent = |id: &String| state.issues.iter().find(|b| &b.id == id)?.epic.clone();
+            if !state.issues.iter().any(|b| b.id == root) {
                 return Err(TrackerError::NotFound);
             }
             let ids = ready.into_iter().map(|b| b.id);
             Ok(ids
                 .filter(|id| std::iter::successors(parent(id), parent).any(|e| e == root))
                 .collect())
+        })
+    }
+
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+        Box::pin(async move {
+            let state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            if !state.issues.iter().any(|b| b.id == root) {
+                return Err(TrackerError::NotFound);
+            }
+            let under = state
+                .issues
+                .iter()
+                .filter(|b| state.parents(&b.id).iter().any(|p| p == root));
+            Ok(under.cloned().collect())
         })
     }
 
@@ -350,16 +400,16 @@ impl Tracker for MemoryTracker {
                     text: "down".to_owned(),
                 });
             }
-            if !state.beads.iter().any(|b| b.id == root) {
+            if !state.issues.iter().any(|b| b.id == root) {
                 return Err(TrackerError::NotFound);
             }
             let under = |id: &str| state.parents(id).iter().any(|p| p == root);
-            let open = state.beads.iter().filter(|b| b.status != "closed" && under(&b.id));
+            let open = state.issues.iter().filter(|b| b.status != "closed" && under(&b.id));
             let mut waits: Vec<Wait> = open
                 .flat_map(|b| {
                     let holds = state.holds(&b.id).into_iter();
                     holds.map(|(blocker, kind, status)| Wait {
-                        bead: b.id.clone(),
+                        issue: b.id.clone(),
                         under: blocker == root || under(&blocker),
                         blocker,
                         kind,
@@ -367,7 +417,7 @@ impl Tracker for MemoryTracker {
                     })
                 })
                 .collect();
-            waits.sort_by(|a, b| (&a.bead, &a.blocker, &a.kind).cmp(&(&b.bead, &b.blocker, &b.kind)));
+            waits.sort_by(|a, b| (&a.issue, &a.blocker, &a.kind).cmp(&(&b.issue, &b.blocker, &b.kind)));
             waits.dedup();
             Ok(waits)
         })
@@ -382,25 +432,25 @@ impl Tracker for MemoryTracker {
                 });
             }
             let commented = |id: &str| {
-                let bead = state.beads.iter().find(|b| b.id == id)?.clone();
+                let issue = state.issues.iter().find(|b| b.id == id)?.clone();
                 let comments = state.comments.iter().filter(|(of, _)| of == id);
                 let comments = comments.map(|(_, c)| c.clone()).collect();
-                Some(Commented { bead, comments })
+                Some(Commented { issue, comments })
             };
-            let bead = commented(id).ok_or(TrackerError::NotFound)?;
+            let issue = commented(id).ok_or(TrackerError::NotFound)?;
             // Up the parents while the tracker has them; a deleted one ends the line.
             let mut parents: Vec<Commented> = Vec::new();
-            let mut next = bead.bead.epic.clone();
+            let mut next = issue.issue.epic.clone();
             while let Some(parent) = next
                 .as_deref()
-                .filter(|p| parents.iter().all(|c| c.bead.id != *p) && *p != id)
+                .filter(|p| parents.iter().all(|c| c.issue.id != *p) && *p != id)
             {
                 let Some(found) = commented(parent) else { break };
-                next = found.bead.epic.clone();
+                next = found.issue.epic.clone();
                 parents.push(found);
             }
             parents.reverse();
-            Ok(Lineage { bead, parents })
+            Ok(Lineage { issue, parents })
         })
     }
 
@@ -417,10 +467,10 @@ impl Tracker for MemoryTracker {
                 .log
                 .iter()
                 .filter(|c| c.seq > after && c.seq <= last)
-                // The bead as it is when read, as br gives it (contracts 5.1, `Change.bead`).
+                // The issue as it is when read, as br gives it (contracts 5.1, `Change.issue`).
                 .map(|c| Change {
-                    bead: (state.beads.iter().find(|b| b.id == c.bead.id))
-                        .map_or_else(|| c.bead.clone(), |b| b.clone()),
+                    issue: (state.issues.iter().find(|b| b.id == c.issue.id))
+                        .map_or_else(|| c.issue.clone(), |b| b.clone()),
                     ..c.clone()
                 })
                 .collect())
@@ -433,7 +483,7 @@ impl Tracker for MemoryTracker {
         key: &'a str,
         title: &'a str,
         description: &'a str,
-    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
         Box::pin(async move {
             let mut state = self.lock();
             if state.down {
@@ -441,7 +491,7 @@ impl Tracker for MemoryTracker {
                     text: "down".to_owned(),
                 });
             }
-            let named = state.beads.iter().find(|b| b.id == description).map(|b| b.id.clone());
+            let named = state.issues.iter().find(|b| b.id == description).map(|b| b.id.clone());
             let made = state.keys.iter().find(|(k, _)| k == key).map(|(_, id)| id.clone());
             let id = match made.or(named) {
                 Some(id) => id,
@@ -452,7 +502,46 @@ impl Tracker for MemoryTracker {
                 }
             };
             state
-                .beads
+                .issues
+                .iter()
+                .find(|b| b.id == id)
+                .cloned()
+                .ok_or(TrackerError::NotFound)
+        })
+    }
+
+    fn file<'a>(
+        &'a self,
+        actor: &'a str,
+        key: Option<&'a str>,
+        new: &'a NewIssue,
+    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        Box::pin(async move {
+            let mut state = self.lock();
+            if state.down {
+                return Err(TrackerError::Unavailable {
+                    text: "down".to_owned(),
+                });
+            }
+            let made = key.and_then(|key| state.keys.iter().find(|(k, _)| k == key));
+            let id = match made.map(|(_, id)| id.clone()) {
+                Some(id) => id,
+                None => {
+                    if let Some(parent) = &new.parent
+                        && state.issues.iter().all(|b| &b.id != parent)
+                    {
+                        return Err(TrackerError::NotFound);
+                    }
+                    let labels: Vec<&str> = new.labels.iter().map(String::as_str).collect();
+                    let prefix = new.prefix.as_deref().unwrap_or("b");
+                    let epic = new.parent.as_deref();
+                    let id = state.push(prefix, Some(&new.title), &new.description, &labels, epic, actor);
+                    state.keys.extend(key.map(|key| (key.to_owned(), id.clone())));
+                    id
+                }
+            };
+            state
+                .issues
                 .iter()
                 .find(|b| b.id == id)
                 .cloned()
@@ -486,7 +575,7 @@ impl Tracker for MemoryTracker {
                     text: "down".to_owned(),
                 });
             }
-            if state.beads.iter().all(|b| b.id != id) {
+            if state.issues.iter().all(|b| b.id != id) {
                 return Err(TrackerError::NotFound);
             }
             drop(state);

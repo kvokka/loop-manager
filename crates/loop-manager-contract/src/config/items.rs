@@ -207,7 +207,7 @@ impl Loader {
         for bad in super::prompt::strangers(steps) {
             self.fail(file, bad);
         }
-        // The task bead a drain step gives out beads under (docs/design/config.md).
+        // The task issue a drain step gives out issues under (docs/design/config.md).
         let drains = steps.iter().any(|s| matches!(s.kind, StepKind::Drain { .. }));
         if drains && !inputs.values().any(|i| i.kind == InputType::Task && i.required) {
             self.fail(

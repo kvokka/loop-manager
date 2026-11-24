@@ -31,16 +31,16 @@ impl Project {
         }
     }
 
-    /// The rig of a bead: the one whose prefix is the bead's id up to its last `-` (docs/design/config.md); none
-    /// for a bead of the root.
-    pub fn rig_of(&self, bead: &str) -> Option<&str> {
-        let (prefix, _) = bead.rsplit_once('-')?;
+    /// The rig of an issue: the one whose prefix is the issue's id up to its last `-` (docs/design/config.md); none
+    /// for an issue of the root.
+    pub fn rig_of(&self, issue: &str) -> Option<&str> {
+        let (prefix, _) = issue.rsplit_once('-')?;
         let mut rigs = self.rigs.iter();
         rigs.find(|(_, r)| r.prefix.as_deref() == Some(prefix))
             .map(|(n, _)| n.as_str())
     }
 
-    /// The tracker's variables of a session or command at `place`: on a rig, its bead prefix too
+    /// The tracker's variables of a session or command at `place`: on a rig, its issue prefix too
     /// (docs/design/config.md), as `env` values: literals.
     pub fn tracker_env<'a>(&'a self, place: Option<&'a Rig>) -> impl Iterator<Item = (&'a String, String)> {
         let prefix = self.tracker.prefix.as_ref().zip(place.and_then(|r| r.prefix.as_ref()));
@@ -89,7 +89,7 @@ impl Loader {
                 self.fail(
                     file,
                     format!(
-                        "rigs `{other}` and `{rig}` both give their beads the prefix `{prefix}`: set `prefix` on one"
+                        "rigs `{other}` and `{rig}` both give their issues the prefix `{prefix}`: set `prefix` on one"
                     ),
                 );
             }

@@ -5,7 +5,7 @@
 takes every run to an explicit outcome through harness failures, account limits and its own restarts.
 
 A loop is work that comes round again until it reaches an outcome: a step retried until its check passes, a check that
-sends the work back to an earlier step for another round, a `drain` that hands out beads until none is left, a trigger
+sends the work back to an earlier step for another round, a `drain` that hands out issues until none is left, a trigger
 that starts a formula on every matching event or tick of a schedule.
 
 ## What shapes it
@@ -29,7 +29,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **orchestrator** | the `loop-manager` daemon and its machine-level settings |
 | **project** | a directory with `loop-manager.toml`: a root, a set of rigs, packs, addons and one tracker database |
 | **root** | the root directory of a project: where agents of scope `root` work, and in a one-repository project the executors too. By default the directory of `loop-manager.toml`, named `root`; both are settings. It need not be a git repository |
-| **rig** | a repository of a project on disk, with its bead prefix and variables (`test_cmd`, `lint_cmd`, …) |
+| **rig** | a repository of a project on disk, with its issue prefix and variables (`test_cmd`, `lint_cmd`, …) |
 | **harness** | a kind of agent CLI: `claude`, `codex`. One adapter each |
 | **harness instance** | a running harness process (an app-server or a session process) that serves one or several sessions |
 | **agent** | a general role (`coder`, `planner`): a role prompt, a prompt template, skills, a scope and default launch settings. It knows nothing of a concrete task. The core's code names no role |
@@ -40,8 +40,8 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **subagent** | an agent a session may call as a native subagent of its harness (`subagents` in `agent.toml`); not a run |
 | **session reference** | the pair "harness + the harness's session id": all the core knows of a conversation |
 | **formula** | a workflow, the "how": a name, a description, inputs and steps in order. The "what", the task, comes only from the user |
-| **step** | `ai` (an agent's turn), `exec` (a command, no LLM), `drain` (giving beads out to executors), `formula` (another formula) or `await` (an outcome from outside) |
-| **task** | the text a user gives a formula at start: what to do. It names an existing bead, or becomes a new root bead |
+| **step** | `ai` (an agent's turn), `exec` (a command, no LLM), `drain` (giving issues out to executors), `formula` (another formula) or `await` (an outcome from outside) |
+| **task** | the text a user gives a formula at start: what to do. It names an existing issue, or becomes a new root issue |
 | **run** | an execution of a formula with concrete inputs; it has attempts and an outcome |
 | **child run** | a run started by a `drain` or `formula` step of another run, or from its agent's session; it inherits that run's correlation |
 | **attempt** | one start or resume of a session within a run |
@@ -52,17 +52,17 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **addon** | an extension, a directory with `addon.toml`: what attaches to agents (skills, hooks, MCP, scripts, env), hooks on orchestrator events, services. Declared once, attached per agent or for all, with parameters ([guide](guide/addons.md)) |
 | **service** | a long-lived process the orchestrator supervises (a shared MCP server, for one) |
 | **issue gate** | a record "start no run by this key until a time, or until opened by hand" |
-| **tracker** | the task store behind an adapter interface; the first implementation is br |
-| **bead** | a task in the tracker. Real work only, no bookkeeping records |
-| **root bead** | the bead with the user's task; every bead filed for that task lies under it |
+| **tracker** | the task store behind an adapter interface; the first implementation is br ([issue trackers](guide/issue-trackers.md)) |
+| **issue** | a task in the tracker. Real work only, no bookkeeping records |
+| **root issue** | the issue with the user's task; every issue filed for that task lies under it |
 | **event** | a record of what happened: a reason to re-read the state, not the truth |
 
 ## What the first release leaves out
 
 | Not included | Why, and what there is instead |
 |---|---|
-| Molecules, wisps, convoys, control beads | Chains are built from formula steps, event subscriptions and child runs |
-| An arbitrary step graph inside a formula: branches, nested steps, parallel branches | A formula is a linear list of steps with a bounded return to an earlier step; a step may be skipped by its `if`. A planner agent splits the work: it files beads, and a `drain` step gives them to executors |
+| Molecules, wisps, convoys, control issues | Chains are built from formula steps, event subscriptions and child runs |
+| An arbitrary step graph inside a formula: branches, nested steps, parallel branches | A formula is a linear list of steps with a bounded return to an earlier step; a step may be skipped by its `if`. A planner agent splits the work: it files issues, and a `drain` step gives them to executors |
 | Agents that live permanently | A session per run |
 | Mail and nudges between agents | A separate addon, later |
 | Storage of sessions and transcripts | The harness's job; the core keeps the reference "harness + id" |
@@ -72,7 +72,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | A human joining a live session, handover of control | A later release: no operations, states or stubs for it now. A human sees the session reference in the run's state and opens the conversation with the harness's own tools after the run ([frontends](api/frontends.md)) |
 | Prompting or controlling work from an editor over ACP | [loop-manager acp](api/frontends.md#read-working-sessions-over-acpv2) provides read-only access to recorded agent sessions |
 | A human answering a permission request | Not planned: the harness decides from the config ([config](design/config.md#permissions)) |
-| A web interface, a dashboard | The task board is `bv`; observation is the CLI and the event stream |
+| A web interface, a dashboard | The task board is the tracker's own ([bv for br](guide/issue-trackers.md#how-it-is-wired)); observation is the CLI and the event stream |
 | Alerting a human about a failure | Only the event journal and the logs; a notice addon is on the [roadmap](roadmap.md) |
 | Windows, several machines, several users | A local daemon of one user |
 | Checks on macOS and on x86_64 | The full suite runs on Linux arm64; release builds run `--version` on each supported platform |
@@ -81,7 +81,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | Translation of hooks between harness dialects | The hook formats of claude and codex are nearly one; a translator when a third dialect appears |
 | A generic ACP adapter, one adapter for several harnesses | When a third harness appears |
 | A model provider setting apart from the harness | The user names a harness; the provider inside it is the harness's native setting |
-| A chain of several formulas over one bead | `pass` closes the bead; the next work comes by taking the next ready bead |
+| A chain of several formulas over one issue | `pass` closes the issue; the next work comes by taking the next ready issue |
 | A demo "loop-manager develops itself" | Later: the agent setup of this repository as a loop-manager pack |
 | Migration of data and packs from other orchestrators | A separate task |
 

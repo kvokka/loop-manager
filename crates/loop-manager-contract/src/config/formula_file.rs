@@ -118,7 +118,7 @@ pub(super) enum StepFile {
         condition: serde_json::Map<String, serde_json::Value>,
         formula: String,
         timeout: Option<String>,
-        /// The most beads in work at once (docs/design/config.md); default 1.
+        /// The most issues in work at once (docs/design/config.md); default 1.
         pool: Option<NonZeroU32>,
         #[serde(default)]
         on_item_failure: OnItemFailure,
@@ -167,14 +167,14 @@ impl StepFile {
     }
 }
 
-/// What a drain step does once the run of a bead failed (docs/design/config.md).
+/// What a drain step does once the run of an issue failed (docs/design/config.md).
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnItemFailure {
-    /// It gives the other beads; the failure does not fail the step.
+    /// It gives the other issues; the failure does not fail the step.
     #[default]
     Continue,
-    /// It gives no new bead and lets the started ones end, then fails.
+    /// It gives no new issue and lets the started ones end, then fails.
     SoftStop,
     /// It cancels the started ones, then fails.
     HardStop,
@@ -240,7 +240,7 @@ pub enum StepKind {
         timeout: Option<Duration>,
         /// The launch settings and the native blocks of the step.
         settings: Box<Settings>,
-        /// The most comments of the bead, and of each of its parents, the prompt shows: the last ones.
+        /// The most comments of the issue, and of each of its parents, the prompt shows: the last ones.
         last_comments: Option<NonZeroUsize>,
     },
     Exec {
@@ -249,12 +249,12 @@ pub enum StepKind {
         /// Its environment over loop-manager's base: its own keys, then `[exec]` of the project and the orchestrator.
         env: super::ExecEnv,
     },
-    /// Every ready bead under the run's bead gets a run of `formula` (docs/design/config.md,
+    /// Every ready issue under the run's issue gets a run of `formula` (docs/design/config.md,
     /// docs/design/contracts.md 5).
     Drain {
         formula: Name,
         timeout: Option<Duration>,
-        /// The most beads in work at once; at least 1.
+        /// The most issues in work at once; at least 1.
         pool: u32,
         on_item_failure: OnItemFailure,
         /// Each child gets the branch `loop-manager/<child>` from the base of its rig, merged back on its final `pass`.

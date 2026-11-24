@@ -42,7 +42,7 @@ One envelope for the JSONL journal, the API event stream (SSE) and the stdin of 
 | `ts` | time | commit time (the managed clock in tests) |
 | `type` | string | one of 1.3 below |
 | `project`, `rig` | string or null | null for orchestrator-level events |
-| `run` | string or null | the run the event is about; for `bead.*` the run whose attempt made the change (attribution by actor, 5.1), else null |
+| `run` | string or null | the run the event is about; for `issue.*` the run whose attempt made the change (attribution by actor, 5.1), else null |
 | `correlation` | string or null | chain id: a run started by hand starts a chain, a run started by a trigger inherits the chain of the event that fired it, a run started from an agent session (6.1) that of the session's run; null for events outside any chain |
 | `data` | object | payload of the type, see 1.3 |
 
@@ -58,7 +58,7 @@ Version rules:
 Filters and templates (see 2) see an event as one flat object: the envelope fields `seq`, `ts`, `type`, `project`,
 `rig`, `run`, `correlation`, plus every key of `data` at the same level. The only payload key that reuses an envelope
 name is `run`: where a payload carries a `RunView`, the view's `run` is that object and the run id is `run.id`;
-elsewhere `run` is the envelope's run id. Examples: `bead.labels` and `bead.epic` of a `bead.ready` event,
+elsewhere `run` is the envelope's run id. Examples: `issue.labels` and `issue.epic` of an `issue.ready` event,
 `run.formula` of a `run.passed` event.
 
 ### 1.3 Payloads
@@ -66,10 +66,10 @@ elsewhere `run` is the envelope's run id. Examples: `bead.labels` and `bead.epic
 Shared objects:
 
 - `RunView`:
-  `{id, formula, step, agent, step_kind: "ai"|"exec"|"drain"|"formula"|"await", state, class, attempt, generation, bead, workdir, depth, parent_run, created_at, started_at}`.
+  `{id, formula, step, agent, step_kind: "ai"|"exec"|"drain"|"formula"|"await", state, class, attempt, generation, issue, workdir, depth, parent_run, created_at, started_at}`.
   `step` is the name of the formula step the run is at (6.1), and of an ended run the step that ran last (the steps
   it skipped after it do not count); `agent` and `step_kind` are of that step, `agent` is null
-  for a step other than `ai`, `class` is null until `failed`, `bead` is the bead id or null, `depth` is the chain
+  for a step other than `ai`, `class` is null until `failed`, `issue` is the issue id or null, `depth` is the chain
   depth of 6.1 (0 for a run started by hand), `parent_run` the run whose event triggered it or whose session started
   it. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
@@ -85,7 +85,7 @@ Shared objects:
   see 4.4, `text` set only for `unknown`, `scope` one of `session | instance | account | provider_model | run | rig`,
   `retry_at` time or null, `source` one of `harness | adapter | core`, `raw` the harness text cut to 4 KiB,
   `account` and `provider_model` as reported by the adapter or null.
-- `Bead`: see 5.2.
+- `Issue`: see 5.2.
 - `Gate`: `{key, until, reason, closed_by: "policy"|"operator"|"core", closed_at}`, `until` null = until removed
   by hand.
 - `Attempts`: list of `{n, generation, step, kind: "new_session"|"resume", started_at, ended_at, failure_kind,
@@ -121,11 +121,11 @@ Observed events (addons and clients read them and cannot change what happens):
 | `trigger.switched` | `{trigger, enabled}`; the operator switched a trigger on a rig off or back on (`POST /v1/triggers/disable`, `/enable`): off, neither its schedule nor its events fire it, a hand firing still does, and the switch outlives restarts and reloads |
 | `gate.closed` | `{gate: Gate}` |
 | `gate.opened` | `{key, by: "timer"\|"operator"\|"policy"}` |
-| `bead.created`, `bead.updated`, `bead.closed`, `bead.ready` | `{bead: Bead, actor, changed: [field]}`; `changed` empty except `updated` |
-| `bead.labeled` | `{bead: Bead, actor, label, ready}`; a write gave a bead the core had read before the label `label`, one event per label (5.1); `ready` is true when the bead is in the ready set and already was before this read: a bead that enters the set in the same read is told by `bead.ready` with the label instead |
-| `tracker.sync_failed` | `{op, bead, error, next_retry_at}` |
+| `issue.created`, `issue.updated`, `issue.closed`, `issue.ready` | `{issue: Issue, actor, changed: [field]}`; `changed` empty except `updated` |
+| `issue.labeled` | `{issue: Issue, actor, label, ready}`; a write gave an issue the core had read before the label `label`, one event per label (5.1); `ready` is true when the issue is in the ready set and already was before this read: an issue that enters the set in the same read is told by `issue.ready` with the label instead |
+| `tracker.sync_failed` | `{op, issue, error, next_retry_at}` |
 | `addon.hook_failed` | `{addon, hook_type, event_seq, error: "spawn"\|"timeout"\|"exit"\|"output", exit_code, stderr_tail}` |
-| `resync.diverged` | `{subject: "process"\|"instance"\|"run"\|"bead"\|"gate", id, expected, observed}` (no automatic effect follows, invariant 20); `instance` also tells an event `seq` that is not the last + 1 (4.3) |
+| `resync.diverged` | `{subject: "process"\|"instance"\|"run"\|"issue"\|"gate", id, expected, observed}` (no automatic effect follows, invariant 20); `instance` also tells an event `seq` that is not the last + 1 (4.3) |
 
 Deciding events (an exec hook of an addon may change what happens; decisions: see 3). The last column is what the
 core does when no addon decides, `default-policy` switched off included:
@@ -163,7 +163,7 @@ formula there is none of, `rejected` (409) when the thing is there but refuses t
 ### 2.1 Paths
 
 A path is a dotted chain of object keys into the event view (see 1.2) or into the run context of a prompt template:
-`bead.epic`, `project`, or into the run context of a step's `if` (config.md, "Formula"); the word `data` never
+`issue.epic`, `project`, or into the run context of a step's `if` (config.md, "Formula"); the word `data` never
 appears in a path. No indexing, no wildcards. A path that a payload of the
 event type cannot have is a config error at load time (the payload schemas of 1.3 are known to the loader); so is a
 `where` path that ends on an object, which no matcher can equal.
@@ -180,9 +180,9 @@ event of the type.
 
 A path that is absent or null in the event does not match. There is no negation, no comparison and no regular
 expression in the first release; a trigger that needs more uses an `exec` step that decides. Example — a trigger
-on beads labelled `auto` is written `where = { "bead.labels" = "auto" }`.
+on issues labelled `auto` is written `where = { "issue.labels" = "auto" }`.
 
-The same table is the `if` of a step, over the run context of a prompt template (2.3, without `remarks`, `agent` and the bead's
+The same table is the `if` of a step, over the run context of a prompt template (2.3, without `remarks`, `agent` and the issue's
 `comments` and `parents`) and `back_from`, the names of the checks that sent the run back into its current round (config.md, "Formula").
 
 ### 2.3 Substitution (`inputs` and prompt templates)
@@ -190,7 +190,7 @@ The same table is the `if` of a step, over the run context of a prompt template 
 One language for trigger `inputs` (`config.md`, "Trigger") and prompt templates (`config.md`, "Agent"): `{{ path }}` with optional
 spaces, nothing else — no filters, conditions or loops.
 
-- In `inputs` the root is `event` (`{{ event.bead.epic }}`); a schedule trigger has no event, so any placeholder
+- In `inputs` the root is `event` (`{{ event.issue.epic }}`); a schedule trigger has no event, so any placeholder
   there is a config error.
 - A string that is exactly one placeholder takes the JSON type of the value (an integer stays an integer, an
   object stays an object). A placeholder inside a longer string is rendered as text: a scalar as it is, an object or
@@ -198,18 +198,18 @@ spaces, nothing else — no filters, conditions or loops.
 - Tables and arrays in `inputs` are mapped recursively.
 - An unresolved path in `inputs` (absent or null at fire time) skips the firing:
   `trigger.skipped{reason: "input_unresolved", detail: <path>}`.
-- In a prompt template the roots are `inputs`, `bead` (when the run has one), `rig`, `run`, `project`, `steps`,
+- In a prompt template the roots are `inputs`, `issue` (when the run has one), `rig`, `run`, `project`, `steps`,
   `remarks` (the remarks of the checks that last sent the run back, empty before; config.md, "Formula") and `agent`
   (`agent.<name>`: the text of the agent's file `<name>.md`, the project's over the pack's; config.md, "Agent"); an
   unresolved path is an error before the run starts and fails the run with class `infrastructure`. `steps` holds the
   outcome of each step before the current one: `steps.<name>.result`, `.summary`, `.data.<key>` (the last attempt of
   that step; `data` of an exec step is `{exit_code, stdout, stderr}`); a path to the current or a later step, to a
-  step with an `if` (it may be skipped), or to another field, is a config error. `bead` holds the fields of `Bead`
-  (5.2) and, in a prompt template only, `bead.comments` — the comments of the bead, oldest first, each `{author,
-  created_at, text}` — and `bead.parents` — its parents from the root down to its own parent, each with the fields of
-  `Bead` and its own `comments`; a path below either is a config error. A run reads both from the tracker (`lineage`,
+  step with an `if` (it may be skipped), or to another field, is a config error. `issue` holds the fields of `Issue`
+  (5.2) and, in a prompt template only, `issue.comments` — the comments of the issue, oldest first, each `{author,
+  created_at, text}` — and `issue.parents` — its parents from the root down to its own parent, each with the fields of
+  `Issue` and its own `comments`; a path below either is a config error. A run reads both from the tracker (`lineage`,
   5.1) each time it enters an `ai` step whose template names one of them, so the prompt holds what was written up to
-  then, by the earlier steps of the run too, and every `bead.*` of that step is the bead as read then. `last_comments`
+  then, by the earlier steps of the run too, and every `issue.*` of that step is the issue as read then. `last_comments`
   of the step keeps the last of them (config.md, "Formula").
 - `{{` that is not a placeholder is written `{{"{{"}}`.
 
@@ -222,8 +222,8 @@ itself: empty, blank at an edge, a number, `true`, `false` or `null`, starting w
 `"`, `\`, a bracket, a brace or a control character. It does not write the keyed tables and the nested field groups
 of the spec; a TOON decoder reads its output all the same.
 
-A task input is a string — the id of a bead the run takes up, or the text of a task that gets a root bead — or
-`{ next_ready = true, epic = <id or absent> }` ([tracker-br.md](tracker-br.md#beads-and-runs)).
+A task input is a string — the id of an issue the run takes up, or the text of a task that gets a root issue — or
+`{ next_ready = true, epic = <id or absent> }` ([tracker-br.md](tracker-br.md#issues-and-runs)).
 
 ## 3. Orchestrator hooks: decisions and timeouts
 
@@ -241,7 +241,7 @@ timeout = "30s"
 
 - Which addons: a hook runs only for an addon that is attached (docs/design/config.md "Addon"). An event of a run
   whose step has an agent goes to the addons that agent attaches, by the run's config snapshot, with that agent's
-  params. Any other event (no run, as `bead.*` and `service.*`, or a step of no agent, or a run before its first
+  params. Any other event (no run, as `issue.*` and `service.*`, or a step of no agent, or a run before its first
   agent step prepares) goes to the addons `[settings]` of the orchestrator and of the event's project attach, with
   the params those two layers give.
 - stdin: the event envelope (see 1.1) as one JSON line, then EOF.
@@ -403,7 +403,7 @@ trait Driver: Send + Sync {
 | Type | Content |
 |---|---|
 | `EffectiveConfig` | the merged harness-neutral categories of `config.md` "Settings" (model, effort, env, MCP servers, harness hooks, skills, system prompt, permission mode, addon parts, host inheritance flag) plus the uninterpreted `native` block of the harness, and in a run `targets`: the configs of the subagents its session may call, by type name; produced by config assembly with the provenance of every value |
-| `SessionPlan` | `New { workdir, run, attempt, token, actor, bead }` or `Resume { session: SessionRef, workdir, run, attempt, token, actor, bead }`; the adapter needs `run`/`attempt` only to name files in the state directory, and `run`, `token`, the tracker `actor` and the run's `bead` (when it has one) to set the attempt environment (4.6) |
+| `SessionPlan` | `New { workdir, run, attempt, token, actor, issue }` or `Resume { session: SessionRef, workdir, run, attempt, token, actor, issue }`; the adapter needs `run`/`attempt` only to name files in the state directory, and `run`, `token`, the tracker `actor` and the run's `issue` (when it has one) to set the attempt environment (4.6) |
 | `Split` | `{ process: ProcessPart, session: SessionPart, fingerprint: Fingerprint }`; the two parts are opaque serializable values of the adapter; `fingerprint` = SHA-256 of the harness name and the canonical JSON of `process` (see 8) |
 | `InstanceHandle` | `{ id, pid, start_time, pgid }`; `start_time` is the kernel start time of `pid` (`/proc/<pid>/stat`), pid + start time identify the process ([event model](event-model.md#state)) |
 | `SessionRef` | opaque JSON the adapter fills with everything resume needs; the core stores and returns it. claude: `{session_id, config_dir, workdir}` (`config_dir` null: the session inherits the host, and its transcript is under the daemon's `CLAUDE_CONFIG_DIR`, else `~/.claude`); codex: `{thread_id, codex_home}` (the transcript lives in `CODEX_HOME`; the chat view uses this home to find a closed thread; a resume takes the home of the process part) |
@@ -635,25 +635,32 @@ The tables are owned by the adapters and pinned by the contract tests ([harness 
 
 ### 5.1 Operations
 
-The trait has the eleven operations the core calls; an operation is added only when a caller needs it.
+The trait has the eleven operations the core calls and three the API calls (`close_by`, `subtree`, `file`); an
+operation is added only when a caller needs it.
 Every call names the actor: `loop-manager:<run id>` when the daemon acts for a run, `loop-manager` for
-the daemon's own reads. Sessions and exec steps get `BD_ACTOR=loop-manager:<run id>:<attempt n>` and the database path
-in their environment ([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
-of its step, its harness and its model (`BR_AGENT_NAME`, `BR_HARNESS`, `BR_MODEL`, the last only when its effective
-config sets a model), which br records on the bead's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
+the daemon's own reads and for the `issue` commands from outside a session. Sessions and exec steps get the actor
+`loop-manager:<run id>:<attempt n>` and the database path in the tracker's variables
+([experiments](experiments.md#br-as-an-event-source-experiment-3)); a session also gets the agent
+of its step, its harness and its model (the last only when its effective
+config sets a model), which the tracker records on the issue's writes ([tracker-br](tracker-br.md#one-database-per-project)). An actor of any other form is a
 human or an outside tool and starts a new correlation chain (`correlation`, 1.1).
 
 ```rust
 trait Tracker: Send + Sync {
-    fn claim(&self, owner: &str, id: &str) -> BoxFuture<Result<Bead, TrackerError>>;
+    fn claim(&self, owner: &str, id: &str) -> BoxFuture<Result<Issue, TrackerError>>;
     fn release(&self, owner: &str, id: &str) -> BoxFuture<Result<(), TrackerError>>;   // conditional
     fn close(&self, owner: &str, id: &str, reason: &str) -> BoxFuture<Result<(), TrackerError>>; // conditional
-    fn ready(&self) -> BoxFuture<Result<Vec<Bead>, TrackerError>>;          // every ready bead, tracker order
+    fn close_by(&self, actor: &str, id: &str, reason: &str)
+        -> BoxFuture<Result<(), TrackerError>>;                                 // whoever holds it
+    fn ready(&self) -> BoxFuture<Result<Vec<Issue>, TrackerError>>;          // every ready issue, tracker order
     fn under(&self, root: &str) -> BoxFuture<Result<Vec<String>, TrackerError>>;     // ready ids below root
-    fn waiting(&self, root: &str) -> BoxFuture<Result<Vec<Wait>, TrackerError>>;     // what holds the beads below root
+    fn subtree(&self, root: &str) -> BoxFuture<Result<Vec<Issue>, TrackerError>>;    // every issue below root
+    fn waiting(&self, root: &str) -> BoxFuture<Result<Vec<Wait>, TrackerError>>;     // what holds the issues below root
     fn changes(&self, after: i64) -> BoxFuture<Result<Vec<Change>, TrackerError>>;           // after a seq
     fn create(&self, actor: &str, key: &str, title: &str, description: &str)
-        -> BoxFuture<Result<Bead, TrackerError>>;                               // once per key
+        -> BoxFuture<Result<Issue, TrackerError>>;                               // once per key
+    fn file(&self, actor: &str, key: Option<&str>, new: &NewIssue)
+        -> BoxFuture<Result<Issue, TrackerError>>;                               // once per key, if any
     fn lineage(&self, id: &str) -> BoxFuture<Result<Lineage, TrackerError>>;          // comments and parents
     fn attempt_ended(&self, actor: &str, id: &str, entry: &Value)
         -> BoxFuture<Result<(), TrackerError>>;                                 // audit trail, not idempotent
@@ -664,106 +671,128 @@ trait Tracker: Send + Sync {
 
 `release` and `close` carry no generation (invariant 4): the condition `assignee == loop-manager:<run id>` is the same
 check, because a run id is not reused within one state directory (it is a counter there: a fresh state directory counts
-from `run_1` again) and a run owns at most one bead once. A claim answer carries the generation it was made for and is
-dropped unless the run still owns the bead in that generation and still waits for it in `preparing`.
+from `run_1` again) and a run owns at most one issue once. A claim answer carries the generation it was made for and is
+dropped unless the run still owns the issue in that generation and still waits for it in `preparing`.
 
-`create` makes an open epic without labels: the root bead of a run whose task is a text that names no bead the core
-knows; a text that is the id of a bead returns that bead instead. It is idempotent by `key`: a repeat (an effect run
-again after a restart) returns the bead of the first call, never a second bead.
+`create` makes an open epic without labels: the root issue of a run whose task is a text that names no issue the core
+knows; a text that is the id of an issue returns that issue instead. It is idempotent by `key`: a repeat (an effect run
+again after a restart) returns the issue of the first call, never a second issue.
 
-`under` gives the ids of the ready beads below `root` at any depth, in the tracker's order: the beads a `drain` step
-gives out (`config.md`, "Formula"). A bead's `epic` names only its parent, and an epic with open children is not ready, so the
+`under` gives the ids of the ready issues below `root` at any depth, in the tracker's order: the issues a `drain` step
+gives out (`config.md`, "Formula"). An issue's `epic` names only its parent, and an epic with open children is not ready, so the
 ancestors of a grandchild cannot be told from `ready()`; the tracker answers for the whole subtree. An epic becomes a
 member once its own children are closed and it is ready itself. A `root` the tracker does not have is `NotFound`.
 
-`waiting` gives what holds the open beads below `root`: the beads of a `drain` step that are not ready and why. A bead
+`waiting` gives what holds the open issues below `root`: the issues of a `drain` step that are not ready and why. An issue
 below `root` at any depth, the root itself left out, with any status but `closed` and `tombstone`, is held by each
-blocker of a blocking dependency (`blocks`, `conditional-blocks`, `waits-for`) of the bead or of one of its parents at
-any height, the root and the beads above it included, whose status is not `closed` or `tombstone` (`open`,
+blocker of a blocking dependency (`blocks`, `conditional-blocks`, `waits-for`) of the issue or of one of its parents at
+any height, the root and the issues above it included, whose status is not `closed` or `tombstone` (`open`,
 `in_progress`, `deferred` and `blocked` all hold); and by itself or a parent whose status is `blocked` (kind
-`status`). A blocked epic therefore holds every bead below it. Parents follow `parent-child` links upward. The answer
-has one `Wait` per bead, blocker and kind, ordered by them; `under` tells whether the blocker is the root or below it,
+`status`). A blocked epic therefore holds every issue below it. Parents follow `parent-child` links upward. The answer
+has one `Wait` per issue, blocker and kind, ordered by them; `under` tells whether the blocker is the root or below it,
 so the core tells a blocker outside the subtree from one inside it. A `root` the tracker does not have is `NotFound`.
 
-`lineage` gives the bead `id` with its comments, oldest first, and its parents with theirs, from the root down to its
-own parent: what a prompt shows of a bead beyond its fields (2.3). It is a read, made as `loop-manager`. A parent the
+`lineage` gives the issue `id` with its comments, oldest first, and its parents with theirs, from the root down to its
+own parent: what a prompt shows of an issue beyond its fields (2.3). It is a read, made as `loop-manager`. A parent the
 tracker no longer has ends the line; an `id` it does not have is `NotFound`. The core asks for it by an effect on the
-queue `tracker:<project>` when a run enters an `ai` step whose prompt template names `bead.comments` or
-`bead.parents`, and the run waits for the answer in `preparing`, as for its claim: the answer replaces the run's
-snapshot of the bead and the prompt renders; an `Unavailable` tracker is tried again
+queue `tracker:<project>` when a run enters an `ai` step whose prompt template names `issue.comments` or
+`issue.parents`, and the run waits for the answer in `preparing`, as for its claim: the answer replaces the run's
+snapshot of the issue and the prompt renders; an `Unavailable` tracker is tried again
 (`tracker.sync_failed{op: "lineage"}`) until `start_timeout` fails the run (`tracker_unavailable`), any other error
-fails it at once (`failed{infrastructure, bead_unreadable: <error>}`). An answer to another entry of a step, or to a
-run that prepares no more, is dropped.
+fails it at once (`failed{infrastructure, issue_unreadable: <error>}`). An answer to another entry of a step, or to a
+run that prepares no more, is dropped. The API reads it too, outside the core and its queue, for
+`GET /v1/projects/{project}/issues/{issue}` (`loop-manager issue show`, [frontends](../api/frontends.md#cli)): the
+issue and its comments; the parents are read too but left out of the reply, so an error reading one fails the read.
 
-`attempt_ended` appends the end of an attempt to the audit trail of the bead `id` as the attempt's actor
-`loop-manager:<run id>:<attempt n>`, apart from the bead: no write `changes` reads, so no `bead.*` event follows. When an
-attempt of a run with a bead ends, the core adds an effect for it in the same transaction, on the queue
+`attempt_ended` appends the end of an attempt to the audit trail of the issue `id` as the attempt's actor
+`loop-manager:<run id>:<attempt n>`, apart from the issue: no write `changes` reads, so no `issue.*` event follows. When an
+attempt of a run with an issue ends, the core adds an effect for it in the same transaction, on the queue
 `tracker:<project>:audit`, so a record the tracker refuses for a while holds up no claim, read or release: one entry
 per attempt, the object `{run, attempt, step, round, agent, harness, model, session, outcome, summary, failure,
 input_tokens, output_tokens}` from the state as the attempt ends (`outcome` is the declared `pass` or `fail`, also of a
 stop by the `context-budget` addon, and `summary` its text; `failure` is the attempt's failure; each is `null` when
 the attempt has none). A repeated effect (a restart between the call and its report) may append the entry twice. An
 `Unavailable` tracker is tried again and an `Invalid` answer dropped, both reported as
-`tracker.sync_failed{op: "attempt_ended"}`. br keeps it in `.beads/interactions.jsonl`
+`tracker.sync_failed{op: "attempt_ended"}`. The tracker keeps it in its audit trail
 ([tracker-br](tracker-br.md#one-database-per-project)).
 
-`comment` adds a comment to the bead `id` as the attempt's actor `loop-manager:<run id>:<attempt n>`: the comment
-of a session through `loop-manager comment` (6.3), so an addon or an agent comments on its bead without knowing the
-tracker. The core adds an effect for it on the queue `tracker:<project>`, so it reaches the bead before the read of
-the bead that a later step's prompt shows (`lineage`): a comment accepted before `finish` is in that prompt, even
+`comment` adds a comment to the issue `id` as the attempt's actor `loop-manager:<run id>:<attempt n>`: the comment
+of a session through `loop-manager comment` (6.3), so an addon or an agent comments on its issue without knowing the
+tracker. The core adds an effect for it on the queue `tracker:<project>`, so it reaches the issue before the read of
+the issue that a later step's prompt shows (`lineage`): a comment accepted before `finish` is in that prompt, even
 after a tracker outage. The same text from the same attempt, while the first is still queued, is one comment. A
 repeated effect may add the comment twice. An `Unavailable` tracker is tried again and an `Invalid` answer dropped,
-both reported as `tracker.sync_failed{op: "comment"}`; a bead the tracker no longer has drops it. br adds it with
-`br comments add <id> --file /dev/stdin` ([tracker-br](tracker-br.md#one-database-per-project)).
+both reported as `tracker.sync_failed{op: "comment"}`; an issue the tracker no longer has drops it. The adapter
+passes the text on stdin, so no text reads as an option ([tracker-br](tracker-br.md#one-database-per-project)).
+
+`file`, `subtree` and `close_by` serve the commands `loop-manager issue create|list|close`
+([frontends](../api/frontends.md#cli)): the API calls them outside the core and its queue, as it reads `lineage`, so
+an agent or a user files, lists and closes issues without knowing the tracker. `file` and `close_by` write as the
+attempt's actor `loop-manager:<run id>:<attempt n>` when the command comes from a session whose token is that of the
+current attempt of a live run, and as `loop-manager` otherwise; the core reads the write back through `changes` like
+any other.
+`file` files `NewIssue {title, description, labels, parent, prefix}`: under `parent` when it has one (a `parent` the
+tracker does not have is `NotFound`), with the id prefix `prefix`, the rig's (decision 96), or the tracker's own for an
+issue of the root. With a `key` it files once per key, as `create` does: the API gives it the request's idempotency key,
+so a request cut before its reply is kept files one issue. `subtree` gives every issue below `root` at any depth by
+its `parent-child` links, the root left out, closed ones included, `tombstone` left out, oldest first; a `root` the
+tracker does not have is `NotFound`. `close_by` closes the issue `id` as `actor` whoever holds it, unlike `close`: a
+human's close of the issue of a live run, which the run sees as `issue_closed` (6.2) unless the write is its own. A
+closed issue stays closed and answers `Ok`; a parent with open children is `Invalid` and stays open.
 
 `changes` is pull-only; the adapter also owns a watcher that sends a "changed" message to the core, and the core then
 calls `changes` from its stored cursor (and on start and after recovery without waiting for a signal). One effect on the
 queue `tracker:<project>` reads `changes(cursor)`, then `ready()`, then `under` and `waiting` for the root of each run
 in a `drain` step; the core turns the writes past the cursor into events, moves the cursor (table `tracker_cursors`,
 never back) and diffs the ready set. The first read of a project's tracker takes its whole history as the starting
-cursor and raises no `bead.created|updated|closed` for it; every bead ready at that read is new to the set and raises
-`bead.ready`. A write whose actor is `loop-manager:<run id>[:<attempt n>]` carries that run and its correlation;
-`bead.ready` carries those of the last such write in the same read (the write that freed the bead is usually that one);
-the rig of a bead event is the one whose prefix is the bead's id up to its last `-`, absent for a bead of the root. The
-core keeps the labels of every bead as last read (table `bead_labels`): from each write it reads, the history of the
-first read included, and from a ready bead it has none of, whose write the read did not list yet. Each label that a
-write past the cursor shows and the bead's last read labels lack raises `bead.labeled` after the write's own event, with
-the write's actor, run and correlation. A bead the core never read gains nothing: a bead filed with a label, or labelled
-before the core first read it, is told by its `bead.created` and `bead.ready`. The core compares labels as read, not
-writes: a label removed and added again with no read seeing it removed is no gain, one added again after such a read is
-gained again. A read queued before the last one was made repeats writes already read: the cursor drops them, so a
-repeated observation raises nothing. The daemon gives a project a tracker when `<project>/.beads` exists, and every
-session and exec step of the project gets `BEADS_DIR` (layer: project) and `BD_ACTOR=loop-manager:<run id>:<attempt n>`;
-the core sets the actor of an exec step and hands that of a session to the adapter in the session plan.
+cursor and raises no `issue.created|updated|closed` for it; every issue ready at that read is new to the set and raises
+`issue.ready`. A write whose actor is `loop-manager:<run id>[:<attempt n>]` carries that run and its correlation;
+`issue.ready` carries those of the last such write in the same read (the write that freed the issue is usually that
+one); the rig of an issue event is the one whose prefix is the issue's id up to its last `-`, absent for an issue of the
+root. The core keeps the labels of every issue as last read (table `issue_labels`): from each write it reads, the
+history of the first read included, and from a ready issue it has none of, whose write the read did not list yet. Each
+label that a write past the cursor shows and the issue's last read labels lack raises `issue.labeled` after the write's
+own event, with the write's actor, run and correlation. An issue the core never read gains nothing: an issue filed with
+a label, or labelled before the core first read it, is told by its `issue.created` and `issue.ready`. The core compares
+labels as read, not writes: a label removed and added again with no read seeing it removed is no gain, one added again
+after such a read is gained again. A read queued before the last one was made repeats writes already read: the cursor
+drops them, so a repeated observation raises nothing. The daemon gives a project a tracker when an adapter finds one in
+its directory, and every session and exec step of the project gets the tracker's variables (layer: project) and its
+actor `loop-manager:<run id>:<attempt n>`
+([tracker-br](tracker-br.md#one-database-per-project)); the core sets the actor of an exec step and hands that of a
+session to the adapter in the session plan.
 
 ### 5.2 Types and errors
 
-- `Bead`: `{id, title, description, status, priority, labels, assignee, epic, created_at, updated_at, closed_at}`.
-  `status` is br's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's tracker
-  policy adds (such as `rework`); the core decides nothing by it. `epic` is computed by the adapter (br has no such field,
-  [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of a bead is the prefix of its id (no label).
-- `Comment`: `{author, created_at, text}`. `Lineage`: the fields of `Bead`, `comments: [Comment]` and `parents`, each
-  the fields of `Bead` and its `comments`. Comments are no part of `Bead`: a bead event carries none.
-- `Wait`: `{bead, blocker, kind: "blocks"|"conditional-blocks"|"waits-for"|"status", status, under}`: an open bead
+- `Issue`: `{id, title, description, status, priority, labels, assignee, epic, created_at, updated_at, closed_at}`.
+  `status` is the tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's tracker
+  policy adds (such as `rework`); the core decides nothing by it. `epic` is computed by the adapter when the tracker has no such field
+  ([tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). The rig of an issue is the prefix of its id (no label).
+- `NewIssue`: `{title, description, labels, parent, prefix}`: an issue `file` files (5.1).
+- `Comment`: `{author, created_at, text}`. `Lineage`: the fields of `Issue`, `comments: [Comment]` and `parents`, each
+  the fields of `Issue` and its `comments`. Comments are no part of `Issue`: an issue event carries none.
+- `Wait`: `{issue, blocker, kind: "blocks"|"conditional-blocks"|"waits-for"|"status", status, under}`: an open issue
   below the root of `waiting` and one thing that holds it (5.1); `status` is the blocker's, `under` whether the
   blocker is the root or below it.
-- `Change`: `{seq, kind: "created"|"updated"|"closed", actor, changed: [field], bead: Bead}`; `seq` orders the writes
-  and is the cursor of `changes(after)`, `bead` is the bead when the change is read; the core maps it to `bead.created`,
-  `bead.updated`, `bead.closed`, derives `bead.labeled` by comparing its `labels` with those it kept (5.1), and derives
-  `bead.ready` by diffing `ready()` with the last ready set it keeps in the state (a bead is "ready" the first time it
+- `Change`: `{seq, kind: "created"|"updated"|"closed", actor, changed: [field], issue: Issue}`; `seq` orders the writes
+  and is the cursor of `changes(after)`, `issue` is the issue when the change is read; the core maps it to `issue.created`,
+  `issue.updated`, `issue.closed`, derives `issue.labeled` by comparing its `labels` with those it kept (5.1), and derives
+  `issue.ready` by diffing `ready()` with the last ready set it keeps in the state (an issue is "ready" the first time it
   enters the set, `config.md` "Trigger").
-- `TrackerError`: `NotFound`; `Claimed { holder }` (claim of a bead someone else holds — told by the state of the
-  bead after the call, not by the exit code text, [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)); `OwnerMismatch { holder }` (conditional release or close
+- `TrackerError`: `NotFound`; `Claimed { holder }` (claim of an issue someone else holds — told by the state of the
+  issue after the call, not by the exit code text, [tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)); `OwnerMismatch { holder }` (conditional release or close
   found another owner, nothing changed); `Unavailable { text }` (transient: retried by the effect queue with
   backoff, `tracker.sync_failed` on every failure); `Invalid { text }` (permanent).
 - `release` and `close` are conditional on `assignee == owner`. A release clears the assignee and sets `open`, but a
-  closed bead keeps its status: a release never reopens a bead. br 0.7.6 has neither a conditional close nor a release,
-  so the adapter reads, compares and writes. A `close` of a parent with open children leaves it open: br refuses it, and
-  the adapter releases the bead instead, so it does not stay `in_progress` behind a terminal run. The window between
-  read and write is open only to humans (the daemon is the only claimer, invariant 3). An owner found changed before the
-  write is `OwnerMismatch`, reported as `resync.diverged`; a human write that lands inside the window shows up only as a
-  `bead.updated` of the next `changes` batch, until the resync of the tracker compares owners.
-- The state of the orchestrator is the truth of ownership; the assignee in br mirrors it (6.2).
+  closed issue keeps its status: a release never reopens an issue. For a tracker with neither a conditional close nor
+  a release, the adapter reads, compares and writes
+  ([tracker-br](tracker-br.md#limits-of-br-the-adapter-is-shaped-by)). A `close` of a parent with open children leaves
+  it open: when the tracker refuses it, the adapter releases the issue instead, so it does not stay `in_progress` behind a
+  terminal run. The window between read and write is open only to humans (the daemon is the only claimer, invariant 3).
+  An owner found changed before the write is `OwnerMismatch`, reported as `resync.diverged`; a human write that lands
+  inside the window shows up only as a `issue.updated` of the next `changes` batch, until the resync of the tracker
+  compares owners.
+- The state of the orchestrator is the truth of ownership; the tracker's assignee mirrors it (6.2).
 
 ## 6. Run
 
@@ -772,9 +801,9 @@ the core sets the actor of an exec step and hands that of a session to the adapt
 | State | Meaning | Deadline (default) | On deadline |
 |---|---|---|---|
 | `queued` | not started: waits for a concurrency slot, a place in its rig (`max_writers`) or an open gate; the reason is visible (`run.queued`) | `queue_timeout` 7 d | `failed{infrastructure, queue_timeout}` |
-| `preparing` | the bead claim confirmed, the comments and parents of the bead read when the step's prompt shows them, `run.preparing` hooks running, workdir and environment being fixed, snapshot of the effective config written | `start_timeout` for the claim and for that read, then the hook deadline (see 3.3) | the hooks count as failed → deny → `failed{check, hook_deadline}` |
+| `preparing` | the issue claim confirmed, the comments and parents of the issue read when the step's prompt shows them, `run.preparing` hooks running, workdir and environment being fixed, snapshot of the effective config written | `start_timeout` for the claim and for that read, then the hook deadline (see 3.3) | the hooks count as failed → deny → `failed{check, hook_deadline}` |
 | `starting` | an attempt: instance acquired, session started or resumed, first prompt sent, waiting for `prompt.acked` | `start_timeout` 120 s | attempt failure `stall` |
-| `running` | the agent works (or the `exec` command runs, or the `drain` step gives out beads, or the `await` step waits for its outcome) | step `timeout` of the formula (default: `ai` 4 h, `exec` 45 m, `drain` and `formula` 24 h) per attempt → `runaway_turn` (`await`: 168 h → `failed{check, await_timeout}`, or `pass` with `fail_on_timeout = false`); silence budgets (an announced `retrying` pause adds to the limit): first event after ack 15 min, model thinking 15 min, tool running 40 min, background work after the turn 120 min → `stall` | attempt failure |
+| `running` | the agent works (or the `exec` command runs, or the `drain` step gives out issues, or the `await` step waits for its outcome) | step `timeout` of the formula (default: `ai` 4 h, `exec` 45 m, `drain` and `formula` 24 h) per attempt → `runaway_turn` (`await`: 168 h → `failed{check, await_timeout}`, or `pass` with `fail_on_timeout = false`); silence budgets (an announced `retrying` pause adds to the limit): first event after ack 15 min, model thinking 15 min, tool running 40 min, background work after the turn 120 min → `stall` | attempt failure |
 | `finishing` | outcome declared and the session idle without background; `run.finishing` hooks running, then the step check script of `step_check_script_path` if the hooks accepted a `pass` (no decision awaited) | hook deadline; for the script the step `timeout` plus a margin, a lost script counting as not passed | the hooks count as failed → veto → `failed{check, hook_deadline}` (a declared `fail` stays `failed{agent}`); script exit 0 → the next step or `passed`; 75 → `failed{check}` with no repeat and no `back_to` round; any other result is an execution that did not pass: under `max_attempts` the run repeats the step (`run.step_finished` with outcome `fail`, then `preparing` with `step_attempt` + 1), else `failed{check}` (`failed{agent}` if the step said `fail`); a script that cannot start → `failed{infrastructure}`, one whose `env` names a variable the daemon does not have (it is not started) → `failed{infrastructure}` with reason `config_error: check script: …` naming the key and the variable, and no `failure_kind` on the attempt, which did not fail |
 | `interrupted` | the current attempt ended with a failure (or by a daemon restart); `run.attempt_failed` is deciding | hook deadline, then the decision's `after` | no decision → `failed{infrastructure}` |
 | `parked` | a started run waits for a gate or a slot of its agent; no harness process | `park_timeout` 7 d from parking, or the gate's `until` if later (a gate with `until` opens by its timer first) | `failed{infrastructure, park_timeout}` |
@@ -792,8 +821,8 @@ so that the state machine has one place where `run.attempt_failed` is decided.
   waits for a gate or a slot of its agent with no harness process.
 - A run belongs to a project and a place: a rig, or the project root under its name (config.md "Project"), named when it
   is created (API, CLI, MCP) or by the trigger that fires there. A start that names no rig takes it from the id prefix
-  of the bead an input names by id, and runs in the root when the id matches no rig or no bead is named. An unknown rig,
-  or a bead that still carries a `rig:` label, is refused before the run exists. Its workdir is the place's directory,
+  of the issue an input names by id, and runs in the root when the id matches no rig or no issue is named. An unknown rig,
+  or an issue that still carries a `rig:` label, is refused before the run exists. Its workdir is the place's directory,
   or a worktree of it with `worktree = true` in the formula (config.md). A child of a `drain` or `formula` step works
   from the base of its rig instead: the workdir of its parent on the parent's rig, the lazy worktree of an ancestor with
   the key on another (config.md "Formula"); a worktree of its own comes from the HEAD of that base. In a directory
@@ -840,7 +869,7 @@ reason `remarks_ceiling` and the class the event would give: `hollow_done` for `
 turns (from idle without background to the next prompt) the step `timeout` pauses and resumes with the time it had
 left. Trigger
 depth: a trigger does not start a run deeper than 10 (`trigger.skipped{depth}`); the limit is fixed, with no
-setting. A run started on `bead.ready` keeps the depth of the run that caused it, with no level added: a bead made ready
+setting. A run started on `issue.ready` keeps the depth of the run that caused it, with no level added: an issue made ready
 is the next work of the tracker, not a run the parent started, so a long epic stays legal. A run started from an agent
 session (`loop-manager run start` with `LOOP_MANAGER_RUN` and `LOOP_MANAGER_ATTEMPT_TOKEN` in its environment, `parent`
 of `POST /v1/runs`) is a child of the session's run: the token must be that of the parent's live current attempt, as for
@@ -853,12 +882,12 @@ cancel); a pass or a failure of the parent leaves them alone.
 
 | From | On | To | Effects after commit |
 |---|---|---|---|
-| — | create (API, CLI, MCP, trigger) with an idempotency key | `queued` | — (with a task input that names a bead the core knows, the run is recorded as the bead's owner in this transaction, invariant 3: a bead another live run holds refuses; `{ next_ready = true, epic }` takes the first bead of the last ready set, in the tracker's order, that is in the epic, of the run's rig or of no rig, without an owner and without a closed gate, passing over (reply `passed_over`) a bead whose `harness:` or `agent:` label the run cannot take; none → the reply `{"nothing_ready": true}`, for a trigger `trigger.skipped{nothing_ready}`; the input then holds the bead id; any other text gets its bead on `preparing`, tracker-br.md) |
+| — | create (API, CLI, MCP, trigger) with an idempotency key | `queued` | — (with a task input that names an issue the core knows, the run is recorded as the issue's owner in this transaction, invariant 3: an issue another live run holds refuses; `{ next_ready = true, epic }` takes the first issue of the last ready set, in the tracker's order, that is in the epic, of the run's rig or of no rig, without an owner and without a closed gate, passing over (reply `passed_over`) an issue whose `harness:` or `agent:` label the run cannot take; none → the reply `{"nothing_ready": true}`, for a trigger `trigger.skipped{nothing_ready}`; the input then holds the issue id; any other text gets its issue on `preparing`, [tracker-br](tracker-br.md#issues-and-runs)) |
 | — | create with `continue_from: <run>` (a terminal run with a session; a session is never reused implicitly) | `queued` | in the workdir of that run; the first attempt resumes that run's last session with the formula prompt; a later `resume` uses the run's own session, or that one while it has none and started no new one; a harness other than the agent's → `failed{infrastructure}`. Only the first step continues that session: a formula whose first step is not `ai`, or has an `if`, cannot be continued, and the later steps start sessions of their own |
-| `queued` | slot free, a place in the rig free (`max_writers`), no gate of the run closed | `preparing` | with a task text that names no bead the core knows: the tracker creates the root bead, or returns the bead the text names (`create`, key kept in the effect), the run owns it and its input takes the id; with a bead: the tracker claim as owner `loop-manager:<run>` (queue `tracker:<project>`), and the prompt renders once the claim returned the bead; `run.preparing` hooks |
+| `queued` | slot free, a place in the rig free (`max_writers`), no gate of the run closed | `preparing` | with a task text that names no issue the core knows: the tracker creates the root issue, or returns the issue the text names (`create`, key kept in the effect), the run owns it and its input takes the id; with an issue: the tracker claim as owner `loop-manager:<run>` (queue `tracker:<project>`), and the prompt renders once the claim returned the issue; `run.preparing` hooks |
 | `preparing` | decision `proceed` (or no hooks) | `starting` | attempt 1: instance acquire, `start_session`, `send_prompt` |
 | `preparing` | the `if` of the step does not match, on entry | `preparing` of the next step, or the end of the run | `run.step_skipped`; no hooks, no attempt |
-| `preparing` | `deny`, template error, claim error `Claimed` / `NotFound` / `Invalid`, `create` error other than `Unavailable`, `lineage` error other than `Unavailable`, no claim, `create` or `lineage` answer within `start_timeout` | `failed{check}`, `failed{infrastructure}`, `failed{infrastructure, bead_claimed / bead_not_found / bead_invalid}`, `failed{infrastructure, bead_not_created: <error>}`, `failed{infrastructure, bead_unreadable: <error>}`, `failed{infrastructure, tracker_unavailable}` | — |
+| `preparing` | `deny`, template error, claim error `Claimed` / `NotFound` / `Invalid`, `create` error other than `Unavailable`, `lineage` error other than `Unavailable`, no claim, `create` or `lineage` answer within `start_timeout` | `failed{check}`, `failed{infrastructure}`, `failed{infrastructure, issue_claimed / issue_not_found / issue_invalid}`, `failed{infrastructure, issue_not_created: <error>}`, `failed{infrastructure, issue_unreadable: <error>}`, `failed{infrastructure, tracker_unavailable}` | — |
 | `starting` | `prompt.acked` of the first prompt | `running` | — |
 | `running` | turn ended, idle without background, outcome declared | `finishing` | `run.finishing` hooks |
 | `running` | turn ended, idle with background, outcome declared | `running` | the adapter stops the commands the session left (`stop_background`); `finishing` follows on idle without background |
@@ -866,40 +895,40 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `preparing` (exec) | decision `proceed` (or no hooks) | `running` (no session to start: the command is spawned at once) | the command runs in the workdir with `PATH`, `HOME`, `LANG` of the daemon (its whole environment with `inherit_env`), the `env` of `[exec]` and of the step with its references resolved (config.md, "Formula"), the `env` of `run.preparing`, `LOOP_MANAGER_SOCKET` (the API socket), `LOOP_MANAGER_INPUT_<NAME>` per input and, per earlier step, `LOOP_MANAGER_STEP_<NAME>_RESULT` (`pass`\|`fail`), `LOOP_MANAGER_STEP_<NAME>_SUMMARY` and `LOOP_MANAGER_STEP_<NAME>_DATA` (the `data` as JSON, when there is one); `<NAME>` is formed as for inputs (config.md, "Formula") |
 | `running` (exec) | exit 0 / other code or a signal | `finishing` with outcome `pass` / `fail`, `summary` `exit <code>` or `signal <n>`, `data` `{exit_code, stdout, stderr}` (last 4 KiB each) | `run.finishing` hooks |
 | `preparing` (drain) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = drain`) | a read of the tracker; the config snapshot is `{drain: <formula>, pool, on_item_failure}` |
-| `running` (drain) | a read of the tracker (`Ready`) | `running` | while fewer than `pool` children are alive (queued or running) and no bead of this entry failed under `soft_stop`/`hard_stop`, each ready bead of its own (config.md, "Formula": of the run's rig, or of any rig for a run of the root) under the run's bead, at any depth, not given in this entry of the step (a restart starts a new attempt, not a new entry): the create of the first row with the bead as input, no rig, the run's correlation, `depth + 1`, `parent_run` the run (a refusal leaves the bead without a run); a run in a drain step holds no concurrency slot |
+| `running` (drain) | a read of the tracker (`Ready`) | `running` | while fewer than `pool` children are alive (queued or running) and no issue of this entry failed under `soft_stop`/`hard_stop`, each ready issue of its own (config.md, "Formula": of the run's rig, or of any rig for a run of the root) under the run's issue, at any depth, not given in this entry of the step (a restart starts a new attempt, not a new entry): the create of the first row with the issue as input, no rig, the run's correlation, `depth + 1`, `parent_run` the run (a refusal leaves the issue without a run); a run in a drain step holds no concurrency slot |
 | `preparing` (formula) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = formula`) | the child run of the step's formula is created in the run's workdir (6.1), or found if a restart cut the attempt that made it |
-| `running` (formula) | the child cannot start: refused (depth, a bead held by another run) or `next_ready` finds no ready bead (`nothing_ready`) | `failed{infrastructure}`, no attempt left to `max_attempts` | — |
+| `running` (formula) | the child cannot start: refused (depth, an issue held by another run) or `next_ready` finds no ready issue (`nothing_ready`) | `failed{infrastructure}`, no attempt left to `max_attempts` | — |
 | `preparing` (await) | decision `proceed` (or no hooks) | `running` (an attempt with no process, `harness = await`) | `run.awaiting {run, deadline}`; the config snapshot is `{fail_on_timeout}`; a run waiting in the step holds no concurrency slot |
 | `running` (await) | an outcome for the step (`POST /v1/runs/{id}/resolve`, `loop-manager run resolve`) | `finishing` with that outcome | `run.finishing` hooks; an outcome for another step or a run not waiting is refused (`rejected`) and changes nothing |
 | `running` (await) | the deadline, no outcome | `failed{check, await_timeout}`, no return to `back_to`; with `fail_on_timeout = false` `finishing` with `pass`, summary `timeout` | — |
 | `running` (formula) | the child ends | `finishing` with the child's outcome (or its reason, without one) | `run.finishing` hooks |
 | `running` (formula) | the run fails in the step (`runaway_turn` with no retry) | `failed` | the live child is cancelled, reason `parent_failed` |
-| `running` (drain) | a read after a bead of this entry failed under `hard_stop` | `running` | the cancel of each alive child, reason `drain_hard_stop` (its children go with it) |
-| `running` (drain) | a read that gave nothing, with no child alive, no later read queued and no bead of its own not given in this entry waiting on a foreign blocker or a `blocked` status (`waiting`, 5.1) | `finishing` with outcome `pass`, `summary` `<n> closed, <n> failed, <n> refused`, `data` `{closed, failed, refused: {<bead>: <reason>}}` of this entry's beads; after a stop `fail`, `summary` `stopped on <beads>: <n> closed, <n> failed, <n> not started`, `data` adds `stopped_on` and `not_started` | `run.finishing` hooks |
+| `running` (drain) | a read after an issue of this entry failed under `hard_stop` | `running` | the cancel of each alive child, reason `drain_hard_stop` (its children go with it) |
+| `running` (drain) | a read that gave nothing, with no child alive, no later read queued and no issue of its own not given in this entry waiting on a foreign blocker or a `blocked` status (`waiting`, 5.1) | `finishing` with outcome `pass`, `summary` `<n> closed, <n> failed, <n> refused`, `data` `{closed, failed, refused: {<issue>: <reason>}}` of this entry's issues; after a stop `fail`, `summary` `stopped on <issues>: <n> closed, <n> failed, <n> not started`, `data` adds `stopped_on` and `not_started` | `run.finishing` hooks |
 | `running` (exec) | exit 75 / timeout / spawn error / an `env` reference to a variable the daemon does not have (the command is not spawned) | `interrupted` with failure `unknown` (`text` `exit 75 (EX_TEMPFAIL)`, scope `run`) / `runaway_turn` / `workspace_failure` / `config_error` (`text` names the key and the variable) | `run.attempt_failed` hooks; every attempt runs the command again |
 | `starting`, `running` | `failure`, `exited`, deadline, exec exit 75 | `interrupted` | stop the session (cancel, then stop the instance if it is the session's own, then sweep descendants); `run.attempt_failed` hooks |
-| `finishing` | accept of a `pass` of a step that is not the last | `preparing` of the next step | `run.step_finished`; the next step's prompt renders (after the read of the bead's comments and parents when it shows them; the workdir and the bead claim stay) and its `run.preparing` hooks run |
-| `finishing` | accept / veto / remark | `passed` or `failed{agent}` / `failed{check}` / `running` | bead close or conditional release; on remark the message goes as the next prompt of the same attempt, the declared outcome is cleared, the token stays valid. A remark on a step other than `ai` is a failed check that sends the run back for a round (3.3) |
+| `finishing` | accept of a `pass` of a step that is not the last | `preparing` of the next step | `run.step_finished`; the next step's prompt renders (after the read of the issue's comments and parents when it shows them; the workdir and the issue claim stay) and its `run.preparing` hooks run |
+| `finishing` | accept / veto / remark | `passed` or `failed{agent}` / `failed{check}` / `running` | issue close or conditional release; on remark the message goes as the next prompt of the same attempt, the declared outcome is cleared, the token stays valid. A remark on a step other than `ai` is a failed check that sends the run back for a round (3.3) |
 | `interrupted` | `resume` / `new_session` | `starting` after `after` | new attempt: `generation + 1`, new token; `resume` first checks the transcript (invariant 17), `Missing` → attempt failure `transcript_divergence` |
 | `interrupted` | `park` | `parked` | gate closed in the same transaction |
 | `interrupted` | `fail`, no decision, attempts ceiling | `failed{infrastructure}` | gate closed if the decision carries one |
 | `parked` | every key of the run open, a concurrency slot free (in creation order with the queue) | `starting` (`then` of the park decision); `run.resumed` | new attempt |
 | `preparing`, `interrupted` | an attempt would start while a key of the run is closed (by anyone, invariant 18), the daemon is stopping, or the run's agent has as many other started runs as its `max_runs` (a step with no agent, drain or exec, has no such limit) | `parked` (`then`: `new_session` from `preparing`, the decided kind from `interrupted`) | — |
-| any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the bead |
-| any non-terminal | the bead the run owns is closed when read, and the last write of the tracker past the cursor (5.1) that closed it or set its status was made by an actor other than the run and its attempts: a human, an outside tool, another run | `cancelled`, reason `bead_closed`; at any step, an `await` step included | as for an operator cancel: stop the session, the cancel of its children, conditional release of the bead, which leaves it closed (5.2) |
+| any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the issue |
+| any non-terminal | the issue the run owns is closed when read, and the last write of the tracker past the cursor (5.1) that closed it or set its status was made by an actor other than the run and its attempts: a human, an outside tool, another run | `cancelled`, reason `issue_closed`; at any step, an `await` step included | as for an operator cancel: stop the session, the cancel of its children, conditional release of the issue, which leaves it closed (5.2) |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its
-bead. A bead the run
+issue. An issue the run
 claimed is closed (`passed`) or released conditionally (`failed`, `cancelled`) by an effect on the queue
 `tracker:<project>`, followed by a new read of the ready set; a refusal (`OwnerMismatch`, `NotFound`) is
-`resync.diverged{subject: "bead"}`, an unavailable tracker `tracker.sync_failed` and a retry, and the outcome of the
-run never changes. The failed runs of a bead are counted: a run that ends `failed` while it held the claim is one,
+`resync.diverged{subject: "issue"}`, an unavailable tracker `tracker.sync_failed` and a retry, and the outcome of the
+run never changes. The failed runs of an issue are counted: a run that ends `failed` while it held the claim is one,
 whatever its class, because a run fails only for good: the rounds of its formula or the `max_attempts` of a step ran
 out, a check refused it outright (exit 75, a veto, a deny), the policy or a ceiling of the core ended it (6.1), or it
 could not go on. What a live run goes through is not counted: a failed attempt the policy retries, a repeat of a
 step, a check that sends the run back for another round. `passed` resets the count; `cancelled`, and a run whose
-claim was refused or never answered, leave it. At `bead_failed_runs` (orchestrator config, default 3) the core closes
-the gate `bead:<project>/<id>`, and the operator opening that gate resets the count. Operator holds (gates
+claim was refused or never answered, leave it. At `issue_failed_runs` (orchestrator config, default 3) the core closes
+the gate `issue:<project>/<id>`, and the operator opening that gate resets the count. Operator holds (gates
 closed by the operator, 7, and cancel) are read by every automatic decision: a decision that would start an attempt
 of a run whose gate the operator closed parks it instead (invariant 18).
 
@@ -910,7 +939,7 @@ of a run whose gate the operator closed parks it instead (invariant 18).
   effect until it runs. The token is valid while its attempt is the run's current one and the run is not
   terminal.
 - The session environment carries `LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, `LOOP_MANAGER_SOCKET` and, when the
-  run has a bead, `LOOP_MANAGER_BEAD`, as an exec step's does (see 4.6 for how each harness gets it).
+  run has an issue, `LOOP_MANAGER_ISSUE`, as an exec step's does (see 4.6 for how each harness gets it).
 - CLI: `loop-manager finish pass|fail --summary <text> [--data <json>|@<file>]` → `POST` of the outcome to the API with
   the token. Answers: accepted; `stale_attempt` (an older or ended attempt — nothing changes); `run_terminal`; `invalid`
   (unknown token or run, `summary` over 4 KiB, `data` over 64 KiB, a call while the run is `finishing`: the declared
@@ -919,8 +948,8 @@ of a run whose gate the operator closed parks it instead (invariant 18).
   s (`LOOP_MANAGER_FINISH_RETRY` seconds overrides it), then exits with code 75; every try carries the same idempotency
   key, a hash of the request, so a retry after a lost reply gets the first answer.
 - CLI: `loop-manager comment --file <file>` → `POST /v1/runs/{id}/comment` of `{token, text}`: the text, up to 64
-  KiB, goes on the run's bead as a comment of the attempt (`comment`, 5.1). Answers: `accepted` (the comment is queued
-  for the tracker and reaches the bead shortly after, before the prompt of the run's next step reads the bead); `no_bead` (the run has none); `stale_attempt` (not the run's
+  KiB, goes on the run's issue as a comment of the attempt (`comment`, 5.1). Answers: `accepted` (the comment is queued
+  for the tracker and reaches the issue shortly after, before the prompt of the run's next step reads the issue); `no_issue` (the run has none); `stale_attempt` (not the run's
   current attempt); `run_terminal`; `invalid` (unknown token or run, text over 64 KiB). The command exits 1 on any
   answer but `accepted` and does not retry an unreachable daemon.
 - The finisher is the agent's word on the outcome: `pass` or `fail`, a short summary, optional data. A failure of
@@ -969,7 +998,7 @@ for it is not.
   waiting for its death, so the hook that runs again may start before the old process is gone: hooks must be idempotent
   (3.1). Runs with a live attempt — `starting`, `running` in a turn — → `interrupted` with `daemon_crash` (not a run
   waiting in an `await` step: its attempt and deadline stay, and a deadline passed while the daemon was down fires at
-  start) (a `drain` attempt too: its next attempt gives no bead its entry of the step gave out), the launches, prompts
+  start) (a `drain` attempt too: its next attempt gives no issue its entry of the step gave out), the launches, prompts
   and deciding hooks they still had queued dropped, and the command of an exec step killed by its
   `LOOP_MANAGER_INSTANCE` marker (random per attempt) before any later attempt runs it. A run that waits for a decision
   on a deciding event keeps its state and waits for the same decision (3.4): `preparing`, `interrupted` waiting for the
@@ -985,7 +1014,7 @@ for it is not.
   the kill of its instance is the stop, so the run settles its turn as idle without background would — `finishing`
   with the declared outcome — and the stop still queued is dropped. The same holds for a background subagent of
   claude, killed with its instance. The deadlines that wait for an effect's answer count again from the start:
-  `decide` (3.3), the claim of a bead and the read of its comments and parents in `preparing` (`start_timeout`); those of real time — gate `until`,
+  `decide` (3.3), the claim of an issue and the read of its comments and parents in `preparing` (`start_timeout`); those of real time — gate `until`,
   schedules (a missed one fires at most once), the `after` of a retry, `queue_timeout`, `park_timeout` — stay. Then
   resync. Deadlines are wall-clock times: the writer reads the wall clock at least every 30 s, so a deadline passed
   while the machine slept fires late by at most that.
@@ -1002,13 +1031,13 @@ for it is not.
 Issue gates are the core's only "do not start yet" mechanism: a record "key closed until time T, or until removed
 by hand". A run with a closed key waits in `queued` (or `parked`, once started) with the gate as the visible reason.
 Three parties close gates: the policy in answer to a failure (an account limit, an agent quarantined after a crash
-series), the operator (a pause) and the core itself (a bead after a series of failed runs, see 6.2). Gates are rows
+series), the operator (a pause) and the core itself (an issue after a series of failed runs, see 6.2). Gates are rows
 in the state: they survive a restart, are listed by the API (`/v1/gates`, `loop-manager gate`), and every closure and
 opening is an event. The account traffic light and the operator hold are built from this one mechanism, with no
 subsystem of their own. The adapter reports the account id (4.5, `Driver::account`).
 
 - Keys: `orchestrator`, `project:<project>`, `rig:<project>/<rig>`, `agent:<agent>` (the qualified agent name of
-  `config.md` "Names", or the name of a variant), `bead:<project>/<bead id>`, `account:<harness>/<account id>`,
+  `config.md` "Names", or the name of a variant), `issue:<project>/<issue id>`, `account:<harness>/<account id>`,
   `model:<harness>/<model>`. The keys of a run are all of these that it has; a run is admitted only if none is
   closed. A run has exactly one model key, its effective config's (config.md "Harness and model": the harness and
   the model name the adapter expanded), taken from the run's snapshot, or before the snapshot as computed when the

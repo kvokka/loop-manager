@@ -2,7 +2,7 @@ name = "index"
 description = "An agent on codex reads the documents to their end and writes an index of their sections"
 
 [inputs]
-task = { type = "task", required = true }   # the request: its text becomes the root bead
+task = { type = "task", required = true }   # the request: its text becomes the root issue
 
 [[step]]
 name = "write"

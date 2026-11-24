@@ -31,7 +31,7 @@ env.DCG_CUSTOM_PATHS = "${DEVLOOP_DCG_PACK}"
 native.claude.promptCacheTtl = "5m"
 native.claude.subagentPromptCacheTtl = "5m"
 
-# The repository itself. A bead an agent files on this rig has the id prefix `lm`; the tracker's own prefix is `dev`.
+# The repository itself. An issue an agent files on this rig has the id prefix `lm`; the tracker's own prefix is `dev`.
 [rigs.repo]
 path = ".."
 prefix = "lm"
@@ -39,22 +39,22 @@ prefix = "lm"
 # with `waiting_for = "writers"`.
 max_writers = 1
 
-# A ready bead with the label `auto` is an epic to work on: it gets a run of the formula. Without the label nothing
-# starts. `epic-ready` takes a bead that becomes ready with the label: filed with it, or freed by its blockers with
-# it; `epic-labeled` takes a bead that is ready already and gains it. A label added to a bead that is not ready waits
+# A ready issue with the label `auto` is an epic to work on: it gets a run of the formula. Without the label nothing
+# starts. `epic-ready` takes an issue that becomes ready with the label: filed with it, or freed by its blockers with
+# it; `epic-labeled` takes an issue that is ready already and gains it. A label added to an issue that is not ready waits
 # for `epic-ready`.
 [[trigger]]
 name = "epic-ready"
-on = "bead.ready"
-where = { "bead.labels" = "auto" }
+on = "issue.ready"
+where = { "issue.labels" = "auto" }
 run = "epic"
 rig = "repo"
-inputs = { epic = "{{ event.bead.id }}" }
+inputs = { epic = "{{ event.issue.id }}" }
 
 [[trigger]]
 name = "epic-labeled"
-on = "bead.labeled"
+on = "issue.labeled"
 where = { label = "auto", ready = true }
 run = "epic"
 rig = "repo"
-inputs = { epic = "{{ event.bead.id }}" }
+inputs = { epic = "{{ event.issue.id }}" }

@@ -17,14 +17,13 @@ loop-manager run show <run>
 
 Identify the current step, the preceding outcome and its summary, data or artifact references. Read the
 formula's instructions to learn what the external outcome means. An approval, a choice of input and a request
-for changes can all use an await step. If there is a bead, locate its tracker via the project's directory:
+for changes can all use an await step. If there is an issue, read it from the project's tracker:
 
 ```sh
-loop-manager project list --project <project>
-BEADS_DIR='<project dir>/.beads' br show <bead> --format toon
+loop-manager issue show <issue> --project <project>
 ```
 
-Use the br command for projects with that tracker. Read the task, relevant comments and later corrections.
+Read the task, relevant comments and later corrections.
 Follow referenced artifacts from the run's workdir when needed. Explain what is blocked, the available choices
 and their consequences. Keep each decision tied to its run and step.
 
@@ -49,5 +48,5 @@ you follow finishes, use [recap](../recap/SKILL.md). For an expired wait, use [r
 A waiting run survives daemon restarts. For requested notifications, `loop-manager events --json` emits
 `run.awaiting` with the run and deadline. Resume with `loop-manager events --from <seq> --json` and refresh
 the current run list after a gap. Projects may also record nonblocking concerns in task comments.
-A `bead.updated` event with a comments change signals when to reread the task. Use the project's convention
+An `issue.updated` event with a comments change signals when to reread the task. Use the project's convention
 to interpret it. Resolving a wait requires the user's decision.

@@ -5,8 +5,8 @@ use crate::common;
 
 use common::{
     POLICY, World,
-    beads::{FIX, slow_turn},
     drain::SWEEP,
+    issues::{FIX, slow_turn},
     last, world, world_with,
 };
 use loop_manager_core::{
@@ -236,7 +236,7 @@ async fn a_run_that_only_works_in_the_root_takes_no_place() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_drain_under_max_writers_one_gives_its_beads_one_at_a_time() {
+async fn a_drain_under_max_writers_one_gives_its_issues_one_at_a_time() {
     let mut files = SWEEP.to_vec();
     files[0].1 = "projects = [\"shop\"]\nbuiltin = { default-policy = { enabled = false } }\n[harness.scripted]\n";
     files[1] = RIGS[0];
@@ -245,11 +245,11 @@ async fn a_drain_under_max_writers_one_gives_its_beads_one_at_a_time() {
     for _ in 0..3 {
         w.tracker.add_in("w", &[], Some(&root));
     }
-    // The sweep runs on `web`: its beads are of that rig, and it lends the rig's place to their runs.
+    // The sweep runs on `web`: its issues are of that rig, and it lends the rig's place to their runs.
     for _ in 0..8 {
         w.driver.script(slow_turn());
     }
-    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
+    let reply = w.start_issue("sweep", Some("web"), json!(root)).await.unwrap();
     let run = reply["run"].as_str().unwrap().to_owned();
     let outsider = w.create().await;
     let kids = w.kids(&run);
@@ -341,13 +341,13 @@ async fn a_run_whose_formula_is_gone_keeps_its_place() {
     assert_eq!(w.waiting_for(&second).await, "writers");
 }
 
-/// A reload can take away the agent a bead's `agent:` label gave a live run.
+/// A reload can take away the agent an issue's `agent:` label gave a live run.
 #[tokio::test(start_paused = true)]
 async fn a_run_whose_agent_is_gone_keeps_its_place() {
     let w = world(&[RIGS, OPS, FIX].concat());
-    let bead = w.tracker.add(&["agent:ops"], None);
+    let issue = w.tracker.add(&["agent:ops"], None);
     w.changed().await;
-    let first = w.run_on(json!(bead)).await;
+    let first = w.run_on(json!(issue)).await;
     assert_eq!(w.states(&first).await, STARTED);
     w.reload_with(&[], &["shop/agents/ops", OPS[2].0]).await;
     let second = w.create().await;
@@ -362,12 +362,12 @@ async fn the_children_of_a_drain_with_the_key_take_no_place() {
     let formulas = [
         (
             "shop/formulas/work.toml",
-            "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+            "name = \"work\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
              [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
         ),
         (
             "shop/formulas/sweep.toml",
-            "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
+            "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
              [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\nworktree = true\n",
         ),
     ];
@@ -409,7 +409,7 @@ async fn the_children_of_a_drain_with_the_key_take_no_place() {
         w.driver
             .script(vec![Step::Emit(Normalized::TurnStarted), Step::Await(held.clone())]);
     }
-    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
+    let reply = w.start_issue("sweep", Some("web"), json!(root)).await.unwrap();
     let run = reply["run"].as_str().unwrap().to_owned();
     let started = std::time::Instant::now();
     loop {

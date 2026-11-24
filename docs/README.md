@@ -12,6 +12,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/install.md](guide/install.md) | installing, what loop-manager runs, the daemon as a service, upgrading |
 | [guide/first-project.md](guide/first-project.md) | a project, its root and rigs |
 | [guide/first-formula.md](guide/first-formula.md) | a formula with an agent, from the config to a passed run |
+| [guide/issue-trackers.md](guide/issue-trackers.md) | issues through loop-manager: what it does with them, the commands; the br tracker, how it is wired, inspecting and repairing it by hand |
 | [guide/recovery.md](guide/recovery.md) | a run that failed for good: what failed, continue the session, a new session with or without a note, abandon |
 | [T3 Code run card](../plugins/README.md#follow-a-run-in-t3-code) | browse executed rounds and open an agent’s working session |
 | [guide/addons.md](guide/addons.md) | using addons: declare, attach, parameters; an agent's subagents |
@@ -30,9 +31,9 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [design/event-model.md](design/event-model.md) | the single writer, the state, the journal, deadlines, resync |
 | [design/invariants.md](design/invariants.md) | the invariants of the core, recovery, known limits |
 | [design/contracts.md](design/contracts.md) | events, the filter and template language, hooks, the driver and tracker interfaces, run states, gates, the registry, the default policy |
-| [design/adapters.md](design/adapters.md) | harness adapters: what the core expects, adding a harness, the contract suite |
+| [design/adapters.md](design/adapters.md) | harness and tracker adapters: what the core expects, adding a harness or a tracker, the contract suite |
 | [harness-updates.md](harness-updates.md) | updating claude or codex, the contract scenarios |
-| [design/tracker-br.md](design/tracker-br.md) | the br tracker: beads and runs, rig prefixes, the limits of br |
+| [design/tracker-br.md](design/tracker-br.md) | the br tracker: issues and runs, rig prefixes, the limits of br |
 | [design/experiments.md](design/experiments.md) | what was measured on the real harnesses, and what was not |
 
 ## Working on loop-manager
