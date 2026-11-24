@@ -1,0 +1,11 @@
+# What the demo needs besides loop-manager and T3 Code; mise is a convenience, any install of these tools does.
+[tools]
+jq = "1.8.2"
+
+[tasks.check]
+description = "The pack, the project and the addon load"
+run = "loop-manager config check --config root/config.toml"
+
+[tasks.demo]
+description = "The demo from the request to its report; EXAMPLE=1 keeps the result as the *-example"
+run = "./run.sh"

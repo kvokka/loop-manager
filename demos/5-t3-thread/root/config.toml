@@ -1,0 +1,9 @@
+# The orchestrator config of this demo, next to the project's loop-manager.toml on purpose: run.sh starts a daemon of the demo's
+# own with `--config` on this file, so the demo neither reads nor changes the user's ~/.config/loop-manager/config.toml.
+# loop-manager.toml beside it is the project.
+projects = ["."]
+
+# The addon of this repository, declared by its directory: relative to this file. The project attaches it in
+# loop-manager.toml.
+[[addon]]
+path = "../../../addons/t3-notify"

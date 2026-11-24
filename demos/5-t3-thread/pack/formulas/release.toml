@@ -1,0 +1,20 @@
+name = "release"
+description = "Build the app, wait for a sign-off from outside, publish what was signed off"
+
+[[step]]
+name = "build"
+kind = "exec"
+command = ["sh", "-c", "sleep 5; echo 'built app-1.4.0.tar.gz: 12 files, 3 warnings'"]
+timeout = "1m"
+
+# The run waits here until someone gives the outcome: `loop-manager run resolve <run> sign_off pass|fail`.
+[[step]]
+name = "sign_off"
+kind = "await"
+timeout = "30m"
+
+[[step]]
+name = "publish"
+kind = "exec"
+command = ["sh", "-c", "echo \"published app-1.4.0.tar.gz, signed off with: $LOOP_MANAGER_STEP_SIGN_OFF_SUMMARY\""]
+timeout = "1m"

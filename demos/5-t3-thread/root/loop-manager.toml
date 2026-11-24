@@ -1,0 +1,12 @@
+name = "shop"
+packs = ["../pack"]                   # the formulas; they have no agents and not a word about T3 Code
+
+# Every run of the project tells the T3 Code thread that started it of its start, its waits for a decision and its
+# end. In `[settings]`, not on an agent: the steps of these formulas have none.
+[settings]
+addons = [{ name = "t3-notify" }]
+
+# One run at a time works in the rig: a second one waits in `queued` until the place is free.
+[rigs.app]
+path = "../app"
+max_writers = 1

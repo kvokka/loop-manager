@@ -104,6 +104,14 @@ pub(crate) const ALL: &[Scenario] = &[
         run: |env| Box::pin(demo(env, "4-context-budget", 1)),
     },
     Scenario {
+        criterion: "20",
+        title: "demo 5: a T3 Code thread starts a run that waits for a place in its rig, and the addon t3-notify tells \
+            the thread of the start, of the wait for a sign-off, which the thread answers, and of the end, unattended; \
+            needs T3 Code on the host and its t3-run-card plugin with auto-open on",
+        launch: Launch::Request,
+        run: |env| Box::pin(demo(env, "5-t3-thread", 1)),
+    },
+    Scenario {
         criterion: "23",
         title: "no todo!/unimplemented!, no unused public items or dependencies (the rest is review)",
         launch: Launch::Ci,

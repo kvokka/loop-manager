@@ -1,0 +1,8 @@
+name = "hold"
+description = "A stand-in for another run at work in the rig: it holds a place there until it is cancelled"
+
+[[step]]
+name = "work"
+kind = "exec"
+command = ["sleep", "3600"]
+timeout = "61m"

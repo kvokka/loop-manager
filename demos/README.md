@@ -10,12 +10,14 @@ and spend tokens; CI only checks that each demo's pack and project load.
 | [`2-multirepo-qa`](2-multirepo-qa) | demo 1 on openai models, then a format check and a qa agent in a browser send the work back to the planner, for at most three rounds |
 | [`3-review-gate`](3-review-gate) | a feature over three GitHub repositories waits on an `await` step for the review of its pull requests: a bridge turns GitHub into its outcome: a comment goes to a reviser of its own, the merge of the root's accepts it, a close cancels and cleans up |
 | [`4-context-budget`](4-context-budget) | an agent on claude reads more than the budget of the addon `context-budget` allows: at the soft limit the addon tells it to wrap up, and the agent leaves a summary of its work as a comment on its issue and finishes the run |
+| [`5-t3-thread`](5-t3-thread) | a T3 Code thread starts a run that waits for a place in its rig; the addon `t3-notify` tells the thread when the run starts, waits for a sign-off and ends, and the thread shows the card, asks for the decision and reports, with no watcher |
 
 A demo is `pack/` (agents and formulas, not a word about the task), `root/` (the orchestrator config of the demo,
 the project and its tracker) and the repositories of the project, empty before a run: `run.sh` makes each a git
 repository of its own (demos 1 and 2: `frontend/` and `backend/`) or a clone of its GitHub repository (demo 3), so a
 coder's commit stays in it. Demo 4's project has no rigs: `run.sh` copies the documents its agents read into its root,
-`library/`. `run.sh` of a demo runs it on a
+`library/`. Demo 5 has no agents: its formulas are exec and `await` steps, and the one who asks is a thread of T3 Code.
+`run.sh` of a demo runs it on a
 daemon of its own; what it creates is in `.gitignore`, and the author's run is
 next to it as `*-example`, with when and on what it ran. `cargo run -p loop-manager-acceptance -- 20` runs the demos as rows
 of the acceptance report.
