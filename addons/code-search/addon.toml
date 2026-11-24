@@ -1,3 +1,13 @@
 name = "code-search"
-version = "0.1.0"
+version = "0.2.0"
 prompt = "prompt.md"
+
+[dependencies.rg]
+minimum = "16.0.0"
+command = ["rg", "--version"]
+pattern = '(?m)^ripgrep (\S+)'
+
+[dependencies.ast-grep]
+minimum = "0.51.3"
+command = ["ast-grep", "--version"]
+pattern = '(?m)^ast-grep (\S+)'

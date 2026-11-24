@@ -84,6 +84,12 @@ default's, is a load error of the file that has it.
 An addon may name the harnesses it is for (`harnesses = ["claude", "codex"]`). An agent on another harness that
 attaches it is a load error; so is a subagent target whose addon is not for the caller's harness.
 
+### Check external tools
+
+Run `loop-manager doctor --config <orchestrator-config>` after adding an addon. Each dependency finding names the
+addon, tool, version requirement and probe result. Install missing tools on the relevant PATH, then run doctor again.
+On a running daemon, `loop-manager doctor` uses the daemon's environment.
+
 ### Check what an agent gets
 
 ```sh

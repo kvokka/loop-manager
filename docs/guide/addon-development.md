@@ -86,7 +86,8 @@ the outcome, `loop-manager comment --file <file>` leaves a comment on the run's 
 An addon depends on no tool it does not bring or adapt. It talks to loop-manager through the CLI and the environment
 it is given, never to the tracker, a harness or another tool it assumes is on the host: a comment on the issue is
 `loop-manager comment`, not the tracker's own command, so the addon works whatever the project's tracker. An addon that
-adapts a tool, as `dcg` does, names the tool among its needs on the host.
+adapts a tool, as `dcg` does, declares its version command and supported range in the manifest.
+See [external tool dependencies](../design/config.md#external-tool-dependencies).
 
 What `hooks/remind` prints on `UserPromptSubmit` joins the prompt:
 

@@ -1,5 +1,10 @@
 # context-budget changelog
 
+## 0.6.0
+
+- Declare the required host tools for `loop-manager doctor`. Upgrade to a loop-manager build with addon dependency checks
+  and install the versions listed in `addon.toml` or newer.
+
 ## 0.5.0
 
 - Read the run's issue from `LOOP_MANAGER_ISSUE` instead of `LOOP_MANAGER_BEAD`, and say issue in the texts to the

@@ -1,5 +1,5 @@
 name = "t3-notify"
-version = "0.1.0"
+version = "0.2.0"
 
 # One hook for the five moments of a run its T3 Code thread is told about (README.md).
 [[hook]]
@@ -21,3 +21,15 @@ command = ["hooks/notify"]
 [[hook]]
 on = "run.cancelled"
 command = ["hooks/notify"]
+
+[dependencies.t3]
+minimum = "0.1.11"
+command = ["t3", "--version"]
+pattern = '(?m)^t3 v(\S+)'
+scope = "daemon"
+
+[dependencies.python3]
+minimum = "3.15.2"
+command = ["python3", "--version"]
+pattern = '(?m)^Python (\S+)'
+scope = "daemon"

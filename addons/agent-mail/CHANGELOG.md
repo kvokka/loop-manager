@@ -1,5 +1,10 @@
 # agent-mail changelog
 
+## 0.6.0
+
+- Declare the required host tools for `loop-manager doctor`. Upgrade to a loop-manager build with addon dependency checks
+  and install the versions listed in `addon.toml` or newer.
+
 ## 0.5.0
 
 - Say issue in the prompt: task status and dependencies stay in the tracker.

@@ -36,7 +36,7 @@ identify it as such and offer its verified full commit SHA as a development snap
    install or the agent's settings for that agent alone. Merge into the existing `addons` array and
    preserve order, params and unrelated entries. For an update or rollback, change the existing pin,
    check the changelog for parameter migrations and account for every attachment using that declaration.
-3. Validate the edited files with `loop-manager config check --config <orchestrator-config>`. For an agent,
+3. Validate the edited files with `loop-manager config check --config <orchestrator-config>`. Run `loop-manager doctor --config <orchestrator-config>` for declared external tool requirements. For an agent,
    use `loop-manager config explain --config <orchestrator-config> --project <project> --agent <agent>`
    to verify its effective settings. To activate the install on its running daemon, run
    `loop-manager config reload` against that daemon. Report the pin, scope and whether the change is active.
@@ -59,7 +59,7 @@ prompt = "prompt.md"
 For other behavior, select the relevant extension point from the
 [authoring guide](https://github.com/kvokka/loop-manager/blob/HEAD/docs/guide/addon-development.md).
 Use `[agent.hooks.<name>]` for session events or `[[hook]]` for orchestrator events. Package referenced
-files with the addon, preserve executable bits on hook programs and document required host tools.
+files with the addon, preserve executable bits on hook programs and declare required host tools under `[dependencies.<tool>]`.
 
 Attach the addon in a test project using a relative `path` and run the config check and explain commands
 above. Verify its contribution for the target agent and exercise the behavior it adds. Write a README

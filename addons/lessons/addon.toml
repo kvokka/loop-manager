@@ -1,5 +1,5 @@
 name = "lessons"
-version = "0.3.0"
+version = "0.4.0"
 harnesses = ["claude", "codex"]
 
 # The turn in which the agent declared its outcome ends: the hook asks the same session for its lessons once, and
@@ -8,3 +8,13 @@ harnesses = ["claude", "codex"]
 event = "Stop"
 command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/lessons' '${LOOP_MANAGER_ADDON_DATA}'"
 timeout = "60s"
+
+[dependencies.jq]
+minimum = "1.8.2"
+command = ["jq", "--version"]
+pattern = '(?m)^jq-(\S+)'
+
+[dependencies.loop-manager]
+minimum = "0.0.1"
+command = ["loop-manager", "--version"]
+pattern = '(?m)^loop-manager (\S+)'

@@ -6,6 +6,7 @@ mod assemble;
 mod check;
 mod compose;
 mod defaults;
+mod dependency;
 mod env;
 mod files;
 mod formula_file;
@@ -25,6 +26,7 @@ use crate::{
     template::{Filter, Inputs},
 };
 pub use assemble::{Attached, EffectiveConfig, Layer, Sourced};
+pub use dependency::{Dependency, DependencyScope};
 pub use env::{ExecEnv, env_literal, env_value};
 pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, Settings, Skill};
 pub use formula_file::{Formula, Input, InputType, OnItemFailure, Step, StepKind};
@@ -272,6 +274,7 @@ pub enum Source {
 
 #[derive(Clone, Debug)]
 pub struct Addon {
+    pub dependencies: BTreeMap<String, Dependency>,
     pub name: String,
     pub version: String,
     /// The harnesses it is for; any when `None`.

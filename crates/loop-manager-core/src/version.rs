@@ -58,3 +58,38 @@ pub(crate) fn parse(text: &str) -> Option<Version> {
         parts.next().is_none().then_some(version)
     })
 }
+
+/// Run an addon-defined version probe with the same bounded process runner as an orchestrator hook.
+pub async fn addon_version_probe(command: &[String], cwd: &Path, path: &str) -> Result<String, String> {
+    use crate::process::{Exit, Spec, base_env, run};
+    let mut env = base_env();
+    env.retain(|(key, _)| key != "PATH");
+    env.push(("PATH".into(), path.into()));
+    let out = run(Spec {
+        command,
+        cwd,
+        env: &env,
+        stdin: &[],
+        timeout: std::time::Duration::from_secs(5),
+        keep: 16 * 1024,
+        stop: None,
+    })
+    .await;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    match out.exit {
+        Exit::Code(0) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            Ok(if stdout.trim().is_empty() {
+                stderr.into_owned()
+            } else {
+                stdout.into_owned()
+            })
+        }
+        Exit::SpawnFailed(e) => Err(format!("cannot run probe: {e}")),
+        Exit::TimedOut => Err("version probe timed out".into()),
+        exit => Err(format!(
+            "probe failed ({exit:?}): {}",
+            stderr.lines().next().unwrap_or_default()
+        )),
+    }
+}

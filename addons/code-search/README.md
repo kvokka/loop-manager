@@ -13,7 +13,7 @@ If you already have a `[settings]` table, append the attachment to its `addons` 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/code-search/0.1.0"
+rev = "addons/code-search/0.2.0"
 dir = "addons/code-search"
 
 [settings]
@@ -26,8 +26,7 @@ declaration in the project file.
 
 ## What the host needs
 
-`rg` and `ast-grep` on the `PATH` of the sessions: the daemon's `PATH`, or the one a settings layer gives. This
-repository pins ripgrep 15.2.0 and ast-grep 0.51.0 in `mise.toml`. The addon does not check for them; without them the
-agent's commands fail and it falls back to other tools.
+Install ripgrep 16.0.0 or newer and ast-grep 0.51.3 or newer on the session's `PATH`.
+Run `loop-manager doctor --config <file>` before starting the daemon, or `loop-manager doctor` on a running daemon.
 
 See the [changelog](CHANGELOG.md) for version history.

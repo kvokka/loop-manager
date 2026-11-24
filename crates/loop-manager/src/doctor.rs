@@ -2,6 +2,8 @@
 //! `--config`, by the CLI without one: the harness and tracker binaries with their versions and logins, the private
 //! directories, the state and its outbox; and `loop-manager daemon --service`, the service file that runs the daemon.
 
+mod dependencies;
+
 use crate::{
     daemon::Paths,
     harness::{adapter, binary, load},
@@ -37,6 +39,7 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
                 format!("no config file at {path}, the defaults")
             };
             found.push(check("config", "ok", detail));
+            let mut sessions = dependencies::Sessions::default();
             for (name, harness) in &config.harnesses {
                 // `load` refused a harness with no adapter.
                 let Some(adapter) = adapter(name) else { continue };
@@ -44,9 +47,10 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
                 found.push(binary_check(name, &path, source, |p| {
                     loop_manager_core::supported_version(p, adapter.minimum)
                 }));
-                let checks = (adapter.doctor)(&agents(&config, name));
+                let checks = (adapter.doctor)(&agents(&config, name, &mut sessions));
                 found.extend(checks.into_iter().map(|c| check(c.check, c.level, c.detail)));
             }
+            found.extend(sessions.findings(&config));
             for adapter in crate::tracker::TRACKERS {
                 let projects = crate::tracker::projects(&config, adapter);
                 if projects.is_empty() {
@@ -73,7 +77,11 @@ pub(crate) fn findings(paths: &Paths) -> Vec<Value> {
 /// The agents on `harness` in every project, root and rig, labelled `<project>/<place>@<agent>`, with their effective
 /// configs: each pack agent alone, `None` where it does not assemble, then as the runs of every prompt formula have
 /// it, a variant by its name.
-fn agents(config: &Config, harness: &str) -> Vec<(String, Option<EffectiveConfig>)> {
+fn agents(
+    config: &Config,
+    harness: &str,
+    sessions: &mut dependencies::Sessions,
+) -> Vec<(String, Option<EffectiveConfig>)> {
     let mut found = std::collections::BTreeMap::new();
     for p in &config.projects {
         let rigs: Vec<&str> = p.places().map(|(r, _)| r).collect();
@@ -86,7 +94,10 @@ fn agents(config: &Config, harness: &str) -> Vec<(String, Option<EffectiveConfig
                 for rig in &rigs {
                     let label = format!("{}/{rig}@{name}", p.name);
                     match config.effective(&p.name, Some(rig), &name) {
-                        Ok(c) if c.harness == harness => drop(found.insert(label, Some(c))),
+                        Ok(c) if c.harness == harness => {
+                            sessions.record(p, &label, &c);
+                            found.insert(label, Some(c));
+                        }
                         Err(_) if agent.harness.as_deref() == Some(harness) => drop(found.insert(label, None)),
                         _ => {}
                     }
@@ -98,7 +109,9 @@ fn agents(config: &Config, harness: &str) -> Vec<(String, Option<EffectiveConfig
                     if let Ok((agent, c)) = config.for_run(&p.name, rig, &formula, step)
                         && c.harness == harness
                     {
-                        found.insert(format!("{}/{rig}@{agent}", p.name), Some(c));
+                        let label = format!("{}/{rig}@{agent}", p.name);
+                        sessions.record(p, &format!("{label} ({formula}/{step})"), &c);
+                        found.insert(label, Some(c));
                     }
                 }
             }

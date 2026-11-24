@@ -1053,6 +1053,44 @@ stronger layer detaches it. An agent has any number of addons, applied in the or
 layers are read weakest first (orchestrator, project, rig, agent, variant, edits), and an attachment keeps its
 place when a stronger layer names it again.
 
+### External tool dependencies
+
+An addon can declare a version probe for each external executable it uses. For example:
+
+```toml
+[dependencies.rg]
+minimum = "16.0.0"
+command = ["rg", "--version"]
+pattern = '^ripgrep (\S+)'
+```
+
+`minimum` is an inclusive SemVer floor. An optional `lock` restricts the accepted versions further.
+For a minimum of `1.2.3`:
+
+| `lock` | Accepted versions |
+| --- | --- |
+| `"minimum"` (default) | 1.2.3 and newer |
+| `"major"` | 1.2.3 and newer within 1.x |
+| `"minor"` | 1.2.3 and newer within 1.2.x |
+| `"exact"` | 1.2.3 |
+
+Comparison uses SemVer precedence, including prerelease identifiers. Build metadata does not affect precedence.
+
+`command` is an argument array executed in the addon directory. Use a bundled script such as
+`["./bin/tool-version"]` for a tool that needs custom arguments, parsing or version normalization.
+The command must exit successfully within five seconds and print a SemVer to stdout (stderr if stdout is empty).
+The optional Rust regex `pattern` extracts the version from that output with one capture group.
+
+`scope = "session"` (default) checks each distinct effective session `PATH` that attaches the addon.
+Use `"daemon"` for tools called by orchestrator hooks and `"both"` for tools used in both places.
+Doctor checks a declared addon with no attached session on the daemon's `PATH`.
+Probes receive that selected `PATH` and the host's `HOME` and `LANG` when set.
+
+`config check` validates the declaration. `doctor` runs the probes and reports an error for a missing program,
+failed probe, unreadable version or version outside the specified range. The user installs the tools.
+
+### Parameters and contributions
+
 A parameter's value is its default from `[params]`, then what each attachment on those layers gives, by key: the
 strongest wins, and `config explain` prints each as `addons.<name>.params.<key>` with the layer it came from (the
 addon's own for a default). An attachment with a key not in `[params]`, or a value of another type than the

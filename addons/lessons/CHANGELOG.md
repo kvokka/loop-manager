@@ -1,5 +1,10 @@
 # lessons changelog
 
+## 0.4.0
+
+- Declare the required host tools for `loop-manager doctor`. Upgrade to a loop-manager build with addon dependency checks
+  and install the versions listed in `addon.toml` or newer.
+
 ## 0.3.0
 
 - Run in a run on an issue as `LOOP_MANAGER_ISSUE` tells it, instead of `LOOP_MANAGER_BEAD`, and say issue in the

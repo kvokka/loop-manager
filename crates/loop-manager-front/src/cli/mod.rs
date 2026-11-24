@@ -98,7 +98,7 @@ pub enum Command {
         #[arg(long)]
         service: Option<Service>,
     },
-    /// Check what the daemon needs: harness and tracker binaries, versions and logins, directories, the state.
+    /// Check what the daemon needs: addon dependencies, harness and tracker versions and logins, directories, the state.
     Doctor {
         /// Check this file without a daemon.
         #[arg(long)]

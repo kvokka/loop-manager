@@ -133,6 +133,14 @@ impl Loader {
             if outer.iter().chain(&addons).any(|p| p.name == raw.name) {
                 self.fail(file, format!("addon `{}` is declared twice", raw.name));
             }
+            for (name, dep) in &raw.dependencies {
+                if name.trim().is_empty() || dep.command.first().is_none_or(|s| s.trim().is_empty()) {
+                    self.fail(
+                        &manifest,
+                        format!("dependency `{name}` needs a name and a version command"),
+                    );
+                }
+            }
             let mut hooks = Vec::new();
             for hook in raw.hook {
                 if event_path(&hook.on, "seq", false).is_none() {
@@ -182,6 +190,7 @@ impl Loader {
             }
             let prompt = raw.prompt.and_then(|p| self.text(&manifest, &root.join(p)));
             addons.push(Addon {
+                dependencies: raw.dependencies,
                 name: raw.name,
                 version: raw.version,
                 harnesses: raw.harnesses,

@@ -8,13 +8,15 @@ say.
 
 ## Install
 
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
+
 In your project's `loop-manager.toml`, declare the Git source and attach the addon to the project's agents.
 If you already have a `[settings]` table, append the attachment to its `addons` array.
 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/dcg/0.1.0"
+rev = "addons/dcg/0.2.0"
 dir = "addons/dcg"
 
 [settings]
@@ -28,7 +30,7 @@ declaration in the project file.
 ## What the host needs
 
 - `dcg` on the `PATH` of the sessions: the daemon's `PATH`, or the one a settings layer gives. This repository pins
-  version 0.16.0 in `mise.toml`.
+  version 0.17.1 in `mise.toml`.
 - Its config, where `dcg` looks for it: the user's `~/.config/dcg/config.toml` (the `HOME` of the session), a
   `.dcg.toml` at the root of the repository the agent works in, or the file `DCG_CONFIG` names. A claude session and an
   inheriting codex session have the operator's `HOME`; an isolated codex session (`inherit_host = false`) has a `HOME`

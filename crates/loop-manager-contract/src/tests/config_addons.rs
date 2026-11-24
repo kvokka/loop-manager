@@ -256,3 +256,48 @@ fn a_addon_from_git_may_live_in_a_directory_of_the_repository() {
         }
     }
 }
+
+#[test]
+fn dependency_locks_compare_semver_precedence() {
+    for (lock, newer_patch, newer_minor, newer_major) in [
+        ("minimum", true, true, true),
+        ("major", true, true, false),
+        ("minor", true, false, false),
+        ("exact", false, false, false),
+    ] {
+        let config = load(&with(&[(
+            MAIL,
+            &format!("[dependencies.tool]\ncommand = ['tool', 'version']\nminimum = '0.2.3'\nlock = '{lock}'"),
+        )]));
+        let dep = &config.addons[0].dependencies["tool"];
+        for (version, ok) in [
+            ("0.2.3+vendor", true),
+            ("0.2.2", false),
+            ("0.2.3-rc.1", false),
+            ("0.2.10", newer_patch),
+            ("0.3.0", newer_minor),
+            ("1.0.0", newer_major),
+        ] {
+            assert_eq!(dep.check(version).is_ok(), ok, "{lock} {version}");
+        }
+    }
+}
+
+#[test]
+fn malformed_dependency_declarations_fail_config_loading() {
+    for (fields, why) in [
+        ("command = []\nminimum = '1.0.0'", "version command"),
+        ("command = ['tool']\nminimum = 'recent'", "unexpected character"),
+        (
+            "command = ['tool']\nminimum = '1.0.0'\nlock = 'patchish'",
+            "unknown variant",
+        ),
+        (
+            "command = ['tool']\nminimum = '1.0.0'\npattern = 'no-group'",
+            "one capture group",
+        ),
+    ] {
+        let changed = with(&[(MAIL, &format!("[dependencies.tool]\n{fields}"))]);
+        fails(&[(MAIL, &changed[0].1)], why);
+    }
+}

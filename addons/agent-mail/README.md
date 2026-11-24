@@ -10,13 +10,15 @@ and the release of a run's reservations. The project keeps its rigs, formulas, p
 
 ## What the host needs
 
-- `mcp-agent-mail` on the daemon's `PATH`. The supported and tested version is 0.3.40.
+- `mcp-agent-mail` on the daemon's `PATH`. Version 0.3.41 or newer is required.
 - A loop-manager build with `[[service]].bind` support (included in this release's Git commit).
-- `jq`, `curl`, and Git with configured hooks (`git hook list`).
+- `python3` for idle-agent cleanup, `jq`, `curl`, and Git with configured hooks (`git hook list`).
 - A session that reaches the server's loopback port. A codex agent with `sandbox_mode = "workspace-write"` may have
   no network; its commits are then refused with "its reservations could not be checked".
 
 ## Install
+
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
 
 In your project's `loop-manager.toml`, declare the addon and attach it to the project's agents. If you already have a
 `[settings]` table, append the attachment to its `addons` array; if the orchestrator already declares the addon, the
@@ -25,7 +27,7 @@ attachment alone is enough. No parameter is required.
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/agent-mail/0.4.0"
+rev = "addons/agent-mail/0.6.0"
 dir = "addons/agent-mail"
 
 [settings]

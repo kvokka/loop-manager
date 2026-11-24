@@ -8,11 +8,13 @@ run. A run no thread started is told to nobody.
 ## Needs on the host
 
 - The `t3` command on the daemon's `PATH`, and the T3 Code server of the thread on the daemon's host.
-- `python3` 3.8 or newer.
+- `python3` 3.15.2 or newer.
 - The plugin [`t3-run-card`](../../plugins/README.md#follow-a-run-in-t3-code) 0.5.0 or newer in the harness of the
   thread, with its auto-open on. Its hook writes down which thread started which run.
 
 ## Install
+
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
 
 In your project's `loop-manager.toml`, declare the Git source and attach the addon in `[settings]`: a run tells its
 thread on steps without an agent too. If you already have a `[settings]` table, append the attachment to its `addons`
@@ -21,7 +23,7 @@ array.
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/t3-notify/0.1.0"
+rev = "addons/t3-notify/0.2.0"
 dir = "addons/t3-notify"
 
 [settings]

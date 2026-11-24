@@ -1,5 +1,5 @@
 name = "agent-mail"
-version = "0.5.0"
+version = "0.6.0"
 harnesses = ["claude", "codex"]
 prompt = "prompt.md"
 
@@ -48,3 +48,33 @@ bind = "${params.bind}"
 command = ["${LOOP_MANAGER_ADDON_DIR}/bin/lm-agent-mail", "serve", "${LOOP_MANAGER_ADDON_DATA}", "${params.multi_repo}"]
 health = { http = "/health/readiness" }
 mcp = { url = "/mcp/" }
+
+[dependencies.git]
+minimum = "2.56.1"
+command = ["git", "--version"]
+pattern = '(?m)^git version (\S+)'
+scope = "both"
+
+[dependencies.jq]
+minimum = "1.8.2"
+command = ["jq", "--version"]
+pattern = '(?m)^jq-(\S+)'
+scope = "both"
+
+[dependencies.curl]
+minimum = "8.23.0"
+command = ["curl", "--version"]
+pattern = '(?m)^curl (\S+)'
+scope = "both"
+
+[dependencies.python3]
+minimum = "3.15.2"
+command = ["python3", "--version"]
+pattern = '(?m)^Python (\S+)'
+scope = "daemon"
+
+[dependencies.mcp-agent-mail]
+minimum = "0.3.41"
+command = ["mcp-agent-mail", "--version"]
+pattern = '(?m)^mcp-agent-mail (\S+)'
+scope = "daemon"

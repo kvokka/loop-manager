@@ -7,13 +7,15 @@ agent. What differs on codex is in [On codex](#on-codex).
 
 ## Install
 
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
+
 In your project's `loop-manager.toml`, declare the Git source and attach the addon to the project's agents.
 If you already have a `[settings]` table, append the attachment to its `addons` array.
 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/context-budget/0.4.0"
+rev = "addons/context-budget/0.6.0"
 dir = "addons/context-budget"
 
 [settings]

@@ -7,13 +7,15 @@ answer, the usual one, leaves nothing. The addon ends there: what is done with t
 
 ## Install
 
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
+
 In your project's `loop-manager.toml`, declare the Git source and attach the addon to the project's agents.
 If you already have a `[settings]` table, append the attachment to its `addons` array.
 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/lessons/0.2.0"
+rev = "addons/lessons/0.4.0"
 dir = "addons/lessons"
 
 [settings]

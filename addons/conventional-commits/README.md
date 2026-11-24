@@ -11,13 +11,15 @@ The check applies only to the run's Git repository, so test fixtures can create 
 
 ## Install
 
+Run `loop-manager doctor --config <file>` after declaring the addon to check the tool versions in [addon.toml](addon.toml).
+
 In your project's `loop-manager.toml`, declare the Git source and attach the addon to the project's agents.
 If you already have a `[settings]` table, append the attachment to its `addons` array.
 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/conventional-commits/0.1.0"
+rev = "addons/conventional-commits/0.3.0"
 dir = "addons/conventional-commits"
 
 [settings]

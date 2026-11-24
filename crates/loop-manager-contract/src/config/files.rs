@@ -326,6 +326,8 @@ pub(super) struct TriggerFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct AddonFile {
+    #[serde(default)]
+    pub dependencies: BTreeMap<String, super::Dependency>,
     pub name: String,
     pub version: String,
     /// The harnesses it is for; any when absent.

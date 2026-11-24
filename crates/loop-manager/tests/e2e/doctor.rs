@@ -311,12 +311,33 @@ fn the_sandbox_warning_names_each_codex_agent_that_sets_no_sandbox_mode() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_daemon_answers_the_same_checks_over_the_api() {
-    let d = crate::common::Daemon::start(|_| {}).await;
+    let d = crate::common::Daemon::start(|d| {
+        let project = d.join("config/loop-manager/shop");
+        let file = project.join("loop-manager.toml");
+        let config = fs::read_to_string(&file).unwrap();
+        fs::write(file, format!("{config}\n[[addon]]\npath = 'audit'\n")).unwrap();
+        let addon = project.join("audit");
+        script(&addon.join("probe"), "echo '2.0.0'");
+        fs::write(
+            addon.join("addon.toml"),
+            "name = 'audit'\nversion = '0.1.0'\n[dependencies.reader]\nminimum = '2.0.1'\ncommand = ['./probe']\n",
+        )
+        .unwrap();
+    })
+    .await;
     let names = |found: &Value| -> Vec<String> {
         let found = found.as_array().unwrap().iter();
         found.map(|f| f["check"].as_str().unwrap().to_owned()).collect()
     };
     let api = d.get("/v1/doctor").await;
+    let probe = api
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["check"] == "addon shop/audit: reader (daemon)")
+        .unwrap();
+    assert_eq!(probe["level"], "error");
+    assert!(probe["detail"].as_str().unwrap().contains("installed 2.0.0"));
     let config = d.dir.path().join("config/loop-manager/config.toml");
     let config = config.to_str().unwrap();
     let local = lm(d.dir.path(), &["doctor", "--json", "--config", config]);
@@ -377,4 +398,65 @@ fn a_rig_with_the_prefix_of_the_br_database_is_warned_about() {
     fs::write(shop.join("loop-manager.toml"), rigs).unwrap();
     let (_, found) = doctor_env(dir.path(), &[("PATH", &path)]);
     assert!(found.iter().all(|f| f.0 != "br prefix"), "{found:?}");
+}
+
+#[test]
+fn addon_probes_use_the_session_path_and_report_version_failures() {
+    let tree = tree("[[addon]]\npath = 'search'\n");
+    let root = tree.path().join("config/loop-manager");
+    fs::create_dir(root.join("search")).unwrap();
+    fs::write(
+        root.join("search/addon.toml"),
+        r#"
+name = "search"
+version = "0.1.0"
+[dependencies.indexer]
+command = ["custom-indexer", "about"]
+pattern = 'release=(\S+)'
+minimum = "1.10.0"
+lock = "minor"
+"#,
+    )
+    .unwrap();
+    let agent = root.join("shop/agents/dev");
+    fs::create_dir_all(&agent).unwrap();
+    let bin = root.join("session-bin");
+    fs::write(
+        agent.join("agent.toml"),
+        format!(
+            "harness = 'claude'\naddons = [{{name='search'}}]\n[env]\nPATH = '{}'\n",
+            bin.display()
+        ),
+    )
+    .unwrap();
+
+    let check = "addon orchestrator/search: indexer (shop/root@shop.dev)";
+    for (probe, wanted, ok) in [
+        (None, "No such file", false),
+        (Some("echo release=1.9.12"), "installed 1.9.12", false),
+        (Some("echo release=1.11.0"), "installed 1.11.0", false),
+        (Some("echo release=1.10.0-beta.1"), "installed 1.10.0-beta.1", false),
+        (Some("echo 'unknown version'"), "pattern did not match", false),
+        (Some("echo release=banana"), "invalid SemVer", false),
+        (Some("echo release=1.10.0; exit 3"), "3", false),
+        (
+            Some("[ \"$1\" = about ] && echo release=1.10.0 >&2"),
+            "installed 1.10.0",
+            true,
+        ),
+        (Some("echo release=1.10.12"), "installed 1.10.12", true),
+    ] {
+        if let Some(body) = probe {
+            script(&bin.join("custom-indexer"), body);
+        }
+        let (passed, found) = doctor(tree.path());
+        let (level, detail) = level(&found, check);
+        assert_eq!(passed, ok, "{found:?}");
+        assert_eq!(level, if ok { "ok" } else { "error" });
+        assert!(
+            detail.contains(wanted) && detail.contains(">= 1.10.0 within 1.10.x"),
+            "{detail}"
+        );
+        assert_eq!(found.iter().filter(|f| f.0.contains("indexer")).count(), 1);
+    }
 }
