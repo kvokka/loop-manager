@@ -287,19 +287,18 @@ and tag. The same convention works in a separate repository, including one with 
    check a config using the addon, and update the README installation example with the Git URL,
    release tag, optional subdirectory and attachment a user can copy into their project. Include these
    files in the release commit.
-5. To publish, run the following from the repository root with the addon's name, version and tested commit.
-   Check that the manifest at that commit has this name and version, and that its changelog describes it.
-   Publish the commit through the repository's usual workflow, then publish only this tag:
+5. Merge the release commit to `main`. The `addon-tags` workflow then tags the merged commit with an annotated
+   `addons/<name>/<version>` for every manifest whose version has no tag yet. It fails, and publishes no tag for
+   that addon, when the changelog has no `## <version>` heading. Do not tag addon releases by hand in this repository.
+   In a separate repository, publish the tag of the tested commit yourself:
 
    ```sh
    tag="addons/$name/$version"
    git tag -a "$tag" "$commit" -m "$name $version"
    git push origin "refs/tags/$tag"
-   git ls-remote --refs --tags origin "refs/tags/$tag"
    ```
 
-Delivering a new addon or a user-visible addon update includes the version bump, changelog and published tag.
-Verify the remote annotated tag peels to the tested commit before reporting the release complete.
+Delivering a new addon or a user-visible addon update includes the version bump and changelog in the commit to `main`.
 An unreleased change can stay on a development branch until the intended release.
 
 Keep published tags on their original commits. A client caches the commit it first resolves for a tag.
