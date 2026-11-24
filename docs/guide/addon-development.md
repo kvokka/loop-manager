@@ -178,7 +178,7 @@ session, and it keeps the harness from compacting. It is all agent side:
 ```toml
 # addons/context-budget/addon.toml
 name = "context-budget"
-version = "0.5.0"
+version = "0.6.0"
 harnesses = ["claude", "codex"]
 
 [params]
@@ -212,6 +212,21 @@ command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}'
 [agent.hooks.context-budget-compact]
 event = "PreCompact"
 command = "'${LOOP_MANAGER_ADDON_DIR}/hooks/budget' '${LOOP_MANAGER_ADDON_DATA}' ${params.soft} ${params.hard} ${params.warn_step} '${params.cut}'"
+
+[dependencies.git]
+minimum = "2.56.1"
+command = ["git", "--version"]
+pattern = '(?m)^git version (\S+)'
+
+[dependencies.jq]
+minimum = "1.8.2"
+command = ["jq", "--version"]
+pattern = '(?m)^jq-(\S+)'
+
+[dependencies.loop-manager]
+minimum = "0.0.1"
+command = ["loop-manager", "--version"]
+pattern = '(?m)^loop-manager (\S+)'
 ```
 
 - **One hook, many events.** The same command runs on `SessionStart`, `SubagentStart`, `PreToolUse`, `PostToolUse`
