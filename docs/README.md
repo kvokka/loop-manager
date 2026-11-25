@@ -14,6 +14,7 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [guide/first-formula.md](guide/first-formula.md) | a formula with an agent, from the config to a passed run |
 | [guide/issue-trackers.md](guide/issue-trackers.md) | issues through loop-manager: what it does with them, the commands; the br tracker, how it is wired, inspecting and repairing it by hand |
 | [guide/recovery.md](guide/recovery.md) | a run that failed for good: what failed, continue the session, a new session with or without a note, abandon |
+| [guide/budgets.md](guide/budgets.md) | spend and budgets: pricing a provider's model, a formula budget and its override, nested budgets, reading a run's spend in each frontend, the T3 notice |
 | [T3 Code run card](../plugins/README.md#follow-a-run-in-t3-code) | browse executed rounds and open an agent’s working session |
 | [guide/addons.md](guide/addons.md) | using addons: declare, attach, parameters; an agent's subagents |
 | [guide/addon-development.md](guide/addon-development.md) | writing an addon: the manifest, the agent side and the orchestrator side, tests, changelogs and releases |

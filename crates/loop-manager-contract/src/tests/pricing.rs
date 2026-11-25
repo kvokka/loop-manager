@@ -147,3 +147,23 @@ fn a_formula_budget_is_a_positive_amount_of_usd() {
         fails(&[("kit/formulas/audit.toml", audit(budget).as_str())], error);
     }
 }
+
+/// The `[[pricing]]` blocks of the guide (docs/guide/budgets.md) load as written and price what they say.
+#[test]
+fn the_pricing_blocks_of_the_guide_load() {
+    let guide = include_str!("../../../../docs/guide/budgets.md");
+    let blocks: String = guide
+        .split("```toml\n")
+        .skip(1)
+        .filter_map(|b| b.split("```").next())
+        .filter(|b| b.contains("[[pricing]]"))
+        .collect();
+    let config = load_with(&[("config.toml", orchestrator(&blocks).as_str())]).unwrap();
+    let p = &config.pricing;
+    let (source, price) = p.lookup("openrouter", "gpt-5.3-codex", None).unwrap();
+    assert_eq!(source, PriceSource::User);
+    assert_eq!((price.rates.cache_read, price.rates.cache_write_1h), (175_000, 3_500_000));
+    let fast = p.lookup("openrouter", "gpt-5.3-codex", Some("priority")).unwrap().1;
+    assert_eq!(fast.rates.output, 28_000_000);
+    assert!(p.lookup("llm.internal.example", "house-coder-2", None).is_some());
+}

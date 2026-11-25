@@ -1,6 +1,6 @@
 # Formula budgets and spend reports
 
-Implementation contract for formula budgets and spend reports.
+Implementation contract for formula budgets and spend reports. How to use them: [budgets and spend](../guide/budgets.md).
 
 ## Scope and enforcement
 
