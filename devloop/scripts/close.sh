@@ -2,9 +2,7 @@
 set -eu
 [ "$#" -eq 0 ] || { echo "usage: close.sh" >&2; exit 2; }
 run=${LOOP_MANAGER_RUN:?}
-# shortcut: a daemon installed while the entity was named issue sets LOOP_MANAGER_ISSUE; drop the fallback once it runs
-# a newer build.
-bead=${LOOP_MANAGER_BEAD:-${LOOP_MANAGER_ISSUE:?}}
+bead=${LOOP_MANAGER_BEAD:?}
 case "$run" in *[!a-zA-Z0-9_-]*) echo "invalid run id" >&2; exit 1;; esac
 
 source=target/devloop/runs/$run

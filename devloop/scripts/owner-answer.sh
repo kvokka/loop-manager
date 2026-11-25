@@ -15,9 +15,7 @@ case ${1:-} in
     ;;
   *) echo 'owner-answer: expected code or review' >&2; exit 75 ;;
 esac
-# shortcut: a daemon installed while the entity was named issue sets LOOP_MANAGER_ISSUE; drop the fallback once it runs
-# a newer build.
-bead=${LOOP_MANAGER_BEAD:-${LOOP_MANAGER_ISSUE:?}}
+bead=${LOOP_MANAGER_BEAD:?}
 if ! printf '%s' "$data" | jq -e --arg summary "$summary" '
   ($summary | test("\\S")) or (. != null and . != {} and . != [] and
     (if type == "string" then test("\\S") else true end))' >/dev/null; then

@@ -123,10 +123,6 @@ For an authorized upgrade, install the new artifact between epics with `mise run
 registered service through its manager. Installation replaces the file atomically. Subsequent CLI invocations use
 it immediately, and the daemon picks it up on restart.
 
-The step scripts `gate.sh`, `close.sh` and `owner-answer.sh` read the bead id from `LOOP_MANAGER_BEAD` and fall back
-to `LOOP_MANAGER_ISSUE`, which a daemon installed while the entity was named issue sets instead. Once the service
-runs a build that sets `LOOP_MANAGER_BEAD`, reduce their `bead=` line to `bead=${LOOP_MANAGER_BEAD:?}`.
-
 ## File an epic
 
 A ready bead with the label `auto` starts a run; a bead without it starts nothing. It does not matter when the bead

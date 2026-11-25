@@ -1,9 +1,7 @@
 #!/bin/sh
 # Commit the round's tracker state locally. The close step publishes the completed epic.
 set -eu
-# shortcut: a daemon installed while the entity was named issue sets LOOP_MANAGER_ISSUE; drop the fallback once it runs
-# a newer build.
-bead=${LOOP_MANAGER_BEAD:-${LOOP_MANAGER_ISSUE:?}}
+bead=${LOOP_MANAGER_BEAD:?}
 head=$(git rev-parse HEAD)
 ci=$(printf '%s\n' "${LOOP_MANAGER_STEP_CI_REPORT_DATA:-null}" | jq -ec '.stdout | fromjson' || echo null)
 review=${LOOP_MANAGER_STEP_REVIEW_DATA:-null}
