@@ -481,6 +481,8 @@ pub(crate) struct Pack {
 pub(crate) struct Addon {
     /// The project whose runs it is on; null for the orchestrator's.
     project: Option<String>,
+    /// The pack of the project whose `pack.toml` declares it; null when the orchestrator's or the project's file does.
+    pack: Option<String>,
     name: String,
     version: Option<String>,
     root: Option<String>,

@@ -330,6 +330,14 @@ async fn the_config_from_the_cli_lists_explains_checks_and_reloads() {
         fs::write(loop_manager.join("shop/agents/qa/agent.toml"), qa).unwrap();
         let inner = "name = \"inner\"\ninternal = true\n[[step]]\nkind = \"exec\"\ncommand = [\"true\"]\n";
         fs::write(loop_manager.join("shop/formulas/inner.toml"), inner).unwrap();
+        // A pack that declares an addon: the project says nothing of it.
+        let project = "packs = [\"../kit\"]\n[rigs.web]\npath = \"web\"\n";
+        fs::write(loop_manager.join("shop/loop-manager.toml"), project).unwrap();
+        fs::create_dir_all(loop_manager.join("kit/addons/notes")).unwrap();
+        let pack = "name = \"kit\"\nversion = \"0.1.0\"\n[[addon]]\npath = \"addons/notes\"\n";
+        fs::write(loop_manager.join("kit/pack.toml"), pack).unwrap();
+        let notes = "name = \"notes\"\nversion = \"0.1.0\"\n";
+        fs::write(loop_manager.join("kit/addons/notes/addon.toml"), notes).unwrap();
     })
     .await;
     check_config_lists(&d);
@@ -434,6 +442,14 @@ fn check_config_lists(d: &Daemon) {
     );
     let shop = (addons.as_array().unwrap().iter()).any(|p| p["project"] == "shop" && p["name"] == "default-policy");
     assert!(shop, "every project's addons without --project: {addons}");
+    let of_pack = |p: &&Value| p["name"] == "notes";
+    let notes = addons.as_array().unwrap().iter().find(of_pack).unwrap();
+    assert_eq!(
+        (&notes["project"], &notes["pack"], &notes["bundled"]),
+        (&"shop".into(), &"kit".into(), &false.into()),
+        "an addon a pack declares is the project's, with its pack: {addons}"
+    );
+    assert_eq!(addons[0]["pack"], Value::Null);
     assert!(!d.cli(&["agent", "list", "--project", "nope"], &[]).status.success());
 }
 

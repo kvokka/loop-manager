@@ -192,6 +192,7 @@ impl Loader {
             addons.push(Addon {
                 dependencies: raw.dependencies,
                 name: raw.name,
+                pack: None,
                 version: raw.version,
                 harnesses: raw.harnesses,
                 bin: Some(root.join("bin")).filter(|b| b.is_dir()),
@@ -203,6 +204,46 @@ impl Loader {
             });
         }
         addons
+    }
+
+    /// Adds to `addons`, those of a project, the ones its pack `pack` declares in `manifest`. A declaration of the
+    /// same name in the orchestrator file (`outer`) or the project's own replaces the pack's, whatever is wrong with
+    /// that one; two packs may declare one addon only from one place, else `file`, the project's, has to say which.
+    pub(super) fn pack_addons(
+        &mut self,
+        file: &Path,
+        outer: &[Addon],
+        (manifest, pack): (&Path, &str),
+        decls: Vec<AddonDecl>,
+        addons: &mut Vec<Addon>,
+    ) {
+        for decl in decls {
+            let checked = self.errors.len();
+            let loaded = self.addons(manifest, &super::items::parent(manifest), vec![decl], &[]);
+            let Some(mut addon) = loaded.into_iter().next() else {
+                continue;
+            };
+            let name = &addon.name;
+            let declared = outer.iter().chain(addons.iter()).find(|a| a.name == *name);
+            match declared.map(|a| (a.pack.as_deref(), a.root == addon.root)) {
+                None => {
+                    addon.pack = Some(pack.to_owned());
+                    addons.push(addon);
+                }
+                Some((None, _)) => self.errors.truncate(checked),
+                Some((Some(other), _)) if other == pack => {
+                    self.fail(manifest, format!("addon `{name}` is declared twice"));
+                }
+                Some((Some(_), true)) => {}
+                Some((Some(other), false)) => self.fail(
+                    file,
+                    format!(
+                        "packs `{other}` and `{pack}` declare addon `{name}` from different sources: declare it \
+                         in this file with `[[addon]]`"
+                    ),
+                ),
+            }
+        }
     }
 }
 

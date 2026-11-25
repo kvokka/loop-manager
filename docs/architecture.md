@@ -57,7 +57,8 @@ These are checked by the build, not kept by agreement.
 
 loop-manager's own addons are not crates either: each lives in `addons/<name>/` of this repository and is self-contained
 — its `addon.toml`, a `README.md`, its own files and its own version — so moving one to a repository of its own
-changes only its declaration. A config declares an addon by `[[addon]]` with a `path`, or with `git` + `rev` + `dir`
+changes only its declaration. The orchestrator config, a project or a pack declares an addon by `[[addon]]` with a
+`path`, or with `git` + `rev` + `dir`
 for a directory of a repository ([config: packs and addons from git](design/config.md#packs-and-addons-from-git)),
 and an agent attaches it with `addons = [{ name, params }]`
 ([config: addon](design/config.md#addon-addonaddontoml)). There are seven:

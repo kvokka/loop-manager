@@ -2,7 +2,7 @@
 //! the config downloads each source first and passes the directory it went to, as [`Checkouts`].
 
 use super::{
-    files::{AddonDecl, OrchestratorFile, ProjectFile, Source},
+    files::{AddonDecl, OrchestratorFile, PackFile, ProjectFile, Source},
     items::{parent, resolve},
     load::Loader,
 };
@@ -29,10 +29,14 @@ pub fn commit_id(text: &str) -> bool {
     matches!(text.len(), 40 | 64) && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The git sources the orchestrator file and its projects declare. Only the files are parsed; their errors are left
-/// to the load that follows, which reports them all.
-pub fn git_sources(orchestrator_file: &Path) -> BTreeSet<GitSource> {
-    let mut loader = Loader::default();
+/// The git sources the orchestrator file, its projects and their packs declare. A pack from git declares its addons
+/// in a manifest that is read where `checkouts` has the pack: whoever downloads asks again once the packs are there.
+/// Only the files are parsed; their errors are left to the load that follows, which reports them all.
+pub fn git_sources(orchestrator_file: &Path, checkouts: &Checkouts) -> BTreeSet<GitSource> {
+    let mut loader = Loader {
+        checkouts: checkouts.clone(),
+        ..Loader::default()
+    };
     let base = parent(orchestrator_file);
     let raw = match orchestrator_file.exists() {
         true => loader.read::<OrchestratorFile>(orchestrator_file).unwrap_or_default(),
@@ -45,10 +49,17 @@ pub fn git_sources(orchestrator_file: &Path) -> BTreeSet<GitSource> {
             continue;
         };
         found.extend(loader.git(&file, &project.addon));
-        found.extend(project.packs.into_iter().filter_map(|s| match s {
-            Source::Git(git) => Some(git),
-            Source::Path(_) => None,
-        }));
+        for source in project.packs {
+            let manifest = loader.root(&file, &dir, &source).map(|root| root.join("pack.toml"));
+            if let Some(manifest) = manifest
+                && let Some(pack) = loader.read::<PackFile>(&manifest)
+            {
+                found.extend(loader.git(&manifest, &pack.addon));
+            }
+            if let Source::Git(git) = source {
+                found.insert(git);
+            }
+        }
     }
     found
 }

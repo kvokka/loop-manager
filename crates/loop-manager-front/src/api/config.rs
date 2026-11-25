@@ -130,7 +130,8 @@ pub(crate) async fn list_packs(state: State, Param(Query(query)): Param<Query<Pr
 }
 
 /// Lists the declared addons and the enabled bundled ones: of the orchestrator (`project` null) and of every
-/// project (those on for its runs), or of the project `project` only.
+/// project (those on for its runs; `pack` names the pack that declares one the project's own file does not), or of
+/// the project `project` only.
 #[utoipa::path(get, path = "/v1/addons", params(ProjectQuery),
     responses((status = OK, body = [Addon]),
         (status = BAD_REQUEST, description = BAD_QUERY, body = ErrorReply),
@@ -148,13 +149,13 @@ pub(crate) async fn list_addons(state: State, Param(Query(query)): Param<Query<P
     for (project, declared, bundled) in lists {
         out.extend(declared.iter().map(|p| {
             let on: Vec<&str> = p.hooks.iter().map(|h| h.on.as_str()).collect();
-            json!({ "project": project, "name": p.name, "version": p.version, "root": p.root, "on": on,
-                "bundled": false })
+            json!({ "project": project, "pack": p.pack, "name": p.name, "version": p.version, "root": p.root,
+                "on": on, "bundled": false })
         }));
         out.extend(
             bundled
                 .iter()
-                .map(|b| json!({ "project": project, "name": b.name, "on": b.on, "bundled": true })),
+                .map(|b| json!({ "project": project, "pack": null, "name": b.name, "on": b.on, "bundled": true })),
         );
     }
     Ok(Json(out.into()))

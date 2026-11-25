@@ -164,6 +164,7 @@ pub struct Project {
     pub settings: Settings,
     pub edits: BTreeMap<String, Settings>,
     pub variants: BTreeMap<String, Variant>,
+    /// The addons its own file declares, then those its packs declare that neither it nor the orchestrator does.
     pub addons: Vec<Addon>,
     /// The bundled addons on for its runs: the orchestrator's, with the project's `[builtin.<name>]` tables.
     pub bundled: Vec<Bundled>,
@@ -285,6 +286,9 @@ pub enum Source {
 pub struct Addon {
     pub dependencies: BTreeMap<String, Dependency>,
     pub name: String,
+    /// The pack whose `pack.toml` declares it for its project; `None` when the orchestrator file or the project's
+    /// does.
+    pub pack: Option<String>,
     pub version: String,
     /// The harnesses it is for; any when `None`.
     pub harnesses: Option<Vec<String>>,

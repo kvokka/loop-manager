@@ -307,6 +307,9 @@ pub(super) struct PackFile {
     #[serde(default)]
     pub requires_addons: Vec<String>,
     pub min_loop_manager: Option<String>,
+    /// The addons it declares for every project that lists it; `path` is relative to the pack's directory.
+    #[serde(default)]
+    pub addon: Vec<AddonDecl>,
     #[serde(default)]
     pub trigger: Vec<TriggerFile>,
     #[serde(default)]

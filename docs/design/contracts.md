@@ -292,8 +292,8 @@ Hooks on observed events may only exit 0 or fail; their failures are reported an
 
 ### 3.3 Several addons on one event
 
-The addons an event goes to (3.1) are ordered by declaration (orchestrator level first, then project level, each
-in declaration order); the bundled addons come after all of them (docs/design/config.md, `[builtin.<name>]`).
+The addons an event goes to (3.1) are ordered by declaration (orchestrator level first, then project level, then
+those the project's packs declare in the order of `packs`, each in declaration order); the bundled addons come after all of them (docs/design/config.md, `[builtin.<name>]`).
 
 - `run.preparing`: hooks run one after another; each receives the event with the earlier modifications applied
   (`workdir`, `env_keys`, `prompt_append`). `env` entries merge by name, `null` removes; `prompt_append` texts are

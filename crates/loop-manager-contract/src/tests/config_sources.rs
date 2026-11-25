@@ -80,15 +80,49 @@ fn git_sources_names_every_declared_source() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
     write(d, &format!(r#"packs = [{{ git = "{KIT}" }}]"#));
-    let found = git_sources(&d.join("config.toml"));
+    let found = git_sources(&d.join("config.toml"), &Checkouts::new());
     assert_eq!(found, [source(KIT, None), source(MAIL, Some("v1"))].into());
 
     fs::write(d.join("shop/loop-manager.toml"), "packs = [").unwrap();
-    let found = git_sources(&d.join("config.toml"));
+    let found = git_sources(&d.join("config.toml"), &Checkouts::new());
     assert_eq!(
         found,
         [source(MAIL, Some("v1"))].into(),
         "a broken project hides only its own"
+    );
+}
+
+/// The addon a pack from git declares from git is a source once the pack is downloaded, and loads from its own
+/// checkout.
+#[test]
+fn the_addons_of_a_pack_from_git_are_sources_once_the_pack_is_downloaded() {
+    const NOTES: &str = "https://example.com/notes.git";
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    write(d, &format!(r#"packs = [{{ git = "{KIT}" }}]"#));
+    let manifest = d.join("dl/kit/pack.toml");
+    let declared = format!("[[addon]]\ngit = \"{NOTES}\"\nrev = \"v2\"\ndir = \"notes\"\n");
+    fs::write(&manifest, fs::read_to_string(&manifest).unwrap() + &declared).unwrap();
+    fs::create_dir_all(d.join("dl/all/notes")).unwrap();
+    fs::write(
+        d.join("dl/all/notes/addon.toml"),
+        "name = \"notes\"\nversion = \"2.0.0\"\n",
+    )
+    .unwrap();
+    let file = d.join("config.toml");
+    let (kit, mail, notes) = (source(KIT, None), source(MAIL, Some("v1")), source(NOTES, Some("v2")));
+
+    let mut checkouts = Checkouts::new();
+    assert_eq!(git_sources(&file, &checkouts), [kit.clone(), mail.clone()].into());
+    checkouts.insert(kit.clone(), Ok(d.join("dl/kit")));
+    checkouts.insert(mail.clone(), Ok(d.join("dl/mail")));
+    assert_eq!(git_sources(&file, &checkouts), [kit, mail, notes.clone()].into());
+    checkouts.insert(notes, Ok(d.join("dl/all")));
+    let config = load_for(&file, &[], checkouts).unwrap();
+    let addon = &config.projects[0].addons[0];
+    assert_eq!(
+        (addon.name.as_str(), addon.pack.as_deref(), &addon.root),
+        ("notes", Some("kit"), &d.join("dl/all/notes"))
     );
 }
 

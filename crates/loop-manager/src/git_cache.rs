@@ -25,12 +25,19 @@ pub(crate) fn checkouts(cache: &Path, config: &Path) -> Checkouts {
     // Reload, check and doctor of one daemon may load at once; a clone's temporary directory is named by the pid.
     static LOCK: Mutex<()> = Mutex::new(());
     let _held = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let at = |s: GitSource| (checkout(cache, &s), s);
-    git_sources(config)
-        .into_iter()
-        .map(at)
-        .map(|(dir, s)| (s, dir))
-        .collect()
+    let mut found = Checkouts::new();
+    // A pack from git declares its addons in its own `pack.toml`: their sources show once the pack is downloaded.
+    loop {
+        let sources = git_sources(config, &found);
+        let new: Vec<GitSource> = sources.into_iter().filter(|s| !found.contains_key(s)).collect();
+        if new.is_empty() {
+            return found;
+        }
+        for source in new {
+            let dir = checkout(cache, &source);
+            found.insert(source, dir);
+        }
+    }
 }
 
 /// The checkout of `source` in `cache`, downloaded when the cache does not have it.

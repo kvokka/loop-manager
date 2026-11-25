@@ -269,3 +269,39 @@ fn a_addon_from_a_directory_of_a_repository_is_the_addon_at_its_path() {
     assert!(by_git.contains(checkout) && !by_git.contains(local), "{by_git}");
     assert_eq!(by_git.replace(checkout, local), by_path);
 }
+
+/// A pack from git declares an addon from git in its `pack.toml`: one load downloads the pack, then the addon it
+/// declares, and the project says nothing of the addon (docs/design/config.md "Pack").
+#[test]
+fn the_addon_a_pack_from_git_declares_is_downloaded_after_the_pack() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let files: Vec<(String, &str)> = MAIL.iter().map(|(p, t)| (format!("sub/mail/{p}"), *t)).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+    let addon = repo(d, "addons", &files);
+    git(d, &d.join("remote/addons"), &["tag", "v1"]);
+    let manifest = format!(
+        "name = \"remote\"\nversion = \"0.1.0\"\n[[addon]]\ngit = \"{}\"\nrev = \"v1\"\ndir = \"sub/mail\"\n",
+        d.join("remote/addons").display()
+    );
+    let agent = "harness = \"claude\"\naddons = [{ name = \"mail\" }]\n";
+    let pack = repo(
+        d,
+        "pack",
+        &[
+            ("pack.toml", manifest.as_str()),
+            ("agents/coder/agent.toml", agent),
+            ("agents/coder/prompt.md", "You code."),
+        ],
+    );
+    config(d, &[("pack", None)]);
+    let file = d.join("config/loop-manager/config.toml");
+    let args = ["--json", "config", "explain", "--config", file.to_str().unwrap()];
+    let (ok, out, err) = loop_manager(
+        d,
+        &[&args[..], &["--project", "shop", "--agent", "remote.coder"]].concat(),
+    );
+    assert!(ok, "{out}{err}");
+    assert_eq!(cached(d), [pack, addon.clone()].into());
+    assert!(out.contains(&format!("{addon}/sub/mail/skills/mail")), "{out}");
+}

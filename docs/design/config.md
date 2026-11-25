@@ -513,8 +513,8 @@ are the root's, and a project `[[trigger]]` that names no `rig` fires in the roo
 
 ### Packs and addons from git
 
-A pack in `packs` and an `[[addon]]` (in the orchestrator file or a project's) is a local directory, or a git
-repository with `pack.toml` / `addon.toml` at its root: `{ git = "<url>", rev = "<tag or commit>" }` for a pack,
+A pack in `packs` and an `[[addon]]` (in the orchestrator file, a project's or a pack's `pack.toml`) is a local
+directory, or a git repository with `pack.toml` / `addon.toml` at its root: `{ git = "<url>", rev = "<tag or commit>" }` for a pack,
 `git = ".."` and `rev = ".."` instead of `path` for an addon (exactly one of `path` and `git`). An addon from git
 may live in a directory of the repository: `dir = "addons/mail"` (relative, inside the repository; `dir` goes with
 `git` only).
@@ -526,7 +526,8 @@ may live in a directory of the repository: `dir = "addons/mail"` (relative, insi
 
 Whoever loads the config downloads first: the daemon at start, at `loop-manager config reload`, `POST /v1/config/check`
 and `GET /v1/doctor`, and the CLI at `loop-manager config check|explain` and `loop-manager doctor` with
-`--config <file>`. The core reads only the finished directories and never runs git. The cache is one per user,
+`--config <file>`. A pack is downloaded before the addons its `pack.toml` declares, which are known only then. The core
+reads only the finished directories and never runs git. The cache is one per user,
 `$XDG_CACHE_HOME/loop-manager/git` (`~/.cache/loop-manager/git` without it):
 
 - `<cache>/<url>/<commit>/` is a detached checkout of the commit, never changed once in place;
@@ -554,17 +555,26 @@ of a checkout in the cache are not detected. git must be in `PATH`; access to th
 helpers) is git's own, and git never asks for a password (`GIT_TERMINAL_PROMPT=0`). Each git command is killed after
 30 s, which fails the load that ran it.
 
-An addon runs any command with the user's rights, so nothing installs or enables one implicitly: its orchestrator
-side and its agent side run only where it is attached in `addons`, and a
-addon from git runs only at the tag or commit its declaration pins.
+An addon runs any command with the user's rights, so nothing enables one implicitly: its orchestrator
+side and its agent side run only where it is attached in `addons`, and an
+addon from git runs only at the tag or commit its declaration pins. A pack is trusted the same way as its agents and
+formulas are: listing it in `packs` takes the addons it declares and the attachments its agents make, at the
+revisions the pack pins; a project that wants another revision of one declares the addon itself (see "Pack").
 
 ## Pack: `<pack>/pack.toml`
 
 ```toml
 name = "kit"
 version = "0.3.0"
-requires_addons = ["mail"]         # must be declared by the orchestrator or the project
+requires_addons = ["mail"]         # must be declared: by the orchestrator, the project or a pack of the project
 min_loop_manager = "0.0.1"                   # optional
+
+[[addon]]                           # an addon the pack declares for every project that lists it
+path = "addons/notes"               # relative to the pack's directory
+[[addon]]                           # or from git, pinned, as in a project's file
+git = "https://github.com/acme/loop-manager-addon-review"
+rev = "v1.2.0"
+dir = "addons/review"               # optional
 
 [settings]                          # layer 7: launch settings of the runs of its formulas
 model = "sonnet"
@@ -581,9 +591,24 @@ Content: `agents/<agent>/agent.toml` (plus `prompt.md`, `prompt.template.md` and
 "Agent"),
 `formulas/**/*.toml`: every `.toml` file under `formulas/`, in subdirectories too, is a formula; and `bin/`, the
 executables its formulas run. A pack
-is the unit of content: agents, formulas, triggers and those executables. It may require addons but never contains one; an addon is
-declared by the orchestrator or the project. A pack holds no word of a user's task: what to do comes only from the
-inputs of a run.
+is the unit of content: agents, formulas, triggers and those executables. A pack holds no word of a user's task: what
+to do comes only from the inputs of a run.
+
+A pack is not an addon, but it may declare the addons its agents attach: an `[[addon]]` of `pack.toml` has the form
+of a project's (`path`, relative to the pack's directory, or `git` with `rev` and an optional `dir`; see
+[above](#packs-and-addons-from-git)) and declares the addon for every project that lists the pack, so the project
+writes nothing for it. Like any declaration it attaches nothing: the pack's agents, or any settings layer of the
+project, attach it by name. The version of an addon is pinned at either level:
+
+- An `[[addon]]` of the same name in the project's `loop-manager.toml` or in the orchestrator file replaces the pack's
+  declaration for that project, and so pins the addon there. The pack's own is then read only for the addon's name:
+  its source must still be there (one from git is downloaded), and nothing else of it is checked or used.
+- Two packs of a project may declare one addon name from one source (the same directory; from git, the same
+  repository at the same commit and the same `dir`): that is one declaration. From different sources it is a config
+  error of the project's file naming both packs, until the project or the orchestrator declares the addon.
+- One `pack.toml` that declares one name twice is a config error.
+
+`requires_addons` lists addons the pack needs and does not declare itself; any of the three declarations satisfies it.
 
 A pack's `bin/` directory, when it has one, goes ahead of `PATH` in the environment of every `exec` step and every
 check script of the pack's formulas (see "Formula"), so a formula writes `command = ["epic-gate"]` wherever the pack
@@ -1100,8 +1125,11 @@ command = ["${LOOP_MANAGER_ADDON_DIR}/bin/inbox", "--folder", "${params.folder}"
 ```
 
 A declaration only names where an addon is: `[[addon]]` with `path`, or `git`, `rev` and an optional `dir` (see
-[above](#packs-and-addons-from-git)), in the orchestrator file or a project's. Addon names are unique across the
-orchestrator and the project. Attaching is the one switch: `addons = [{ name = "mail", params = { folder = "work" }
+[above](#packs-and-addons-from-git)), in the orchestrator file, a project's, or the `pack.toml` of a pack (for the
+projects that list it; see "Pack"). Addon names are unique across the orchestrator file and a project's own: a name
+both declare is a config error. A pack's declaration is the weakest: one of the same name in either file replaces it.
+Each project has its own set, the orchestrator's addons and its own, so two projects of one daemon may declare one
+name from different places; what the daemon keeps by the addon's name alone, `${LOOP_MANAGER_ADDON_DATA}`, they share. Attaching is the one switch: `addons = [{ name = "mail", params = { folder = "work" }
 }]` in any settings layer. In `[settings]` of the orchestrator or a project it attaches the addon to every agent there,
 on a rig to the agents of the rig, in `agent.toml`, a variant or an edit to that agent only; `enabled = false` on a
 stronger layer detaches it. An agent has any number of addons, applied in the order of their first mention: the
