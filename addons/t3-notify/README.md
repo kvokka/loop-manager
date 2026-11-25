@@ -10,7 +10,7 @@ run. A run no thread started is told to nobody.
 - The `t3` command on the daemon's `PATH`, and the T3 Code server of the thread on the daemon's host.
 - `python3` 3.15.2 or newer.
 - `loop-manager` on the daemon's `PATH`, for the spend table (see Params). Without it, or on a build without
-  `loop-manager run spend`, the notices go out without the table.
+  `loop-manager run spend`, the notices go out without the table; `loop-manager doctor` reports it missing.
 - The plugin [`t3-run-card`](../../plugins/README.md#follow-a-run-in-t3-code) 0.5.0 or newer in the harness of the
   thread, with its auto-open on. Its hook writes down which thread started which run.
 
