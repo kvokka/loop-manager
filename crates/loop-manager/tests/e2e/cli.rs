@@ -645,3 +645,21 @@ async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
         "not_found"
     );
 }
+
+#[tokio::test]
+async fn a_budget_that_is_not_a_positive_amount_is_a_bad_request() {
+    let d = Daemon::start(|_| {}).await;
+    for budget in ["0", "abc"] {
+        let out = d.cli(
+            &["run", "start", "shop", "web", "check", "--budget", budget, "--json"],
+            &[],
+        );
+        let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(
+            (out.status.code(), &error["error"]["code"]),
+            (Some(1), &"bad_request".into()),
+            "{budget}"
+        );
+    }
+    assert_eq!(d.json(&["run", "list"]), Value::Array(Vec::new()));
+}
