@@ -2,7 +2,7 @@
 //! translates and executes; it never retries a turn, parks or decides an outcome (docs/architecture.md,
 //! docs/design/adapters.md).
 
-use crate::{BoxFuture, config::EffectiveConfig};
+use crate::{BoxFuture, config::EffectiveConfig, usd::Usd};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -194,6 +194,18 @@ pub enum SessionState {
     Idle,
 }
 
+/// Token quantities of requests, disjoint: no token is counted in two fields, so each takes its own rate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tokens {
+    /// Ordinary input: neither read from nor written to a cache.
+    pub input: u64,
+    pub cache_read: u64,
+    /// Written to a cache that lives five minutes (the provider's short duration).
+    pub cache_write_5m: u64,
+    pub cache_write_1h: u64,
+    pub output: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RateLimit {
     pub utilization: f64,
@@ -215,10 +227,19 @@ pub enum Normalized {
         state: SessionState,
         background: bool,
     },
-    Usage {
-        input_tokens: u64,
-        output_tokens: u64,
-        rate_limit: Option<RateLimit>,
+    /// The limit of the session's account, as the harness last told it.
+    RateLimit(RateLimit),
+    /// The running total of one usage counter of the session, as the harness keeps it (contracts 4.3): the core
+    /// charges the increment over the total it recorded last for the same session and counter.
+    UsageTotal {
+        /// Which counter of the session: claude names it by the model, codex by the thread.
+        counter: String,
+        /// The provider the requests went to, as the harness tells it.
+        provider: String,
+        model: String,
+        tokens: Tokens,
+        /// The harness's own running cost of the counter, an explicit zero included.
+        cost: Option<Usd>,
     },
     Retrying {
         attempt: u32,

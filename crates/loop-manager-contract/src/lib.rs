@@ -11,6 +11,7 @@ pub mod orphans;
 pub mod template;
 pub mod toon;
 pub mod tracker;
+pub mod usd;
 
 pub use event::{SCHEMA, envelope, parse_rfc3339_ms, rfc3339_ms};
 

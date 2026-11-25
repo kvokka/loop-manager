@@ -82,7 +82,10 @@ the core relies on these, and a driver that misses one fails runs by the watchdo
   4.6); text is a narrow fallback, and what no field tells apart is `unknown` with the harness words or the value
   in `text`. A success that carries an error is a failure; an exit in an open turn is `harness_crash` whatever
   the exit code.
-- **`Usage`** carries increments, not running totals; `Retrying{delay}` is in real units (the core adds it to the
+- **`UsageTotal`** carries the harness's running total of one counter of the session, not an increment: the core
+  charges what it adds over the last total of that session and counter, so a total repeated after a resume or a
+  reconnect charges nothing. Its token quantities are disjoint: an adapter whose harness counts cached input inside
+  the input takes it out. `RateLimit` is the account's limit alone. `Retrying{delay}` is in real units (the core adds it to the
   silence limit); the events of one instance are sent in `seq` order by one sender at a time (a repeat is dropped, a
   gap is told as `resync.diverged`).
 - **`Exited{code, signal}`**, instance-wide, once the process is gone, after the failure of a turn it left open.

@@ -37,8 +37,8 @@ and `run_state` a run view, its scalars as fields, its attempts as a table:
 ```text
 agent: null
 attempt: 1
-attempts[1]{ended_at,failure_kind,generation,harness,input_tokens,kind,n,output_tokens,session,started_at,step}:
-  null,null,1,exec,0,new_session,1,0,null,"2026-11-19T04:52:09.427Z","1"
+attempts[1]{cache_read_tokens,cache_write_tokens,cost_usd,ended_at,failure_kind,generation,harness,input_tokens,kind,n,output_tokens,session,started_at,step}:
+  0,0,"0",null,null,1,exec,0,new_session,1,0,null,"2026-11-19T04:52:09.427Z","1"
 ...
 state: running
 ```

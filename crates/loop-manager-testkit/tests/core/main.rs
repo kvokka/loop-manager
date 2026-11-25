@@ -47,6 +47,7 @@ mod root;
 mod runs;
 mod service_ports;
 mod services;
+mod spend;
 mod step_if;
 mod step_repeat;
 mod step_repeat_exits;

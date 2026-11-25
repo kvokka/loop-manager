@@ -290,4 +290,23 @@ fn no_built_in_agent_type_is_left() {
     }
 }
 
+#[test]
+fn the_provider_is_the_host_of_a_base_url_or_anthropic() {
+    let env = |url: &str| vec![("ANTHROPIC_BASE_URL".to_owned(), url.to_owned())];
+    let none = serde_json::json!({});
+    assert_eq!(part::provider(&none, &[]), "anthropic");
+    assert_eq!(part::provider(&none, &env("http://127.0.0.1:8080")), "127.0.0.1");
+    assert_eq!(
+        part::provider(&none, &env("https://u:p@proxy.example/v1?x=1")),
+        "proxy.example"
+    );
+    assert_eq!(part::provider(&none, &env("http://[::1]:9/")), "::1");
+    assert_eq!(part::provider(&none, &env("")), "anthropic");
+    let settings = serde_json::json!({ "settings": { "env": { "ANTHROPIC_BASE_URL": "https://gateway.example" } } });
+    assert_eq!(
+        part::provider(&settings, &env("http://127.0.0.1:8080")),
+        "gateway.example"
+    );
+}
+
 mod process;

@@ -44,7 +44,13 @@ const RUN: Shape = Obj(&[
     ("started_at", Leaf),
 ]);
 
-const USAGE: Shape = Obj(&[("input_tokens", Leaf), ("output_tokens", Leaf)]);
+const USAGE: Shape = Obj(&[
+    ("input_tokens", Leaf),
+    ("cache_read_tokens", Leaf),
+    ("cache_write_tokens", Leaf),
+    ("output_tokens", Leaf),
+    ("cost_usd", Leaf),
+]);
 
 const FAILURE: Shape = Obj(&[
     ("kind", Leaf),

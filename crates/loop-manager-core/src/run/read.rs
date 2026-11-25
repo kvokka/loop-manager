@@ -98,7 +98,7 @@ impl Reader {
         view["back_from"] = super::render::back_from(&conn, id)?;
         view["attempts"] = json!(row::attempt_history(&conn, id, all)?);
         view["steps"] = json!(super::render::step_results(&conn, id, &row.step)?);
-        view["usage"] = row::usage(&conn, id)?;
+        view["usage"] = super::spend::usage(&conn, id)?;
         Ok(Some(view))
     }
 

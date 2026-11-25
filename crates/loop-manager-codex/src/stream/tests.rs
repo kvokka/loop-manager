@@ -1,6 +1,6 @@
 use super::*;
 use crate::rpc;
-use loop_manager_contract::driver::RateLimit;
+use loop_manager_contract::driver::{RateLimit, Tokens};
 use serde_json::json;
 
 mod classify;
@@ -29,7 +29,7 @@ pub(super) fn turn_completed(status: &str, error: Value) -> Value {
 #[test]
 fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
     let mut stream = Stream::new(Some("acct".into()));
-    stream.bind("t", Some("gpt-fake".into()));
+    stream.bind("t", Some("gpt-fake".into()), Some("fake".into()));
     let command = json!({ "type": "commandExecution", "id": "c1" });
     let events = play(
         &mut stream,
@@ -43,7 +43,8 @@ fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
             note("item/completed", json!({ "threadId": "t", "item": command })),
             note(
                 "thread/tokenUsage/updated",
-                json!({ "threadId": "t", "tokenUsage": { "last": { "inputTokens": 5, "outputTokens": 2 } } }),
+                json!({ "threadId": "t", "tokenUsage": { "last": { "inputTokens": 5, "outputTokens": 2 },
+                    "total": { "inputTokens": 9, "outputTokens": 4 } } }),
             ),
             note(
                 "thread/status/changed",
@@ -63,10 +64,16 @@ fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
             },
             Normalized::Activity { tool_running: true },
             Normalized::Activity { tool_running: false },
-            Normalized::Usage {
-                input_tokens: 5,
-                output_tokens: 2,
-                rate_limit: None
+            Normalized::UsageTotal {
+                counter: "t".into(),
+                provider: "fake".into(),
+                model: "gpt-fake".into(),
+                tokens: Tokens {
+                    input: 9,
+                    output: 4,
+                    ..Tokens::default()
+                },
+                cost: None,
             },
             Normalized::TurnEnded {
                 stop_reason: StopReason::Completed
@@ -80,10 +87,49 @@ fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
     assert!(stream.open().is_empty());
 }
 
+/// The usage is the thread's running total with the cached and cache-written input taken out of `inputTokens`; a
+/// resumed thread tells the total it had again, which is the same total and no new spend.
+#[test]
+fn a_thread_tells_its_running_total_without_the_cache_in_the_input_and_again_on_a_resume() {
+    let total = |input: u64, cached: u64, written: Option<u64>, output: u64| {
+        let mut total = json!({ "inputTokens": input, "cachedInputTokens": cached, "outputTokens": output,
+            "reasoningOutputTokens": 3 });
+        if let Some(written) = written {
+            total["cacheWriteInputTokens"] = json!(written);
+        }
+        note(
+            "thread/tokenUsage/updated",
+            json!({ "threadId": "t", "tokenUsage": { "last": total, "total": total } }),
+        )
+    };
+    let told = |input, cache_read, cache_write_5m, output| Normalized::UsageTotal {
+        counter: "t".into(),
+        provider: "openai".into(),
+        model: "gpt-fake".into(),
+        tokens: Tokens {
+            input,
+            cache_read,
+            cache_write_5m,
+            cache_write_1h: 0,
+            output,
+        },
+        cost: None,
+    };
+    let mut first = Stream::new(None);
+    first.bind("t", Some("gpt-fake".into()), Some("openai".into()));
+    let events = play(&mut first, &[total(100, 60, Some(10), 8), total(5, 9, None, 1)]);
+    // More cached than input (not seen from codex) leaves no ordinary input rather than wrapping.
+    assert_eq!(events, [told(30, 60, 10, 8), told(0, 9, 0, 1)]);
+    let mut resumed = Stream::new(None);
+    resumed.bind("t", Some("gpt-fake".into()), Some("openai".into()));
+    let events = play(&mut resumed, &[total(100, 60, Some(10), 8)]);
+    assert_eq!(events, [told(30, 60, 10, 8)]);
+}
+
 #[test]
 fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
     let mut stream = Stream::new(Some("acct".into()));
-    stream.bind("t", Some("gpt-fake".into()));
+    stream.bind("t", Some("gpt-fake".into()), None);
     let limits = json!({ "rateLimits": { "primary": { "usedPercent": 100, "resetsAt": 1_794_284_533 },
         "secondary": { "usedPercent": 42, "resetsAt": 1_794_680_933 } } });
     let error = json!({ "message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded" });
@@ -100,14 +146,10 @@ fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
             turn_completed("failed", error.clone()),
         ],
     );
-    let usage = Normalized::Usage {
-        input_tokens: 0,
-        output_tokens: 0,
-        rate_limit: Some(RateLimit {
-            utilization: 1.0,
-            resets_at_ms: Some(1_794_284_533_000),
-        }),
-    };
+    let usage = Normalized::RateLimit(RateLimit {
+        utilization: 1.0,
+        resets_at_ms: Some(1_794_284_533_000),
+    });
     assert_eq!(events[1], usage);
     let Normalized::Failure(failure) = &events[2] else {
         panic!("{events:?}")
@@ -134,7 +176,7 @@ fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
 #[test]
 fn a_window_past_its_reset_no_longer_counts() {
     let mut stream = Stream::new(None);
-    stream.bind("t", None);
+    stream.bind("t", None, None);
     let limits = |l: Value| note("account/rateLimits/updated", json!({ "rateLimits": l }));
     let events = play(
         &mut stream,
@@ -145,13 +187,11 @@ fn a_window_past_its_reset_no_longer_counts() {
             limits(json!({ "secondary": { "usedPercent": 50, "resetsAt": 4_000_000_000_i64 } })),
         ],
     );
-    let usage = |utilization, at: i64| Normalized::Usage {
-        input_tokens: 0,
-        output_tokens: 0,
-        rate_limit: Some(RateLimit {
+    let usage = |utilization, at: i64| {
+        Normalized::RateLimit(RateLimit {
             utilization,
             resets_at_ms: Some(at * 1000),
-        }),
+        })
     };
     assert_eq!(events[1..], [usage(1.0, 1_000), usage(0.5, 4_000_000_000)]);
 }

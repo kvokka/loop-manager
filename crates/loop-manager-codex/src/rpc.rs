@@ -152,6 +152,14 @@ pub(crate) async fn read(
                 lock(&instance.stream).accepted(&thread);
                 send(Some(thread), Normalized::PromptAcked { key });
             }
+            // A started or resumed thread is bound before the next line is read: codex tells a resumed thread's usage
+            // right after the answer, before the caller of `thread/resume` runs again.
+            if let Ok(result) = &reply
+                && let (Some(thread), Some(model)) = (result["thread"]["id"].as_str(), result["model"].as_str())
+            {
+                let provider = result["modelProvider"].as_str().map(str::to_owned);
+                lock(&instance.stream).bind(thread, Some(model.to_owned()), provider);
+            }
             if let Some(tx) = lock(&instance.pending).remove(&id) {
                 let _ = tx.send(reply);
             }

@@ -73,10 +73,10 @@ Shared objects:
   depth of 6.1 (0 for a run started by hand), `parent_run` the run whose event triggered it or whose session started
   it. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
-  name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`{input_tokens, output_tokens}`, summed
-  over every attempt) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the
-  oldest closure of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the
-  formula's checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
+  name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`Usage`, of the run and its
+  subtree) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the oldest closure
+  of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the formula's
+  checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`
   return sets 1; `attempt` stays the attempt of the session). `GET /v1/runs/{id}` alone adds `bases`: the directory of
   the run's base in each place, its own (`workdir`) and each other place where it had children (config.md,
@@ -89,8 +89,12 @@ Shared objects:
 - `Gate`: `{key, until, reason, closed_by: "policy"|"operator"|"core", closed_at}`, `until` null = until removed
   by hand.
 - `Attempts`: list of `{n, generation, step, kind: "new_session"|"resume", started_at, ended_at, failure_kind,
-  input_tokens, output_tokens}` of the run (`step`: the formula step the attempt ran), newest last, at most 20 entries;
-  the tokens are the sums of the attempt's `usage` events.
+  input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, cost_usd}` of the run (`step`: the formula step
+  the attempt ran), newest last, at most 20 entries; the tokens and the cost are what the spend ledger charged to the
+  attempt, its session's subagents and late usage included.
+- `Usage`: `{input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, cost_usd}`, disjoint token quantities
+  (`input_tokens` is input neither read from nor written to a cache; `cache_write_tokens` counts both durations) and
+  `cost_usd`, USD as an exact decimal string (`"0.00143244"`).
 - `Outcome`: `{result: "pass"|"fail", summary, data}`; `summary` ≤ 4 KiB, `data` any JSON ≤ 64 KiB.
 
 Observed events (addons and clients read them and cannot change what happens):
@@ -146,7 +150,9 @@ Each of them carries `deadline`, the time after which the core applies the "no a
 | `run.turn_ended_without_outcome` | `{run, stop_reason, remarks, attempts: Attempts, deadline}` |
 | `run.finishing` | `{run, outcome: Outcome, remarks, final, deadline}` |
 
-`usage` is `{input_tokens, output_tokens}` summed over every attempt of the run; `rate_limit` is the last limit known
+`usage` is the `Usage` of the run and of its subtree as the event is written: every run its sessions and steps
+started, down the chain, but a run a trigger started (docs/design/formula-budgets.md); usage the harness reports later
+is charged all the same and shows in the read API; `rate_limit` is the last limit known
 for the run's account. `stop_reason` of `run.turn_ended_without_outcome` is the reported one (`completed`, `cancelled`,
 `failed`). `remarks` is the number of remarks already returned in this attempt. `final` of `run.finishing` is true for
 a `pass` that ends the run once accepted: its step is the last of the formula and no check of its row before it failed. `gates` lists every closed gate whose
@@ -432,7 +438,8 @@ the stop reason of a turn and a denied permission reach the policy and the obser
 | `turn.started` | — | watchdog: first event seen |
 | `turn.ended` | `stop_reason: completed \| cancelled \| failed` | candidate end of the attempt's work; `failed` follows a `failure` event; `stop_reason` goes to `run.turn_ended_without_outcome` |
 | `state` | `state: running \| idle`, `background: bool` | "idle without background" = `idle` and `background == false`; the adapter applies the harness rule. `idle` with `background` after the turn ended and with the outcome declared makes the core call `stop_background` (6.3) |
-| `usage` | `input_tokens, output_tokens, rate_limit: {utilization, resets_at} \| null` | the core adds the tokens (increments) to the attempt; keeps the last `rate_limit` per account key (`account:<harness>/<id>`, one row, replaced by each report); still activity for the watchdog |
+| `usage_total` | `counter, provider, model, tokens: {input, cache_read, cache_write_5m, cache_write_1h, output}, cost: USD \| null` | the running total of one usage counter of the session as the harness keeps it, the token quantities disjoint, `cost` the harness's own running cost (an explicit zero included). The core charges the increment over the checkpoint it keeps per session and counter to the newest attempt of the session, ended or not (late usage counts), and moves the checkpoint; a total below the checkpoint in any field is a new count, charged whole. A repeated total charges nothing, so a resume or a restart never charges a request twice. Still activity for the watchdog |
+| `rate_limit` | `utilization, resets_at` | keeps the last limit per account key (`account:<harness>/<id>`, one row, replaced by each report); still activity for the watchdog |
 | `retrying` | `attempt, delay, text` | in `running`: journals `run.retrying` (`next_retry_at` = now + `delay`) and sets the silence deadline to silence + `delay` (an announced pause is not silence) |
 | `permission_denied` | `tool, tool_use_id, input, reason` | in every live state: journals `run.permission_denied`; still activity for the watchdog in `running` |
 | `activity` | `tool_running: bool` | watchdog only: moves the silence deadline, kept in memory, no transaction; the adapter coalesces it to at most one per second per session |
@@ -505,6 +512,7 @@ the key comes from, not what it is.
 | Resume | full flag set again on every `--resume` | full thread config again on every `thread/resume`, after app-server closed the thread (`thread/unsubscribe` until `notLoaded`, at most 10 s, else `transcript_divergence`; a `thread/resume` refused because the thread is still closing is retried within the same 10 s): a thread it still holds keeps the old config |
 | Attempt environment | process environment | `shell_environment_policy.set` of the thread; a hook runs with the process environment, so each hook command starts with `export` of the same variables |
 | Stop of what a session left | `control_request{stop_task}` on every `local_bash` task of the last `background_tasks_changed` (a `local_agent` subagent is left alone); the `task_notification{stopped}` that follows is not a wake-up | `thread/backgroundTerminals/clean{threadId}` (experimental API): only that thread's commands go, each one's `item/completed` follows; a command that detached itself goes on `close_session`, killed by the thread's attempt token |
+| Usage | one `usage_total` per model of `modelUsage` of every `result`: cumulative over the session, its subagents and every `--resume` included, `inputTokens` apart from the cache, the 5m/1h split of cache writes when claude gives it (else all 5m), `costUSD` as the cost. Counter and model: the model id; provider: the host of `ANTHROPIC_BASE_URL` of the session's settings or process environment, else `anthropic` | `thread/tokenUsage/updated` → one `usage_total` of `tokenUsage.total`, counter the thread id, model and provider of the `thread/start` or `thread/resume` answer (bound as the answer is read: codex tells a resumed thread's restored total right after it); `cachedInputTokens` and `cacheWriteInputTokens` are taken out of `inputTokens`, `reasoningOutputTokens` stays inside `outputTokens`; no cost |
 | Transcript check | the session file under `config_dir`: user record with `key`, answer after it | `thread/read` with turns: `userMessage` with `clientId == key`, completed turn after it |
 
 Every adapter runs each session process (claude) or instance process (codex) in its own process group, and takes
@@ -709,7 +717,7 @@ issue and its comments; the parents are read too but left out of the reply, so a
 attempt of a run with an issue ends, the core adds an effect for it in the same transaction, on the queue
 `tracker:<project>:audit`, so a record the tracker refuses for a while holds up no claim, read or release: one entry
 per attempt, the object `{run, attempt, step, round, agent, harness, model, session, outcome, summary, failure,
-input_tokens, output_tokens}` from the state as the attempt ends (`outcome` is the declared `pass` or `fail`, also of a
+input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, cost_usd}` from the state as the attempt ends (`outcome` is the declared `pass` or `fail`, also of a
 stop by the `context-budget` addon, and `summary` its text; `failure` is the attempt's failure; each is `null` when
 the attempt has none). A repeated effect (a restart between the call and its report) may append the entry twice. An
 `Unavailable` tracker is tried again and an `Invalid` answer dropped, both reported as

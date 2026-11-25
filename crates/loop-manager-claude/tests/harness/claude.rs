@@ -4,10 +4,10 @@
 use loop_manager_claude::Claude;
 use loop_manager_contract::{
     config::{EffectiveConfig, Hook, Layer, Mcp, Skill, Sourced},
-    driver::{Driver, DriverEvent, Normalized, PromptKey, SessionPlan, SessionState, StopReason, Transcript},
+    driver::{Driver, DriverEvent, Normalized, PromptKey, SessionPlan, SessionState, StopReason, Tokens, Transcript},
 };
 use loop_manager_testkit::anthropic::{Provider, Reply};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path, time::Duration};
 use tokio::sync::mpsc;
 
@@ -117,6 +117,47 @@ async fn a_reply_is_acked_and_completed_and_is_in_the_transcript() {
         })
     );
     assert_eq!(transcript, Transcript::Present { delivered: true });
+}
+
+/// The usage of a turn is the session's running total of its model, with the cache the provider reported and the cost
+/// claude priced, named by the host of `ANTHROPIC_BASE_URL`.
+#[tokio::test]
+async fn a_turn_tells_the_running_total_of_its_model_with_cache_and_cost() {
+    let dir = tempfile::tempdir().unwrap();
+    let usage = json!({ "input_tokens": 7, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 50,
+        "cache_creation": { "ephemeral_5m_input_tokens": 20, "ephemeral_1h_input_tokens": 30 }, "output_tokens": 4 });
+    let reply = Reply::Usage(usage, Box::new(Reply::Text("OK".into())));
+    let (seen, _, raw, _) = turn(vec![reply], dir.path(), |_| {}).await;
+    let result = raw.iter().find(|m| m["type"] == "result").expect("a result");
+    let totals: Vec<_> = seen
+        .iter()
+        .filter_map(|e| match e {
+            Normalized::UsageTotal {
+                counter,
+                provider,
+                model,
+                tokens,
+                cost,
+            } => Some((counter.as_str(), provider.as_str(), model.as_str(), *tokens, *cost)),
+            _ => None,
+        })
+        .collect();
+    let [(counter, provider, model, tokens, cost)] = totals[..] else {
+        panic!("one total in {seen:?}, result {result}")
+    };
+    assert_eq!(
+        (counter, provider, model),
+        ("claude-haiku-5-5", "127.0.0.1", "claude-haiku-5-5")
+    );
+    let expected = Tokens {
+        input: 7,
+        cache_read: 300,
+        cache_write_5m: 20,
+        cache_write_1h: 30,
+        output: 4,
+    };
+    assert_eq!(tokens, expected, "{result}");
+    assert!(cost.is_some_and(|c| c.0 > 0), "{cost:?} of {result}");
 }
 
 #[tokio::test]

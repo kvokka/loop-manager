@@ -214,8 +214,8 @@ impl RunHandler {
             params![row.id, row.attempt],
         )?;
         tx.sql().execute(
-            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step, round) \
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, round FROM runs WHERE id = ?1",
+            "INSERT INTO attempts (run, n, kind, harness, started_ms, token_sha256, step, round, agent) \
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, round, agent FROM runs WHERE id = ?1",
             // The kind that happens: a resume with no session to resume is a new session.
             params![
                 row.id,
@@ -408,7 +408,7 @@ impl RunHandler {
             self.end_child(tx, &row)?;
         }
         self.let_go_issue(tx, &row, state, reason)?;
-        let usage = super::row::usage(tx.sql(), &row.id)?;
+        let usage = super::spend::usage(tx.sql(), &row.id)?;
         let data = match state {
             "passed" => json!({ "run": row.view(), "outcome": outcome, "usage": usage }),
             "failed" => json!({ "run": row.view(), "class": class, "reason": reason, "outcome": outcome,

@@ -358,6 +358,25 @@ pub(crate) fn env(p: &Value, id: &str, socket: Option<&Path>, host: &Path) -> Re
     Ok(env)
 }
 
+/// The provider the requests of `claude` go to, which its usage names: the host of `ANTHROPIC_BASE_URL` (a proxy or a
+/// gateway) when the `--settings` env or the process environment `env` sets one, `anthropic` otherwise.
+pub(crate) fn provider(p: &Value, env: &[(String, String)]) -> String {
+    const BASE_URL: &str = "ANTHROPIC_BASE_URL";
+    let set = env.iter().rev().find(|(k, _)| k == BASE_URL).map(|(_, v)| v.as_str());
+    let url = p["settings"]["env"][BASE_URL].as_str().or(set).unwrap_or_default();
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next(),
+        None => authority.split(':').next(),
+    };
+    match host {
+        Some(host) if !host.is_empty() => host.to_owned(),
+        _ => "anthropic".to_owned(),
+    }
+}
+
 /// The daemon's variables `claude` gets; a session inheriting the host also gets the host's config directory and
 /// network settings.
 pub(crate) fn daemon_vars(p: &Value) -> impl Iterator<Item = &'static str> {

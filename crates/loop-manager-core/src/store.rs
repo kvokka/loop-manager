@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 27;
+const VERSION: i32 = 28;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -84,6 +84,7 @@ CREATE TABLE runs (
 );
 CREATE INDEX runs_state ON runs (state);
 CREATE INDEX runs_trigger ON runs (trigger);
+CREATE INDEX runs_parent ON runs (parent_run);
 -- The finisher (contracts 6.3): the attempt token by its SHA-256, the declared `outcome` and the number of `prompts`
 -- the attempt sent (remarks = prompts - 1). `waited`: its failure parked the run on an account gate, so it is
 -- outside the attempts ceiling (invariant 16). The tokens it used (contracts 4.3) and the step it ran. `skipped`:
@@ -107,15 +108,44 @@ CREATE TABLE attempts (
     prompts INTEGER NOT NULL DEFAULT 1,
     services TEXT,
     waited INTEGER NOT NULL DEFAULT 0,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
     step TEXT NOT NULL DEFAULT '1',
+    agent TEXT, -- The agent of the step for an ai step: who the spend of its session is charged to.
     skipped INTEGER NOT NULL DEFAULT 0,
     round INTEGER NOT NULL,
     workdir TEXT, -- Reserved in schema 26.
     PRIMARY KEY (run, n)
 );
 CREATE INDEX attempts_instance ON attempts (instance);
+CREATE INDEX attempts_session ON attempts (session);
+-- The spend ledger (docs/design/formula-budgets.md): sums per attempt, agent, provider, model and the price used.
+-- `price` is the JSON of the price used, its `source` `harness` or `none`. `cost` is in pico-USD.
+CREATE TABLE spend (
+    run TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    price TEXT NOT NULL,
+    input INTEGER NOT NULL DEFAULT 0,
+    cache_read INTEGER NOT NULL DEFAULT 0,
+    cache_write_5m INTEGER NOT NULL DEFAULT 0,
+    cache_write_1h INTEGER NOT NULL DEFAULT 0,
+    output INTEGER NOT NULL DEFAULT 0,
+    cost INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (run, attempt, agent, provider, model, price)
+);
+-- The last running total each usage counter of a session reported: the checkpoint the next total is charged over.
+CREATE TABLE spend_counters (
+    session TEXT NOT NULL,
+    counter TEXT NOT NULL,
+    input INTEGER NOT NULL,
+    cache_read INTEGER NOT NULL,
+    cache_write_5m INTEGER NOT NULL,
+    cache_write_1h INTEGER NOT NULL,
+    output INTEGER NOT NULL,
+    cost INTEGER,
+    PRIMARY KEY (session, counter)
+);
 CREATE INDEX attempts_token ON attempts (token_sha256);
 -- The delivery record of every prompt of an attempt (contracts 6.4): `n` counts from 1.
 CREATE TABLE prompts (

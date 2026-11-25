@@ -4,7 +4,8 @@ use loop_manager_codex::Codex;
 use loop_manager_contract::{
     config::{EffectiveConfig, Layer, Skill, Sourced},
     driver::{
-        Driver, DriverEvent, FailureKind, Normalized, PromptKey, SessionPlan, SessionState, StopReason, Transcript,
+        Driver, DriverEvent, FailureKind, Normalized, PromptKey, SessionPlan, SessionState, StopReason, Tokens,
+        Transcript,
     },
 };
 use loop_manager_testkit::openai::{Provider, Reply};
@@ -360,5 +361,96 @@ async fn a_detached_command_goes_with_its_thread() {
         None,
         "the command went with its thread"
     );
+    driver.stop_instance(&instance, Duration::from_secs(4)).await;
+}
+
+/// The usage of a thread is its running total with the cached input apart from the ordinary one, named by the
+/// thread's provider and model; a thread resumed by a new app-server goes on from its total.
+#[tokio::test]
+async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
+    let usage = |input: u64, cached: u64, written: u64, output: u64| {
+        json!({ "input_tokens": input,
+            "input_tokens_details": { "cached_tokens": cached, "cache_write_tokens": written },
+            "output_tokens": output, "output_tokens_details": { "reasoning_tokens": 1 }, "total_tokens": input + output })
+    };
+    let provider = Provider::start(vec![
+        Reply::Usage(usage(100, 60, 10, 8), Box::new(Reply::Text("one".into()))),
+        Reply::Usage(usage(50, 20, 0, 2), Box::new(Reply::Text("two".into()))),
+    ])
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let driver = Codex::new("codex".into(), dir.path().join("state"), None, 8);
+    let (workdir, run) = (dir.path().to_path_buf(), "r".to_owned());
+    let plan = SessionPlan::New {
+        workdir: workdir.clone(),
+        run: run.clone(),
+        attempt: 1,
+        token: "one".into(),
+        actor: None,
+        issue: None,
+    };
+    let totals = |events: &[Normalized]| -> Vec<(String, String, String, Tokens, bool)> {
+        let totals = events.iter().filter_map(|e| match e {
+            Normalized::UsageTotal {
+                counter,
+                provider,
+                model,
+                tokens,
+                cost,
+            } => Some((
+                counter.clone(),
+                provider.clone(),
+                model.clone(),
+                *tokens,
+                cost.is_some(),
+            )),
+            _ => None,
+        });
+        totals.collect()
+    };
+    let split = driver.split(&config(&provider), &plan).unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let instance = driver.start_instance("i1", &split.process, tx.clone()).await.unwrap();
+    let session = driver.start_session(&instance, &split.session).await.unwrap();
+    let prompt = driver.send_prompt(&instance, &session, "one", PromptKey::new("r", 1, 1));
+    prompt.await.unwrap();
+    let first = until(&mut rx, |e| matches!(e, Normalized::TurnEnded { .. })).await;
+    let first = totals(&first);
+    let thread = &first.last().unwrap_or_else(|| panic!("no total")).0;
+    let told = |input, cache_read, cache_write_5m, output| {
+        let tokens = Tokens {
+            input,
+            cache_read,
+            cache_write_5m,
+            cache_write_1h: 0,
+            output,
+        };
+        (thread.clone(), "fake".to_owned(), "gpt-fake".to_owned(), tokens, false)
+    };
+    assert_eq!(first, [told(30, 60, 10, 8)]);
+    driver.stop_instance(&instance, Duration::from_secs(4)).await;
+    until(&mut rx, |e| matches!(e, Normalized::Exited { .. })).await;
+
+    let plan = SessionPlan::Resume {
+        session: session.clone(),
+        workdir,
+        run,
+        attempt: 2,
+        token: "two".into(),
+        actor: None,
+        issue: None,
+    };
+    let split = driver.split(&config(&provider), &plan).unwrap();
+    let instance = driver.start_instance("i2", &split.process, tx).await.unwrap();
+    let resumed = driver.resume_session(&instance, &session, &split.session);
+    resumed.await.unwrap();
+    let prompt = driver.send_prompt(&instance, &session, "two", PromptKey::new("r", 2, 1));
+    prompt.await.unwrap();
+    let second = until(&mut rx, |e| matches!(e, Normalized::TurnEnded { .. })).await;
+    // A total told again at the resume is the one the thread had.
+    let second = totals(&second);
+    let (again, last) = second.split_at(second.len().saturating_sub(1));
+    assert!(again.iter().all(|t| *t == told(30, 60, 10, 8)), "{second:?}");
+    assert_eq!(last, [told(60, 80, 10, 10)]);
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
 }

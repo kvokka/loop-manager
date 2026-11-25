@@ -94,6 +94,7 @@ impl Claude {
         p["files"] = json!(files);
         let p = &p;
         let env = part::env(p, id, self.socket.as_deref(), &part::host_dir())?;
+        let provider = part::provider(p, &env);
         let mut command = Command::new(&self.binary);
         command
             .args(part::args(p))
@@ -109,7 +110,7 @@ impl Claude {
         let session = SessionRef(json!({
             "session_id": p["session_id"], "config_dir": p["config_dir"], "workdir": p["workdir"],
         }));
-        let stream = Stream::new(Some(part::account(p)), p["model"].as_str().map(str::to_owned));
+        let stream = Stream::new(Some(part::account(p)), p["model"].as_str().map(str::to_owned), provider);
         let instance = Arc::new(Instance {
             session: session.clone(),
             stdin: tokio::sync::Mutex::new(child.stdin.take()),

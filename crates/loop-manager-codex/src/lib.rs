@@ -144,12 +144,11 @@ impl Codex {
         Ok(handle)
     }
 
-    /// Binds a started or resumed thread: its model names its failures, its messages go to its live channel.
+    /// Binds a started or resumed thread: its messages go to its live channel. Its model and provider are bound to
+    /// the stream as the answer is read (`rpc::read`).
     fn bind(&self, instance: &Instance, thread: &str, result: &Value, part: &Value) {
         let token = part["config"]["shell_environment_policy"]["set"]["LOOP_MANAGER_ATTEMPT_TOKEN"].as_str();
         lock(&instance.tokens).insert(thread.to_owned(), token.unwrap_or_default().to_owned());
-        let model = result["model"].as_str().map(str::to_owned);
-        lock(&instance.stream).bind(thread, model);
         let tap = rpc::ThreadTap {
             messages: broadcast::channel(256).0,
             path: result["thread"]["path"].as_str().map(PathBuf::from),

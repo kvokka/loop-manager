@@ -58,6 +58,9 @@ pub enum Reply {
     Hang,
     /// Silence before the headers.
     Silent,
+    /// The reply with these fields of a Responses API `usage` (`input_tokens`, `input_tokens_details`,
+    /// `output_tokens`, `output_tokens_details`, `total_tokens`) in place of the fixed ones.
+    Usage(Value, Box<Reply>),
 }
 
 /// A model request the fake received.
@@ -102,7 +105,7 @@ impl Provider {
                     n
                 };
                 let reply = plan[n.min(plan.len()) - 1].clone();
-                answer(n, reply, &body).await
+                answer(n, reply, &body, &Value::Null).await
             }
         });
         let server = tokio::spawn(async move {
@@ -128,7 +131,8 @@ impl Drop for Provider {
     }
 }
 
-async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
+/// `usage`: the scripted fields of the response's usage, or null.
+async fn answer(n: usize, reply: Reply, body: &Value, usage: &Value) -> Response {
     let model = body["model"].as_str().unwrap_or_default();
     match reply {
         Reply::Text(text) => {
@@ -136,7 +140,7 @@ async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
                 "status": "completed", "content": [{ "type": "output_text", "text": text, "annotations": [] }] });
             let delta = json!({ "type": "response.output_text.delta", "item_id": format!("msg_fake_{n}"),
                 "output_index": 0, "content_index": 0, "delta": text });
-            stream(n, model, item, Some(delta))
+            stream(n, model, usage, item, Some(delta))
         }
         Reply::Task(command) => {
             let ran = body["input"].as_array().and_then(|i| i.last()).map(|i| &i["type"]);
@@ -144,15 +148,15 @@ async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
                 Some(kind) if kind == "function_call_output" => Reply::Text("Done.".into()),
                 _ => Reply::Command(command),
             };
-            Box::pin(answer(n, reply, body)).await
+            Box::pin(answer(n, reply, body, usage)).await
         }
         Reply::Command(command) => {
             let arguments = json!({ "cmd": command }).to_string();
             let item = json!({ "type": "function_call", "id": format!("fc_fake_{n}"), "status": "completed",
                 "call_id": format!("call_fake_{n}"), "name": "exec_command", "arguments": arguments });
-            stream(n, model, item, None)
+            stream(n, model, usage, item, None)
         }
-        Reply::Mcp(suffix) => Box::pin(answer(n, Reply::Call(suffix, json!({})), body)).await,
+        Reply::Mcp(suffix) => Box::pin(answer(n, Reply::Call(suffix, json!({})), body, usage)).await,
         Reply::Call(suffix, arguments) => {
             // codex puts the tools of MCP server `s` in a namespace `mcp__s`: a call names both.
             let tools = body["tools"].as_array().into_iter().flatten();
@@ -162,19 +166,20 @@ async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
                 None => vec![(t, Value::Null)],
             });
             let Some((tool, namespace)) = found.find(|(t, _)| named(t)) else {
-                return Box::pin(answer(n, Reply::Text(format!("No tool *{suffix}.")), body)).await;
+                return Box::pin(answer(n, Reply::Text(format!("No tool *{suffix}.")), body, usage)).await;
             };
             let item = json!({ "type": "function_call", "id": format!("fc_fake_{n}"), "status": "completed",
                 "call_id": format!("call_fake_{n}"), "name": tool["name"], "namespace": namespace,
                 "arguments": arguments.to_string() });
-            stream(n, model, item, None)
+            stream(n, model, usage, item, None)
         }
         Reply::Turn(replies) => {
             let input = body["input"].as_array().into_iter().flatten();
             let done = input.filter(|i| i["type"] == "function_call_output").count();
             let reply = replies[done.min(replies.len() - 1)].clone();
-            Box::pin(answer(n, reply, body)).await
+            Box::pin(answer(n, reply, body, usage)).await
         }
+        Reply::Usage(usage, reply) => Box::pin(answer(n, *reply, body, &usage)).await,
         Reply::RateLimited => error(
             StatusCode::TOO_MANY_REQUESTS,
             json!({ "type": "rate_limit_exceeded", "code": "rate_limit_exceeded",
@@ -249,7 +254,7 @@ fn usage_limit(after: u64) -> Response {
 }
 
 /// A completed response of one output item; a text item is streamed by its delta first.
-fn stream(n: usize, model: &str, item: Value, delta: Option<Value>) -> Response {
+fn stream(n: usize, model: &str, usage: &Value, item: Value, delta: Option<Value>) -> Response {
     let mut events = vec![
         json!({ "type": "response.created", "response": response(n, model, "in_progress", json!([])) }),
         json!({ "type": "response.output_item.added", "output_index": 0, "item": item }),
@@ -259,6 +264,9 @@ fn stream(n: usize, model: &str, item: Value, delta: Option<Value>) -> Response 
     let mut completed = response(n, model, "completed", json!([item]));
     completed["usage"] = json!({ "input_tokens": 10, "input_tokens_details": { "cached_tokens": 0 },
         "output_tokens": 3, "output_tokens_details": { "reasoning_tokens": 0 }, "total_tokens": 13 });
+    for (key, value) in usage.as_object().into_iter().flatten() {
+        completed["usage"][key] = value.clone();
+    }
     events.push(json!({ "type": "response.completed", "response": completed }));
     let body: Vec<Bytes> = events
         .into_iter()

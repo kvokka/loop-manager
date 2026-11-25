@@ -11,12 +11,13 @@ pub(super) fn feed(stream: &mut Stream, lines: &[Value]) -> Vec<Normalized> {
 }
 
 pub(super) fn stream() -> Stream {
-    Stream::new(Some("acct".into()), Some("claude-haiku-5-5".into()))
+    Stream::new(Some("acct".into()), Some("claude-haiku-5-5".into()), "anthropic".into())
 }
 
 pub(super) fn result(is_error: bool, extra: Value) -> Value {
     let mut msg = json!({ "type": "result", "subtype": "success", "is_error": is_error,
-        "usage": { "input_tokens": 3, "output_tokens": 2 }, "result": "OK" });
+        "usage": { "input_tokens": 3, "output_tokens": 2 }, "result": "OK",
+        "modelUsage": { "claude-haiku-5-5": { "inputTokens": 3, "outputTokens": 2, "costUSD": 0 } } });
     msg.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
     msg
 }
@@ -56,10 +57,16 @@ fn a_reply_is_acked_started_and_completed() {
             Normalized::PromptAcked { key },
             Normalized::TurnStarted,
             Normalized::Activity { tool_running: false },
-            Normalized::Usage {
-                input_tokens: 3,
-                output_tokens: 2,
-                rate_limit: None
+            Normalized::UsageTotal {
+                counter: "claude-haiku-5-5".into(),
+                provider: "anthropic".into(),
+                model: "claude-haiku-5-5".into(),
+                tokens: Tokens {
+                    input: 3,
+                    output: 2,
+                    ..Tokens::default()
+                },
+                cost: Some(Usd(0)),
             },
             Normalized::TurnEnded {
                 stop_reason: StopReason::Completed
@@ -308,4 +315,57 @@ fn a_denial_is_told_once_from_either_source() {
     );
     let next = denials(feed(&mut s, &[listed(&["toolu_1"])]));
     assert_eq!(next, [told("toolu_1", json!({ "command": "touch a" }), None)]);
+}
+
+/// `modelUsage` of a `result` is the session's running total per model (a subagent's model among them), taken over
+/// `usage`, the main loop's last turn; the cache writes keep their duration, or are five-minute ones unsplit.
+#[test]
+fn a_result_tells_the_running_total_of_every_model_with_its_cache_and_cost() {
+    let mut s = Stream::new(None, None, "gateway.example".into());
+    // The second result of experiment 1a's `basic`, with a subagent on another model that does not split its writes.
+    let models = json!({ "modelUsage": {
+        "claude-haiku-5-5": { "inputTokens": 4, "cacheReadInputTokens": 25211, "cacheCreationInputTokens": 10762,
+            "cacheCreationEphemeral5mInputTokens": 0, "cacheCreationEphemeral1hInputTokens": 10762,
+            "outputTokens": 9, "costUSD": 0.00240941 },
+        "claude-sonnet-5": { "inputTokens": 7, "cacheReadInputTokens": 100, "cacheCreationInputTokens": 50,
+            "outputTokens": 11 } } });
+    let events = feed(
+        &mut s,
+        &[json!({ "type": "system", "subtype": "init" }), result(false, models)],
+    );
+    let total = |model: &str, tokens, cost| Normalized::UsageTotal {
+        counter: model.into(),
+        provider: "gateway.example".into(),
+        model: model.into(),
+        tokens,
+        cost,
+    };
+    assert_eq!(
+        events[1..3],
+        [
+            total(
+                "claude-haiku-5-5",
+                Tokens {
+                    input: 4,
+                    cache_read: 25211,
+                    cache_write_5m: 0,
+                    cache_write_1h: 10762,
+                    output: 9,
+                },
+                Some(Usd(2_409_410_000)),
+            ),
+            total(
+                "claude-sonnet-5",
+                Tokens {
+                    input: 7,
+                    cache_read: 100,
+                    cache_write_5m: 50,
+                    cache_write_1h: 0,
+                    output: 11,
+                },
+                None,
+            ),
+        ]
+    );
+    assert!(matches!(events[3], Normalized::TurnEnded { .. }), "{events:?}");
 }

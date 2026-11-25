@@ -315,14 +315,20 @@ pub(super) fn attempt_ended(tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
     let entry: String = tx.sql().query_row(
         "SELECT json_object('run', run, 'attempt', n, 'step', step, 'round', round, 'harness', harness, \
          'session', json(session), 'outcome', json_extract(outcome, '$.result'), \
-         'summary', json_extract(outcome, '$.summary'), 'failure', json(failure), \
-         'input_tokens', input_tokens, 'output_tokens', output_tokens) FROM attempts WHERE run = ?1 AND n = ?2",
+         'summary', json_extract(outcome, '$.summary'), 'failure', json(failure)) \
+         FROM attempts WHERE run = ?1 AND n = ?2",
         params![row.id, row.attempt],
         |r| r.get(0),
     )?;
     // SQLite's own JSON always parses.
     let mut entry: Value = serde_json::from_str(&entry).unwrap_or_default();
     let config: Option<Value> = row.config.as_deref().and_then(|c| serde_json::from_str(c).ok());
+    if let (Some(e), Value::Object(usage)) = (
+        entry.as_object_mut(),
+        super::spend::attempt_usage(tx.sql(), &row.id, row.attempt)?,
+    ) {
+        e.extend(usage);
+    }
     entry["agent"] = json!(Some(&row.agent).filter(|a| !a.is_empty()));
     entry["model"] = config.map(|c| c["model"]["value"].clone()).unwrap_or_default();
     let payload = json!({ "op": "tracker", "call": "attempt_ended", "project": row.project, "issue": issue,

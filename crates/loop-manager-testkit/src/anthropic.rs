@@ -53,6 +53,9 @@ pub enum Reply {
     Hang,
     /// Silence before the headers.
     Silent,
+    /// The reply with these fields of a Messages API `usage` (`input_tokens`, `cache_read_input_tokens`,
+    /// `cache_creation_input_tokens`, `cache_creation`, `output_tokens`) in place of the fixed ones.
+    Usage(Value, Box<Reply>),
 }
 
 /// A model request the fake received.
@@ -97,7 +100,7 @@ impl Provider {
                     n
                 };
                 let reply = plan[n.min(plan.len()) - 1].clone();
-                answer(n, reply, &body).await
+                answer(n, reply, &body, &Value::Null).await
             }
         });
         let server = tokio::spawn(async move {
@@ -123,38 +126,40 @@ impl Drop for Provider {
     }
 }
 
-async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
+/// `usage`: the scripted fields of the message's usage, or null.
+async fn answer(n: usize, reply: Reply, body: &Value, usage: &Value) -> Response {
     let model = body["model"].as_str().unwrap_or_default();
     let stream = body["stream"].as_bool().unwrap_or(false);
     match reply {
         Reply::Text(text) => {
             let block = json!({ "type": "text", "text": text });
             let delta = json!({ "type": "text_delta", "text": text });
-            message(n, model, stream, block, delta, "end_turn")
+            message(n, model, stream, usage, block, delta, "end_turn")
         }
         Reply::Bash(ref command) | Reply::Background(ref command) => {
             let background = matches!(reply, Reply::Background(_));
             let input = json!({ "command": command, "description": "run a command", "run_in_background": background });
             let block = json!({ "type": "tool_use", "id": format!("toolu_fake_{n}"), "name": "Bash", "input": input });
             let delta = json!({ "type": "input_json_delta", "partial_json": input.to_string() });
-            message(n, model, stream, block, delta, "tool_use")
+            message(n, model, stream, usage, block, delta, "tool_use")
         }
         Reply::Mcp(suffix) => {
             let tools = body["tools"].as_array().into_iter().flatten();
             let Some(name) = tools.filter_map(|t| t["name"].as_str()).find(|t| t.ends_with(&suffix)) else {
-                return Box::pin(answer(n, Reply::Text(format!("No tool *{suffix}.")), body)).await;
+                return Box::pin(answer(n, Reply::Text(format!("No tool *{suffix}.")), body, usage)).await;
             };
             let block = json!({ "type": "tool_use", "id": format!("toolu_fake_{n}"), "name": name, "input": {} });
             let delta = json!({ "type": "input_json_delta", "partial_json": "{}" });
-            message(n, model, stream, block, delta, "tool_use")
+            message(n, model, stream, usage, block, delta, "tool_use")
         }
         Reply::Turn(replies) => {
             let messages = body["messages"].as_array().into_iter().flatten();
             let blocks = messages.filter_map(|m| m["content"].as_array()).flatten();
             let done = blocks.filter(|b| b["type"] == "tool_result").count();
             let reply = replies[done.min(replies.len() - 1)].clone();
-            Box::pin(answer(n, reply, body)).await
+            Box::pin(answer(n, reply, body, usage)).await
         }
+        Reply::Usage(usage, reply) => Box::pin(answer(n, *reply, body, &usage)).await,
         Reply::RateLimited => error(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limit_error",
@@ -200,7 +205,7 @@ async fn answer(n: usize, reply: Reply, body: &Value) -> Response {
             &[],
         ),
         Reply::Hang if stream => {
-            let start = sse("message_start", &message_start(n, model));
+            let start = sse("message_start", &message_start(n, model, usage));
             let events = tokio_stream::iter([Ok::<_, Infallible>(start)]).chain(tokio_stream::pending());
             respond(StatusCode::OK, "text/event-stream", n, &[], Body::from_stream(events))
         }
@@ -237,9 +242,9 @@ fn quota() -> Response {
 }
 
 /// A complete assistant message of one content block, streamed or as JSON.
-fn message(n: usize, model: &str, stream: bool, block: Value, delta: Value, stop: &str) -> Response {
+fn message(n: usize, model: &str, stream: bool, usage: &Value, block: Value, delta: Value, stop: &str) -> Response {
     if !stream {
-        let mut message = message_start(n, model)["message"].clone();
+        let mut message = message_start(n, model, usage)["message"].clone();
         message["content"] = json!([block]);
         message["stop_reason"] = json!(stop);
         return respond(
@@ -257,7 +262,7 @@ fn message(n: usize, model: &str, stream: bool, block: Value, delta: Value, stop
         _ => empty["input"] = json!({}),
     }
     let events = [
-        sse("message_start", &message_start(n, model)),
+        sse("message_start", &message_start(n, model, usage)),
         sse(
             "content_block_start",
             &json!({ "type": "content_block_start", "index": 0, "content_block": empty }),
@@ -273,18 +278,27 @@ fn message(n: usize, model: &str, stream: bool, block: Value, delta: Value, stop
         sse(
             "message_delta",
             &json!({ "type": "message_delta", "delta": { "stop_reason": stop, "stop_sequence": null },
-                "usage": { "output_tokens": 3 } }),
+                "usage": scripted(json!({ "output_tokens": 3 }), usage) }),
         ),
         sse("message_stop", &json!({ "type": "message_stop" })),
     ];
     respond(StatusCode::OK, "text/event-stream", n, &[], Body::from(events.concat()))
 }
 
-fn message_start(n: usize, model: &str) -> Value {
+fn message_start(n: usize, model: &str, usage: &Value) -> Value {
+    let fixed = json!({ "input_tokens": 10, "output_tokens": 1, "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0 });
     json!({ "type": "message_start", "message": { "id": format!("msg_fake_{n}"), "type": "message",
         "role": "assistant", "model": model, "content": [], "stop_reason": null, "stop_sequence": null,
-        "usage": { "input_tokens": 10, "output_tokens": 1, "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0 } } })
+        "usage": scripted(fixed, usage) } })
+}
+
+/// `fixed` with the fields of `usage` in place of its own.
+fn scripted(mut fixed: Value, usage: &Value) -> Value {
+    for (key, value) in usage.as_object().into_iter().flatten() {
+        fixed[key] = value.clone();
+    }
+    fixed
 }
 
 fn sse(event: &str, data: &Value) -> Bytes {

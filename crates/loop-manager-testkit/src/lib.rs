@@ -64,6 +64,8 @@ struct State {
     stoppable: bool,
     /// Calls of `stop_background`.
     background_stops: usize,
+    /// Set by [`ScriptedDriver::late_on_close`].
+    late: Vec<Normalized>,
     /// Set by [`ScriptedDriver::hold_sessions`].
     held: Option<Arc<Mutex<std::sync::mpsc::Receiver<()>>>>,
     /// Set by [`ScriptedDriver::real_processes`]: how long a stopped process takes to die.
@@ -347,11 +349,17 @@ impl Driver for ScriptedDriver {
     fn close_session<'a>(&'a self, _instance: &'a InstanceHandle, session: &'a SessionRef) -> BoxFuture<'a, ()> {
         // Closing detaches the session from its process; the transcript stays resumable, like a harness's does.
         let mut state = self.lock();
+        let late = std::mem::take(&mut state.late);
+        let mut instance = String::new();
         if let Some(s) = session_id(session).ok().and_then(|id| state.sessions.get_mut(&id)) {
-            s.instance.clear();
+            instance = std::mem::take(&mut s.instance);
             if let Some(playing) = s.playing.take() {
                 playing.abort();
             }
+        }
+        drop(state);
+        for event in late {
+            self.emit(&instance, Some(session), event);
         }
         ready(())
     }

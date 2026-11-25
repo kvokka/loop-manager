@@ -2,7 +2,9 @@
 //! 4.6; docs/design/experiments.md, experiment 2). A turn ends on `turn/completed` only; the thread status `idle`
 //! comes just before it and ends nothing (docs/design/contracts.md 4.6).
 
-use loop_manager_contract::driver::{Failure, FailureKind, Normalized, RateLimit, SessionState, Source, StopReason};
+use loop_manager_contract::driver::{
+    Failure, FailureKind, Normalized, RateLimit, SessionState, Source, StopReason, Tokens,
+};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -28,6 +30,8 @@ pub(crate) type Events = Vec<(Option<String>, Normalized)>;
 #[derive(Default)]
 struct Thread {
     model: Option<String>,
+    /// `modelProvider` of the thread's start or resume: the provider its usage names.
+    provider: Option<String>,
     /// A turn started and no `turn/completed` closed it yet.
     open: bool,
     /// We sent `turn/interrupt`: the next `turn/completed` is cancelled whatever its status says.
@@ -60,9 +64,11 @@ impl Stream {
         }
     }
 
-    /// A thread of this process runs `model`: its failures name it.
-    pub(crate) fn bind(&mut self, thread: &str, model: Option<String>) {
-        self.threads.entry(thread.to_owned()).or_default().model = model;
+    /// A thread of this process runs `model` of `provider`: its failures name the model, its usage both.
+    pub(crate) fn bind(&mut self, thread: &str, model: Option<String>, provider: Option<String>) {
+        let known = self.threads.entry(thread.to_owned()).or_default();
+        known.model = model;
+        known.provider = provider;
     }
 
     /// `turn/start` was accepted: the turn is open before its `turn/started` arrives.
@@ -167,14 +173,7 @@ impl Stream {
                 thread.error = Some(params["error"].clone());
                 vec![]
             }
-            "thread/tokenUsage/updated" => {
-                let last = &params["tokenUsage"]["last"];
-                vec![Normalized::Usage {
-                    input_tokens: last["inputTokens"].as_u64().unwrap_or_default(),
-                    output_tokens: last["outputTokens"].as_u64().unwrap_or_default(),
-                    rate_limit: None,
-                }]
-            }
+            "thread/tokenUsage/updated" => vec![usage(&id, thread, &params["tokenUsage"]["total"])],
             "item/started" | "item/completed" => {
                 item_activity(thread, now, &params["item"], method == "item/completed")
             }
@@ -229,6 +228,7 @@ impl Stream {
         // The commands of a turn outlive it (a background command): they stay known to the thread.
         let rest = Thread {
             model: thread.model,
+            provider: thread.provider,
             commands: thread.commands,
             ..Thread::default()
         };
@@ -323,14 +323,7 @@ impl Stream {
         };
         self.open()
             .into_iter()
-            .map(|id| {
-                let usage = Normalized::Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    rate_limit: Some(rate_limit),
-                };
-                (Some(id), usage)
-            })
+            .map(|id| (Some(id), Normalized::RateLimit(rate_limit)))
             .collect()
     }
 }
@@ -345,6 +338,29 @@ fn info(error: &Value) -> (&str, Option<u64>) {
             .next()
             .map_or(("", None), |(variant, v)| (variant, v["httpStatusCode"].as_u64())),
         _ => ("", None),
+    }
+}
+
+/// The thread's running total, `tokenUsage.total`: a resumed thread tells it again as it was, where `last` would count
+/// the last turn twice. codex counts the cached and the cache-written input inside `inputTokens` and the reasoning
+/// inside `outputTokens`; it prices nothing.
+fn usage(id: &str, thread: &Thread, total: &Value) -> Normalized {
+    let count = |key: &str| total[key].as_u64().unwrap_or_default();
+    let (cache_read, cache_write) = (count("cachedInputTokens"), count("cacheWriteInputTokens"));
+    Normalized::UsageTotal {
+        counter: id.to_owned(),
+        provider: thread.provider.clone().unwrap_or_default(),
+        model: thread.model.clone().unwrap_or_default(),
+        tokens: Tokens {
+            input: count("inputTokens")
+                .saturating_sub(cache_read)
+                .saturating_sub(cache_write),
+            cache_read,
+            cache_write_5m: cache_write,
+            cache_write_1h: 0,
+            output: count("outputTokens"),
+        },
+        cost: None,
     }
 }
 

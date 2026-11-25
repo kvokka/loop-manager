@@ -143,35 +143,35 @@ pub(super) fn attempts(conn: &Connection, run: &str) -> Result<Vec<Value>, Error
 
 pub(super) fn attempt_history(conn: &Connection, run: &str, all: bool) -> Result<Vec<Value>, Error> {
     let mut stmt = conn.prepare(
-        "SELECT n, kind, started_ms, ended_ms, json_extract(failure, '$.kind'), harness, session, input_tokens, \
-         output_tokens, step, round, json_extract(outcome, '$.result'), json_extract(outcome, '$.summary') FROM \
+        "SELECT n, kind, started_ms, ended_ms, json_extract(failure, '$.kind'), harness, session, step, round, \
+         json_extract(outcome, '$.result'), json_extract(outcome, '$.summary') FROM \
          (SELECT * FROM attempts WHERE run = ?1 ORDER BY n DESC LIMIT ?2) ORDER BY n",
     )?;
     let rows = stmt.query_map(rusqlite::params![run, if all { -1 } else { 20 }], |r| {
         let mut item = json!({
             "n": r.get::<_, i64>(0)?, "generation": r.get::<_, i64>(0)?, "kind": r.get::<_, String>(1)?,
-            "step": r.get::<_, String>(9)?,
+            "step": r.get::<_, String>(7)?,
             "started_at": rfc3339_ms(r.get(2)?), "ended_at": r.get::<_, Option<i64>>(3)?.map(rfc3339_ms),
             "failure_kind": r.get::<_, Option<String>>(4)?, "harness": r.get::<_, String>(5)?,
             // The session reference (docs/api/frontends.md): the harness's own tools open the conversation by it.
             "session": r.get::<_, Option<String>>(6)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
-            "input_tokens": r.get::<_, i64>(7)?, "output_tokens": r.get::<_, i64>(8)?,
         });
         if all {
-            item["round"] = json!(r.get::<_, u32>(10)?);
-            item["result"] = json!(r.get::<_, Option<String>>(11)?);
-            item["summary"] = json!(r.get::<_, Option<String>>(12)?);
+            item["round"] = json!(r.get::<_, u32>(8)?);
+            item["result"] = json!(r.get::<_, Option<String>>(9)?);
+            item["summary"] = json!(r.get::<_, Option<String>>(10)?);
         }
         Ok(item)
     })?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-/// The tokens every attempt of a run used, `{input_tokens, output_tokens}` (contracts 1.3).
-pub(super) fn usage(conn: &Connection, run: &str) -> Result<Value, Error> {
-    Ok(conn.query_row(
-        "SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) FROM attempts WHERE run = ?1",
-        [run],
-        |r| Ok(json!({ "input_tokens": r.get::<_, i64>(0)?, "output_tokens": r.get::<_, i64>(1)? })),
-    )?)
+    let mut items: Vec<Value> = rows.collect::<Result<_, _>>()?;
+    for item in &mut items {
+        let n = item["n"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or_default();
+        if let (Some(item), Value::Object(usage)) = (item.as_object_mut(), super::spend::attempt_usage(conn, run, n)?) {
+            item.extend(usage);
+        }
+    }
+    Ok(items)
 }

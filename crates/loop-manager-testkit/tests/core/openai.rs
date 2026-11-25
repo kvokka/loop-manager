@@ -61,6 +61,26 @@ async fn the_plan_goes_in_order_and_its_last_reply_repeats() {
 }
 
 #[tokio::test]
+async fn a_scripted_usage_takes_the_place_of_the_fixed_fields() {
+    let usage = json!({ "input_tokens": 100, "input_tokens_details": { "cached_tokens": 60 } });
+    let p = Provider::start(vec![Reply::Usage(usage, Box::new(Reply::Text("OK".into())))]).await;
+    let (_, body) = post(&p, "/v1/responses", SECOND).await;
+    let completed = body
+        .lines()
+        .filter_map(|l| l.strip_prefix("data: "))
+        .next_back()
+        .unwrap_or_default();
+    let completed: Value = serde_json::from_str(completed).unwrap();
+    let usage = &completed["response"]["usage"];
+    assert_eq!(completed["type"], "response.completed");
+    assert_eq!(
+        (usage["input_tokens"].as_u64(), usage["output_tokens"].as_u64()),
+        (Some(100), Some(3))
+    );
+    assert_eq!(usage["input_tokens_details"]["cached_tokens"], 60);
+}
+
+#[tokio::test]
 async fn every_error_has_its_status_code_and_headers() {
     let cases = [
         (

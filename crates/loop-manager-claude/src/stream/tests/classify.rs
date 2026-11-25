@@ -226,10 +226,7 @@ fn a_rejected_limit_is_a_quota_with_its_reset_and_a_401_fails_at_once() {
         &mut stream(),
         &[limit, result(true, json!({ "api_error_status": 429 }))],
     );
-    assert!(
-        matches!(events[0], Normalized::Usage { rate_limit: Some(RateLimit { utilization, .. }), ..
-            } if utilization == 1.0)
-    );
+    assert!(matches!(events[0], Normalized::RateLimit(RateLimit { utilization, .. }) if utilization == 1.0));
     let f = failure(&events);
     assert_eq!(
         (f.kind, f.retry_at_ms),

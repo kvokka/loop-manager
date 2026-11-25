@@ -8,7 +8,7 @@ use common::{
     issues::{FIX, next_ready, slow_turn},
     last, world,
 };
-use loop_manager_core::driver::Normalized;
+use loop_manager_core::driver::{Normalized, Tokens};
 use loop_manager_core::run::{Msg, Verdict};
 use loop_manager_testkit::Step;
 use serde_json::{Value, json};
@@ -467,10 +467,16 @@ async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_se
     let mut first = slow_turn();
     first.insert(
         1,
-        Step::Emit(Normalized::Usage {
-            input_tokens: 100,
-            output_tokens: 20,
-            rate_limit: None,
+        Step::Emit(Normalized::UsageTotal {
+            counter: "m1".into(),
+            provider: "p".into(),
+            model: "m1".into(),
+            tokens: Tokens {
+                input: 100,
+                output: 20,
+                ..Tokens::default()
+            },
+            cost: None,
         }),
     );
     w.driver.script(first);

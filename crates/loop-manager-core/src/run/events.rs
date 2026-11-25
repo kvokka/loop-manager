@@ -97,7 +97,7 @@ impl RunHandler {
     }
 
     /// An event goes to the live attempts of its instance: of its session, or all of them for an instance-wide
-    /// failure or exit. Events no live attempt owns are late and dropped.
+    /// failure or exit. Events no live attempt owns are late and dropped, but for their usage.
     pub(super) fn driver_event(&mut self, tx: &mut Tx<'_>, event: DriverEvent) -> Result<(), Error> {
         if !Self::in_order(tx, &event.instance, event.seq)? {
             return Ok(());
@@ -122,6 +122,41 @@ impl RunHandler {
         // session never takes another session's event.
         if owners.is_empty() && live.len() == 1 {
             owners = live.iter().filter(|(_, _, s)| s.is_none()).collect();
+        }
+        if let Normalized::UsageTotal {
+            counter,
+            provider,
+            model,
+            tokens,
+            cost,
+        } = &event.event
+        {
+            // Charged even when its attempt or run has ended: late usage belongs in the final accounts
+            // (docs/design/formula-budgets.md). The newest attempt of the session on the instance owns it.
+            let owner = match owners.first() {
+                Some((run, n, _)) => Some((run.clone(), *n)),
+                None => tx
+                    .sql()
+                    .query_row(
+                        "SELECT run, n FROM attempts WHERE instance = ?1 AND session = ?2 \
+                         ORDER BY started_ms DESC LIMIT 1",
+                        params![event.instance, session],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)),
+                    )
+                    .optional()?,
+            };
+            if let Some((run, attempt)) = owner {
+                let key = session.clone().unwrap_or_else(|| format!("{run}/{attempt}"));
+                let total = super::spend::Total {
+                    session: &key,
+                    counter,
+                    provider,
+                    model,
+                    tokens,
+                    cost: *cost,
+                };
+                super::spend::charge(tx, &run, attempt, &total)?;
+            }
         }
         for (run, attempt, _) in owners {
             self.attempt_event(tx, run, *attempt, event.event.clone())?;
@@ -149,13 +184,8 @@ impl RunHandler {
         if let Normalized::PromptAcked { key } = &event {
             super::prompts::advance(tx, &row.id, attempt, Some(*key), "acked")?;
         }
-        if let Normalized::Usage {
-            input_tokens,
-            output_tokens,
-            rate_limit,
-        } = &event
-        {
-            Self::usage(tx, &row, attempt, [*input_tokens, *output_tokens], rate_limit.as_ref())?;
+        if let Normalized::RateLimit(limit) = &event {
+            Self::keep_limit(tx, &row, limit)?;
         }
         match event {
             Normalized::PromptAcked { key } if row.state == "starting" => {

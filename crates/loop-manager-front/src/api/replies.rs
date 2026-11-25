@@ -57,7 +57,7 @@ pub(crate) struct Run {
     steps: Map<String, Value>,
     /// The last 20, newest last; all recorded attempts with `all_attempts=true`.
     attempts: Vec<Attempt>,
-    /// The tokens of every attempt of the run.
+    /// What the run and its subtree of child runs spent, over every attempt.
     usage: Usage,
     /// `GET /v1/runs/{id}` only: by place (a rig, or the root's name), the directory of the run's base there
     /// (docs/design/config.md "Formula"): in its own place its `workdir`; in each other place it had children in,
@@ -65,11 +65,16 @@ pub(crate) struct Run {
     bases: Option<BTreeMap<String, String>>,
 }
 
-/// The tokens the harness reported (docs/design/contracts.md 4.3 `usage`).
+/// What the harness reported (docs/design/contracts.md 1.3 `usage`): disjoint token quantities and the cost.
 #[derive(ToSchema)]
 pub(crate) struct Usage {
+    /// Ordinary input, neither read from nor written to a cache.
     input_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
     output_tokens: u64,
+    /// USD as an exact decimal, e.g. `0.00143244`.
+    cost_usd: String,
 }
 
 /// `Outcome` of docs/design/contracts.md 1.3.
@@ -103,7 +108,11 @@ pub(crate) struct Attempt {
     #[schema(value_type = Option<Object>)]
     session: Option<Value>,
     input_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
     output_tokens: u64,
+    /// USD as an exact decimal: what the attempt's session spent, its subagents included.
+    cost_usd: String,
 }
 
 /// The errors of an operation that takes an `Idempotency-Key`: the core carries it out.

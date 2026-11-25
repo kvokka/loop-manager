@@ -2,8 +2,9 @@
 //! (docs/design/contracts.md 4.3, 4.6; docs/design/experiments.md, experiment 1a and "Idle without background").
 
 use loop_manager_contract::driver::{
-    Failure, FailureKind, Normalized, PromptKey, RateLimit, SessionState, Source, StopReason,
+    Failure, FailureKind, Normalized, PromptKey, RateLimit, SessionState, Source, StopReason, Tokens,
 };
+use loop_manager_contract::usd::Usd;
 use serde_json::Value;
 use std::{
     collections::HashSet,
@@ -17,6 +18,8 @@ const RAW_MAX: usize = 4096;
 pub(crate) struct Stream {
     account: Option<String>,
     model: Option<String>,
+    /// The provider the session's requests go to (`part::provider`).
+    provider: String,
     interrupted: bool,
     /// A prompt was taken or a turn began, and no result closed it yet.
     open: bool,
@@ -40,10 +43,11 @@ pub(crate) struct Stream {
 }
 
 impl Stream {
-    pub(crate) fn new(account: Option<String>, model: Option<String>) -> Self {
+    pub(crate) fn new(account: Option<String>, model: Option<String>, provider: String) -> Self {
         Self {
             account,
             model,
+            provider,
             interrupted: false,
             open: false,
             error: None,
@@ -173,12 +177,7 @@ impl Stream {
     }
 
     fn result(&mut self, msg: &Value) -> Vec<Normalized> {
-        let usage = &msg["usage"];
-        let mut out = vec![Normalized::Usage {
-            input_tokens: usage["input_tokens"].as_u64().unwrap_or_default(),
-            output_tokens: usage["output_tokens"].as_u64().unwrap_or_default(),
-            rate_limit: None,
-        }];
+        let mut out = self.usage(&msg["modelUsage"]);
         let denials = msg["permission_denials"].as_array().into_iter().flatten();
         out.extend(denials.filter_map(|d| self.denial(d, &Value::Null)));
         let failed = msg["is_error"].as_bool().unwrap_or(true) || msg["subtype"] != "success";
@@ -208,6 +207,35 @@ impl Stream {
         self.notified_since_result = false;
         self.denied.clear();
         out
+    }
+
+    /// The session's running total per model, all agents and resumes of the session included: `modelUsage` of a
+    /// `result` (`usage` is the main loop's last turn alone). Its `inputTokens` holds no cached token.
+    fn usage(&self, models: &Value) -> Vec<Normalized> {
+        let models = models.as_object().into_iter().flatten();
+        let count = |u: &Value, key: &str| u[key].as_u64().unwrap_or_default();
+        models
+            .map(|(model, u)| {
+                // A claude that does not split the cache writes by duration wrote them all for five minutes.
+                let (cache_write_5m, cache_write_1h) = match u["cacheCreationEphemeral1hInputTokens"].as_u64() {
+                    Some(long) => (count(u, "cacheCreationEphemeral5mInputTokens"), long),
+                    None => (count(u, "cacheCreationInputTokens"), 0),
+                };
+                Normalized::UsageTotal {
+                    counter: model.clone(),
+                    provider: self.provider.clone(),
+                    model: model.clone(),
+                    tokens: Tokens {
+                        input: count(u, "inputTokens"),
+                        cache_read: count(u, "cacheReadInputTokens"),
+                        cache_write_5m,
+                        cache_write_1h,
+                        output: count(u, "outputTokens"),
+                    },
+                    cost: u["costUSD"].as_f64().map(Usd::from_f64),
+                }
+            })
+            .collect()
     }
 
     /// One denial of `system/permission_denied` or of `result.permission_denials`, unless its `tool_use_id` was told
@@ -257,14 +285,10 @@ impl Stream {
         let utilization = info["unifiedWindows"][window]["utilization"]
             .as_f64()
             .unwrap_or_default();
-        vec![Normalized::Usage {
-            input_tokens: 0,
-            output_tokens: 0,
-            rate_limit: Some(RateLimit {
-                utilization,
-                resets_at_ms,
-            }),
-        }]
+        vec![Normalized::RateLimit(RateLimit {
+            utilization,
+            resets_at_ms,
+        })]
     }
 
     /// At most one activity a second, but a change of `tool_running` always goes through. Out of a turn it is a

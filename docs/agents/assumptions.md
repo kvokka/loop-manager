@@ -51,6 +51,10 @@ The behaviour itself is described in the document named under each heading; this
 
 - The driver interface has no steer mid-turn, no change of model inside a live session, no human joining.
 - An instance has a limit of sessions; past it a second instance with the same fingerprint starts.
+- A usage counter of a session that reports less than its checkpoint has restarted from zero: it is charged whole. A
+  harness that loses its count and outgrows the old value before its next report is undercounted once.
+- The subtree of a run, whose spend its total includes, is the runs its sessions and steps started, down the chain; a
+  run a trigger started on an event of the run is an invocation of its own.
 
 ## Agents, packs, formulas — [config](../design/config.md)
 
@@ -173,7 +177,6 @@ Open questions the code must not lean on without an experiment
 - With host inheritance off: a claude token expiring mid-session.
 - br's "refuse rather than lose" in a long unattended loop; whether the rider of br's license applies to Claude and
   Codex agents running `br`.
-- Whether claude's `result.usage` counts one turn or the whole process.
 - The stop of what a session left running, beyond the fake providers of one version pair: codex 0.167.2
   (`thread/backgroundTerminals/clean` was run on 0.168.0 only), claude's `stop_task` while a background
   subagent is alive, and whether the MCP servers of a codex thread, which carry the attempt token, die with it.

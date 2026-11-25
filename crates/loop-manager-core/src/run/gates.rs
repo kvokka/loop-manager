@@ -127,28 +127,14 @@ impl RunHandler {
         Ok(())
     }
 
-    /// Adds the tokens of a `usage` event to the attempt and keeps the account's limit it reports, if any
-    /// (contracts 4.3): the last one known per account goes to the policy with `run.attempt_failed`.
-    pub(super) fn usage(
-        tx: &Tx<'_>,
-        row: &Row,
-        attempt: u32,
-        tokens: [u64; 2],
-        limit: Option<&RateLimit>,
-    ) -> Result<(), Error> {
-        let [input, output] = tokens.map(|t| i64::try_from(t).unwrap_or(i64::MAX));
+    /// Keeps the account's limit a `rate_limit` event reports (contracts 4.3): the last one known per account goes
+    /// to the policy with `run.attempt_failed`.
+    pub(super) fn keep_limit(tx: &Tx<'_>, row: &Row, limit: &RateLimit) -> Result<(), Error> {
         tx.sql().execute(
-            "UPDATE attempts SET input_tokens = input_tokens + ?3, output_tokens = output_tokens + ?4 \
-             WHERE run = ?1 AND n = ?2",
-            params![row.id, attempt, input, output],
+            "INSERT OR REPLACE INTO account_limits (account, utilization, resets_at_ms) \
+             SELECT account, ?2, ?3 FROM runs WHERE id = ?1 AND account IS NOT NULL",
+            params![row.id, limit.utilization, limit.resets_at_ms],
         )?;
-        if let Some(limit) = limit {
-            tx.sql().execute(
-                "INSERT OR REPLACE INTO account_limits (account, utilization, resets_at_ms) \
-                 SELECT account, ?2, ?3 FROM runs WHERE id = ?1 AND account IS NOT NULL",
-                params![row.id, limit.utilization, limit.resets_at_ms],
-            )?;
-        }
         Ok(())
     }
 

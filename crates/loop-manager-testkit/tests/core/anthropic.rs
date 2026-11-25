@@ -69,6 +69,27 @@ async fn a_request_without_stream_gets_a_json_message() {
 }
 
 #[tokio::test]
+async fn a_scripted_usage_takes_the_place_of_the_fixed_fields() {
+    let usage = json!({ "cache_read_input_tokens": 300, "cache_creation": { "ephemeral_1h_input_tokens": 30 } });
+    let p = Provider::start(vec![Reply::Usage(usage, Box::new(Reply::Text("hi".into())))]).await;
+    let (_, body) = post(&p, "/v1/messages", &request(false), SECOND).await;
+    let message: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(message["content"][0]["text"], "hi");
+    let usage = &message["usage"];
+    assert_eq!(
+        (
+            usage["input_tokens"].as_u64(),
+            usage["cache_read_input_tokens"].as_u64()
+        ),
+        (Some(10), Some(300))
+    );
+    assert_eq!(usage["cache_creation"]["ephemeral_1h_input_tokens"], 30);
+    // A stream tells the scripted fields at its start and again with the output at its end.
+    let (_, body) = post(&p, "/v1/messages", &request(true), SECOND).await;
+    assert_eq!(body.matches("\"cache_read_input_tokens\":300").count(), 2, "{body}");
+}
+
+#[tokio::test]
 async fn a_bash_reply_is_a_tool_use() {
     let p = Provider::start(vec![Reply::Bash("sleep 100".into())]).await;
     let (_, body) = post(&p, "/v1/messages", &request(true), SECOND).await;

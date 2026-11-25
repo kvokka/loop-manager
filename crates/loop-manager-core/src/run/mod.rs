@@ -28,6 +28,7 @@ mod repeat;
 mod row;
 mod service_proc;
 mod services;
+mod spend;
 mod triggers;
 mod writers;
 

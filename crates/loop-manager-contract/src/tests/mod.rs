@@ -19,3 +19,4 @@ mod cron;
 mod journal;
 mod template;
 mod toon;
+mod usd;

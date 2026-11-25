@@ -1,7 +1,7 @@
 //! How a test sets up and reads the scripted driver: scenarios, instances, tokens, what sessions were given.
 
 use super::{NO_PID, ScriptedDriver, Session, State, Step};
-use loop_manager_contract::driver::{Capabilities, PromptKey};
+use loop_manager_contract::driver::{Capabilities, Normalized, PromptKey};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -39,6 +39,11 @@ impl ScriptedDriver {
     /// Queues the scenario played by the next `send_prompt`.
     pub fn script(&self, steps: Vec<Step>) {
         self.lock().scenarios.push_back(steps);
+    }
+
+    /// The next session closed reports `events` as it closes: what a harness tells of a response already in flight.
+    pub fn late_on_close(&self, events: Vec<Normalized>) {
+        self.lock().late = events;
     }
 
     /// Every later `start_session` never returns: a process that never reports its session.
