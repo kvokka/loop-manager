@@ -74,7 +74,7 @@ Shared objects:
   it. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`Usage`, of the run and its
-  subtree) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the oldest closure
+  subtree), `budget_usd` (the run's spend limit in USD as a decimal string, null without one) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the oldest closure
   of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the formula's
   checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`
@@ -884,7 +884,8 @@ of `POST /v1/runs`) is a child of the session's run: the token must be that of t
 the finisher (6.3), else the start is `rejected` ("stale attempt"); the child takes the parent's correlation and
 `parent_run`, one level deeper, under the same ceiling of 10 (`rejected` beyond it). Cancelling a run cancels its live
 children started from its sessions, with reason `parent_cancelled` (runs its events triggered are not its children to
-cancel); a pass or a failure of the parent leaves them alone.
+cancel); a pass or a failure of the parent leaves them alone, except a failure `budget_exceeded`, which cancels them with
+reason `parent_failed` ([formula budgets](formula-budgets.md), [config](config.md), "Formula").
 
 ### 6.2 Transitions
 
@@ -923,6 +924,7 @@ cancel); a pass or a failure of the parent leaves them alone.
 | `parked` | every key of the run open, a concurrency slot free (in creation order with the queue) | `starting` (`then` of the park decision); `run.resumed` | new attempt |
 | `preparing`, `interrupted` | an attempt would start while a key of the run is closed (by anyone, invariant 18), the daemon is stopping, or the run's agent has as many other started runs as its `max_runs` (a step with no agent, drain or exec, has no such limit) | `parked` (`then`: `new_session` from `preparing`, the decided kind from `interrupted`) | — |
 | any non-terminal | operator cancel, or the cancel of the parent (6.1, reason `parent_cancelled`) | `cancelled` | stop the session, conditional release of the issue |
+| any non-terminal | a charge of usage, or the start of an attempt, finds that the run's subtree has spent its `budget` and no run above it whose subtree it is in has spent its own | `failed{infrastructure}`, reason `budget_exceeded`, with no repeat and no `back_to` | stop the session, cancel the live children (reason `parent_failed`), conditional release of the issue; the parent's step takes the failure as that of any child |
 | any non-terminal | the issue the run owns is closed when read, and the last write of the tracker past the cursor (5.1) that closed it or set its status was made by an actor other than the run and its attempts: a human, an outside tool, another run | `cancelled`, reason `issue_closed`; at any step, an `await` step included | as for an operator cancel: stop the session, the cancel of its children, conditional release of the issue, which leaves it closed (5.2) |
 
 Every terminal transition frees the run's concurrency slot and its place in its rig, and releases its ownership of its

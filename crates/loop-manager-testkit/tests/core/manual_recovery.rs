@@ -57,6 +57,7 @@ impl World {
             parent_run: None,
             token: None,
             continue_from: from.map(Into::into),
+            budget: None,
         };
         let reply = self.core.send(None, Msg::Create(create)).await.unwrap();
         reply["run"].as_str().unwrap().to_owned()

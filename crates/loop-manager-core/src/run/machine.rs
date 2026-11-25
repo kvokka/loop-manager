@@ -81,6 +81,10 @@ impl RunHandler {
 
     /// A new attempt (contracts 6.2): a new or resumed session on an instance of its own, then the prompt.
     pub(super) fn start_attempt(&mut self, tx: &mut Tx<'_>, row: Row, kind: &str) -> Result<(), Error> {
+        // No work starts in the scope of a spent budget (docs/design/formula-budgets.md).
+        if self.enforce_budget(tx, &row.id)? {
+            return Ok(());
+        }
         // Every automatic start reads the gates, the operator's among them (invariant 18), and a drain: both park.
         if let Some(gate) = self.held(tx, &row)? {
             return self.park(tx, row, gate, kind);

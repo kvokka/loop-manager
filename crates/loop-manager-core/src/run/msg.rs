@@ -229,6 +229,8 @@ pub struct Create {
     pub token: Option<String>,
     /// A terminal run whose last session this run continues (docs/design/contracts.md 6); never implicit.
     pub continue_from: Option<String>,
+    /// The spend limit of the run in place of its formula's `budget` (docs/design/formula-budgets.md).
+    pub budget: Option<crate::usd::Usd>,
 }
 
 /// The decisions of contracts 3.2 the run machine applies.

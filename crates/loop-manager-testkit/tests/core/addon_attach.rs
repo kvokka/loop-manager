@@ -59,6 +59,7 @@ async fn a_hook_goes_only_to_the_runs_of_an_agent_that_attaches_its_addon() {
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let review = reply["run"].as_str().unwrap().to_owned();

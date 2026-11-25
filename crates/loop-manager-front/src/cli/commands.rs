@@ -25,6 +25,9 @@ pub enum RunCommand {
         /// A terminal run whose last session this run continues.
         #[arg(long)]
         continue_from: Option<String>,
+        /// The run's spend limit in USD (a decimal such as `2.5`), in place of its formula's `budget`.
+        #[arg(long, value_name = "USD")]
+        budget: Option<String>,
         /// The idempotency key: a repeat with the same key starts nothing new.
         #[arg(long)]
         key: Option<String>,
@@ -152,11 +155,12 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             formula,
             inputs,
             continue_from,
+            budget,
             key,
         } => {
             let inputs: Map<String, Value> = inputs.iter().map(|i| input(i)).collect();
             let body = json!({ "project": project, "rig": rig, "formula": formula, "inputs": inputs,
-                "continue_from": continue_from, "parent": session() });
+                "continue_from": continue_from, "budget_usd": budget, "parent": session() });
             let reply = client.request("POST", "/v1/runs", Some(&body), key.as_deref()).await?;
             match reply["run"].as_str() {
                 _ if json => print(json, &reply),

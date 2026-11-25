@@ -47,6 +47,7 @@ async fn an_event_chain_keeps_its_correlation_stops_at_the_depth_limit_and_survi
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let build = core.send(None, Msg::Create(create)).await.unwrap()["run"].clone();
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -248,6 +249,7 @@ async fn an_event_trigger_switched_off_does_not_fire() {
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     core.send(None, Msg::Create(create)).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;

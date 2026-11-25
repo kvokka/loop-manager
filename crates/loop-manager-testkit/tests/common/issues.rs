@@ -43,6 +43,7 @@ impl World {
             parent_run: None,
             token: None,
             continue_from: None,
+            budget: None,
         };
         self.core.send(None, Msg::Create(create)).await
     }

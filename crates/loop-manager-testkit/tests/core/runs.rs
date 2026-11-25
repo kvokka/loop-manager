@@ -238,6 +238,7 @@ async fn a_run_continues_the_session_of_a_finished_run_only_when_asked() {
         parent_run: None,
         token: None,
         continue_from: Some(from.into()),
+        budget: None,
     };
     let early = w.core.send(None, Msg::Create(create(&first))).await;
     assert!(matches!(early, Err(Error::Rejected(_))), "still running");
@@ -271,6 +272,7 @@ async fn a_run_must_name_a_runnable_formula_with_its_inputs() {
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let sent = w.core.send(None, Msg::Create(create("nope", json!({})))).await;
     assert!(matches!(sent, Err(Error::NotFound(_))), "{sent:?}");
@@ -314,6 +316,7 @@ async fn a_prompt_empty_after_substitution_fails_the_run_before_a_launch() {
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let events = w

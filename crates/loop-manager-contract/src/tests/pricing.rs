@@ -130,3 +130,20 @@ fn the_shipped_catalog_is_dated_and_prices_every_entry() {
             .all(|p| p.rates.output > 0 && p.provider.is_none())
     );
 }
+
+#[test]
+fn a_formula_budget_is_a_positive_amount_of_usd() {
+    let audit = |budget: &str| {
+        format!("name = \"audit\"\nbudget = {budget}\n[[step]]\nkind = \"exec\"\ncommand = [\"true\"]\n")
+    };
+    let config = load_with(&[("kit/formulas/audit.toml", audit("2.5").as_str())]).unwrap();
+    let formula = config.projects[0].packs.iter().find_map(|p| p.formulas.get("audit"));
+    assert_eq!(formula.unwrap().budget, Some(Usd(2_500_000_000_000)));
+    for (budget, error) in [
+        ("0", "more than 0"),
+        ("-1", "not an amount"),
+        ("\"x\"", "not an amount"),
+    ] {
+        fails(&[("kit/formulas/audit.toml", audit(budget).as_str())], error);
+    }
+}

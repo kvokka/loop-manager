@@ -47,6 +47,7 @@ inputs = { from = "{{ event.run.id }}" }
             parent_run: None,
             token: None,
             continue_from: None,
+            budget: None,
         };
         core.send(None, Msg::Create(create)).await.unwrap();
     }
@@ -113,6 +114,7 @@ inputs = { from = "{{ event.run.id }}" }
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     core.send(None, Msg::Create(create)).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;

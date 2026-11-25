@@ -184,6 +184,7 @@ impl Loader {
         self.check_formula_inputs(file, &raw.inputs, &steps);
         let own = raw.rounds.map(|n| (n.get(), super::Layer::Formula(raw.name.clone())));
         let (value, from) = own.unwrap_or((3, super::Layer::Default));
+        let budget = self.budget(file, raw.budget.as_ref());
         Some((
             raw.name,
             Formula {
@@ -192,10 +193,33 @@ impl Loader {
                 worktree: raw.worktree,
                 internal: raw.internal,
                 rounds: super::Sourced { value, from },
+                budget,
                 defaults: BTreeMap::new(),
                 steps,
             },
         ))
+    }
+
+    /// A formula's `budget`: a positive amount of USD with at most twelve decimals (docs/design/formula-budgets.md).
+    fn budget(&mut self, file: &Path, value: Option<&toml::Value>) -> Option<crate::usd::Usd> {
+        value.and_then(|v| {
+            let text = match v {
+                toml::Value::Integer(n) => n.to_string(),
+                toml::Value::Float(f) => f.to_string(),
+                other => other.to_string(),
+            };
+            match text.parse::<crate::usd::Usd>() {
+                Ok(usd) if usd.0 > 0 => Some(usd),
+                Ok(_) => {
+                    self.fail(file, "`budget` must be more than 0 USD");
+                    None
+                }
+                Err(e) => {
+                    self.fail(file, format!("`budget`: {e}"));
+                    None
+                }
+            }
+        })
     }
 
     fn check_formula_inputs(

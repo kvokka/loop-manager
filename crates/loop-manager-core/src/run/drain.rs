@@ -152,6 +152,7 @@ impl RunHandler {
                 parent_run: Some(row.id.clone()),
                 token: None,
                 continue_from: None,
+                budget: None,
             };
             match tx.unit(|tx| self.create(tx, create)) {
                 Ok(_) => {

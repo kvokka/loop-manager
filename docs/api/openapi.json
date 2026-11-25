@@ -3321,6 +3321,13 @@
           "formula"
         ],
         "properties": {
+          "budget_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run's spend limit in USD as a decimal, in place of its formula's `budget`\n(docs/design/formula-budgets.md); more than 0."
+          },
           "continue_from": {
             "type": [
               "string",
@@ -4155,6 +4162,13 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "budget_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run's spend limit in USD, a decimal; absent when it has none (docs/design/formula-budgets.md)."
           },
           "class": {
             "type": [

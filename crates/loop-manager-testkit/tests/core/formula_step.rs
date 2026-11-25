@@ -73,6 +73,7 @@ fn start_with(formula: &str, inputs: Value) -> Msg {
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     })
 }
 

@@ -42,6 +42,7 @@ impl World {
             parent_run: None,
             token: None,
             continue_from: None,
+            budget: None,
         };
         let reply = self.core.send(None, Msg::Create(create)).await.unwrap();
         let run = reply["run"].as_str().unwrap().to_owned();
@@ -256,6 +257,7 @@ async fn a_formula_whose_first_step_has_an_if_cannot_be_continued() {
         parent_run: None,
         token: None,
         continue_from: Some("run_1".into()),
+        budget: None,
     };
     let refused = w.core.send(None, Msg::Create(create)).await.unwrap_err().to_string();
     assert!(refused.contains("starts with a step with an `if`"), "{refused}");

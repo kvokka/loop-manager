@@ -148,8 +148,8 @@ impl RunHandler {
         }
         tx.sql().execute(
             "INSERT INTO runs (n, id, project, rig, formula, agent, inputs, correlation, depth, parent_run, \
-             workdir, state, created_ms, continue_from, issue, step, as_agent, step_kind, issue_data) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             workdir, state, created_ms, continue_from, issue, step, as_agent, step_kind, issue_data, budget) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'queued', ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 n,
                 id,
@@ -168,7 +168,8 @@ impl RunHandler {
                 first.name,
                 as_agent,
                 first.kind.name(),
-                lent
+                lent,
+                c.budget.or(formula.budget).map(|b| b.0)
             ],
         )?;
         let row = Row::load(tx, &id)?;

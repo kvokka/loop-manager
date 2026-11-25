@@ -45,6 +45,8 @@ fn tools() -> Value {
               "inputs": { "type": "object", "description": "By name. A `task` input takes the task as text, \
                   the id of the issue it takes up, or `{\"next_ready\": true}`." },
               "continue_from": { "type": "string", "description": "A terminal run whose last session to continue." },
+              "budget_usd": { "type": "string", "description": "The run's spend limit in USD, a decimal such as \
+                  \"2.5\", in place of its formula's `budget`." },
               "idempotency_key": key } } },
         { "name": "run_state", "description": "The state of a run: its view, where it waits, its attempts.",
           "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": id } } },

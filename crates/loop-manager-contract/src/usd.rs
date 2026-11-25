@@ -31,3 +31,38 @@ impl fmt::Display for Usd {
         write!(f, "{sign}{whole}.{}", frac.trim_end_matches('0'))
     }
 }
+
+/// A decimal amount in USD of at least zero and at most twelve decimals: `10`, `2.5`, `0.000001`.
+impl std::str::FromStr for Usd {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        let (whole, frac) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !digits(whole) || !(frac.is_empty() || digits(frac)) || text.ends_with('.') {
+            return Err(format!("`{text}` is not an amount of USD of at least zero"));
+        }
+        if frac.len() > 12 {
+            return Err(format!("`{text}` has more than twelve decimals"));
+        }
+        let scaled = format!("{whole}{frac:0<12}");
+        scaled.parse().map(Self).map_err(|_| format!("`{text}` is too large"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Usd;
+
+    #[test]
+    fn an_amount_reads_back_as_it_prints() {
+        for text in ["10", "2.5", "0.000000000001", "0"] {
+            let usd: Usd = text.parse().unwrap();
+            assert_eq!(usd.to_string(), text);
+        }
+        assert_eq!("1.50".parse::<Usd>(), Ok(Usd(1_500_000_000_000)));
+        for bad in ["-1", "1.", ".5", "1e3", "0.0000000000001", "", "99999999"] {
+            assert!(bad.parse::<Usd>().is_err(), "{bad}");
+        }
+    }
+}

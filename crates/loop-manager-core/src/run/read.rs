@@ -99,6 +99,8 @@ impl Reader {
         view["attempts"] = json!(row::attempt_history(&conn, id, all)?);
         view["steps"] = json!(super::render::step_results(&conn, id, &row.step)?);
         view["usage"] = super::spend::usage(&conn, id)?;
+        let budget: Option<i64> = conn.query_row("SELECT budget FROM runs WHERE id = ?1", [id], |r| r.get(0))?;
+        view["budget_usd"] = json!(budget.map(|b| crate::usd::Usd(b).to_string()));
         Ok(Some(view))
     }
 

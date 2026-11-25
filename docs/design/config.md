@@ -695,6 +695,7 @@ worktree = true                     # optional (default false): each run works i
 rounds = 3                          # optional: the most rounds a check may send the run through (default: the
                                     # project's `rounds`, else the orchestrator's, else 3)
 internal = false                    # optional: true starts it only from a `formula` or `drain` step
+budget = 10                         # optional: the spend limit of a run in USD, more than 0 (see below)
 
 [inputs]
 task = { type = "task", required = true }   # task | string | integer | boolean
@@ -810,7 +811,20 @@ may borrow it on. A child that cannot start (the start is refused, or `next_read
 issue) fails the parent at once with class `infrastructure`, with no count toward `max_attempts`; a parent that fails in
 the step cancels its live child. The step has no process: it ends when the child does; a cancelled parent cancels the
 child, and a restart finds the child it made and makes no second one. `max_attempts` and `step_check_script_path`
-apply as to any step. A formula with `internal = true` runs only from such a step or a `drain` step: a start by
+apply as to any step.
+
+`budget` is the default spend limit of each run of the formula, in USD with at most twelve decimals
+([formula budgets](formula-budgets.md)). A start may replace it (`budget_usd` of `POST /v1/runs` and of the MCP tool
+`start_run`, `--budget` of `loop-manager run start`); a child of a `formula` or `drain` step and a run of a trigger
+take the formula's. The limit is fixed when the run is created, and a reload does not change it. The spend of a run is
+that of its subtree: its own attempts, their harness subagents and the runs its sessions and steps started, down the
+chain, not a run a trigger started. When the spend of a run reaches its limit, whether it was charged to the run or to
+a run of its subtree, the outermost such live run fails at once with class `infrastructure` and reason
+`budget_exceeded`, with no repeat and no `back_to`: its session is stopped and its live children are cancelled with
+reason `parent_failed`. Its parent's step takes the failure as that of any child. Usage the harness reports after that
+still counts in the run's total. A start of an attempt in the scope of a spent budget fails the same way.
+
+A formula with `internal = true` runs only from such a step or a `drain` step: a start by
 hand, from the API, MCP or a session is refused (`` `<name>` is internal: only a step of another formula runs
 it ``), `GET /v1/formulas` marks each formula with `internal`, and
 `loop-manager formula list` hides the internal ones unless `--all`. Config errors: a step that neither gives nor

@@ -59,6 +59,8 @@ pub(crate) struct Run {
     attempts: Vec<Attempt>,
     /// What the run and its subtree of child runs spent, over every attempt.
     usage: Usage,
+    /// The run's spend limit in USD, a decimal; absent when it has none (docs/design/formula-budgets.md).
+    budget_usd: Option<String>,
     /// `GET /v1/runs/{id}` only: by place (a rig, or the root's name), the directory of the run's base there
     /// (docs/design/config.md "Formula"): in its own place its `workdir`; in each other place it had children in,
     /// its worktree there when its formula has `worktree = true` and that worktree exists, else the place's directory.

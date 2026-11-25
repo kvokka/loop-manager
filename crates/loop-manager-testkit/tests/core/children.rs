@@ -24,6 +24,7 @@ fn child(parent: Option<&str>, token: Option<&str>, depth: u32) -> Msg {
         parent_run: parent.map(str::to_owned),
         token: token.map(str::to_owned),
         continue_from: None,
+        budget: None,
     })
 }
 

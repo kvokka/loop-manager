@@ -27,7 +27,11 @@ impl RunHandler {
             return Err(rejected(format!("`{run}` is already `{}`", row.state)));
         }
         self.terminal(tx, row, "cancelled", None, reason)?;
-        // The live runs its sessions started go with it; a trigger's run is not the parent's to cancel.
+        self.cancel_children(tx, run, "parent_cancelled")
+    }
+
+    /// Cancels the live runs the sessions and steps of `run` started; a trigger's run is not the parent's to cancel.
+    fn cancel_children(&mut self, tx: &mut Tx<'_>, run: &str, reason: &str) -> Result<(), Error> {
         let children: Vec<String> = {
             let mut stmt = tx.sql().prepare(
                 "SELECT id FROM runs WHERE parent_run = ?1 AND trigger IS NULL \
@@ -37,10 +41,22 @@ impl RunHandler {
         };
         for child in children {
             if Row::load(tx, &child)?.live() {
-                self.cancel(tx, &child, "parent_cancelled")?;
+                self.cancel(tx, &child, reason)?;
             }
         }
         Ok(())
+    }
+
+    /// Fails the outermost live run from `run` up whose budget its subtree has spent, and stops that subtree
+    /// (docs/design/formula-budgets.md, "Scope and enforcement"); whether there was one.
+    pub(super) fn enforce_budget(&mut self, tx: &mut Tx<'_>, run: &str) -> Result<bool, Error> {
+        let Some(over) = super::spend::exhausted(tx.sql(), run)? else {
+            return Ok(false);
+        };
+        let row = Row::load(tx, &over)?;
+        self.terminal(tx, row, "failed", Some("infrastructure"), "budget_exceeded")?;
+        self.cancel_children(tx, &over, "parent_failed")?;
+        Ok(true)
     }
 
     /// The current attempt of `run` is `attempt` and still live.
@@ -158,6 +174,7 @@ impl RunHandler {
                     cost: *cost,
                 };
                 super::spend::charge(tx, &self.config.pricing, &run, attempt, &total)?;
+                self.enforce_budget(tx, &run)?;
             }
         }
         for (run, attempt, _) in owners {

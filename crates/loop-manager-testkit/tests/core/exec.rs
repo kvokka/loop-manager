@@ -41,6 +41,7 @@ fn check_within(timeout: Option<&str>, inputs: &str, script: &str, hooks: ExecHo
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     (w, create)
 }
@@ -113,6 +114,7 @@ async fn the_command_gets_the_run_and_its_inputs_in_the_environment_and_inputs_a
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let run = w
         .start_run(with(json!({ "n": 3, "flag": true, "note-text": "a {b}" })))

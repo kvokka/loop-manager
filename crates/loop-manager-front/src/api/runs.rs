@@ -11,7 +11,10 @@ use axum::{
     extract::{Path, Query},
     http::{HeaderMap, StatusCode},
 };
-use loop_manager_core::run::{Create, Msg, Outcome, RunFilter};
+use loop_manager_core::{
+    run::{Create, Msg, Outcome, RunFilter},
+    usd::Usd,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use utoipa::{IntoParams, ToSchema};
@@ -37,6 +40,9 @@ pub(crate) struct CreateRun {
     inputs: Map<String, Value>,
     /// A terminal run whose last session this run continues (docs/design/contracts.md 6).
     continue_from: Option<String>,
+    /// The run's spend limit in USD as a decimal, in place of its formula's `budget`
+    /// (docs/design/formula-budgets.md); more than 0.
+    budget_usd: Option<String>,
     /// The agent session that starts this run (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`): the run is its child, with its
     /// correlation, one level deeper (docs/design/contracts.md 6.1). Absent: a new correlation at depth 0.
     parent: Option<ParentAttempt>,
@@ -58,6 +64,12 @@ pub(crate) struct ParentAttempt {
         (status = NOT_FOUND, description = "`not_found`: no such project, rig, parent run or run to continue",
             body = ErrorReply), Keyed))]
 pub(crate) async fn create(state: State, headers: HeaderMap, Body(body): Body<CreateRun>) -> Reply {
+    let budget = match body.budget_usd.as_deref().map(str::parse::<Usd>) {
+        Some(Ok(usd)) if usd.0 > 0 => Some(usd),
+        None => None,
+        Some(Ok(_)) => return Err(bad_budget("`budget_usd` must be more than 0".to_owned())),
+        Some(Err(why)) => return Err(bad_budget(format!("`budget_usd`: {why}"))),
+    };
     let create = Create {
         project: body.project,
         rig: body.rig,
@@ -68,8 +80,13 @@ pub(crate) async fn create(state: State, headers: HeaderMap, Body(body): Body<Cr
         token: body.parent.as_ref().map(|p| p.token.clone()),
         parent_run: body.parent.map(|p| p.run),
         continue_from: body.continue_from,
+        budget,
     };
     Ok(Json(state.core.send_request(key(&headers), Msg::Create(create)).await?))
+}
+
+fn bad_budget(why: String) -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, "bad_request", why)
 }
 
 /// The states of a run (docs/design/contracts.md 6.2).

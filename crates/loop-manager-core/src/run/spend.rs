@@ -131,12 +131,37 @@ fn sums(conn: &Connection, filter: &str, key: impl rusqlite::Params) -> Result<V
     })?)
 }
 
-/// What a run and its subtree spent (docs/design/formula-budgets.md): the runs its sessions and steps started, down
-/// the chain; a run a trigger started is an invocation of its own.
+/// The ledger rows of a run (`?1`) and its subtree (docs/design/formula-budgets.md): the runs its sessions and steps
+/// started, down the chain; a run a trigger started is an invocation of its own.
+const SUBTREE: &str = "run IN (WITH RECURSIVE tree(id) AS (SELECT ?1 UNION ALL \
+    SELECT r.id FROM runs r JOIN tree t ON r.parent_run = t.id WHERE r.trigger IS NULL) SELECT id FROM tree)";
+
+/// What a run and its subtree spent.
 pub(super) fn usage(conn: &Connection, run: &str) -> Result<Value, Error> {
-    let subtree = "run IN (WITH RECURSIVE tree(id) AS (SELECT ?1 UNION ALL \
-        SELECT r.id FROM runs r JOIN tree t ON r.parent_run = t.id WHERE r.trigger IS NULL) SELECT id FROM tree)";
-    sums(conn, subtree, [run])
+    sums(conn, SUBTREE, [run])
+}
+
+/// The outermost live run whose budget the spend of its subtree has reached, from `run` up the runs whose subtree
+/// it is in (docs/design/formula-budgets.md, "Scope and enforcement").
+pub(super) fn exhausted(conn: &Connection, run: &str) -> Result<Option<String>, Error> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE up(id, parent, trigger, level) AS (SELECT id, parent_run, trigger, 0 FROM runs WHERE id = ?1 \
+         UNION ALL SELECT r.id, r.parent_run, r.trigger, up.level + 1 FROM runs r JOIN up ON r.id = up.parent \
+         WHERE up.trigger IS NULL) \
+         SELECT r.id, r.budget FROM up JOIN runs r ON r.id = up.id \
+         WHERE r.budget IS NOT NULL AND r.state NOT IN ('passed', 'failed', 'cancelled') ORDER BY up.level DESC",
+    )?;
+    let limited: Vec<(String, i64)> = stmt
+        .query_map([run], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, budget) in limited {
+        let sql = format!("SELECT COALESCE(SUM(cost), 0) FROM spend WHERE {SUBTREE}");
+        let spent: i64 = conn.query_row(&sql, [&id], |r| r.get(0))?;
+        if spent >= budget {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
 }
 
 /// What one attempt spent, its session's subagents included.

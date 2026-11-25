@@ -99,6 +99,7 @@ async fn a_resume_after_a_new_session_that_never_started_leaves_the_continued_se
         parent_run: None,
         token: None,
         continue_from: Some(first.clone()),
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let run = reply["run"].as_str().unwrap().to_owned();

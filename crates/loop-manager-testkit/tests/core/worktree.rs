@@ -208,6 +208,7 @@ async fn a_run_continuing_a_session_works_in_the_worktree_of_that_session() {
         parent_run: None,
         token: None,
         continue_from: Some(first.clone()),
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let second = reply["run"].as_str().unwrap();
@@ -276,6 +277,7 @@ async fn a_child_of_a_formula_step_works_in_the_worktree_of_its_parent_and_leave
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
@@ -462,6 +464,7 @@ async fn a_child_of_a_formula_step_with_a_worktree_of_its_own_deletes_its_branch
         parent_run: None,
         token: None,
         continue_from: None,
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
@@ -523,6 +526,7 @@ async fn a_run_a_session_starts_works_in_its_place_not_in_the_worktree_of_its_pa
         parent_run: parent,
         token,
         continue_from: None,
+        budget: None,
     };
     let reply = w
         .core

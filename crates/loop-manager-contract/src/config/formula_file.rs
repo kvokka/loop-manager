@@ -28,6 +28,8 @@ pub(super) struct FormulaFile {
     pub internal: bool,
     /// The most rounds of a run that checks send back (docs/design/config.md); default 3.
     pub rounds: Option<NonZeroU32>,
+    /// The default spend limit of a run in USD (docs/design/formula-budgets.md).
+    pub budget: Option<toml::Value>,
     pub step: Vec<StepFile>,
 }
 
@@ -191,6 +193,8 @@ pub struct Formula {
     /// The most rounds of a run: a failed check with `back_to` starts the next one, past the last the run fails. The
     /// formula's own, else the project's, else the orchestrator's, else 3 (docs/design/config.md "Formula").
     pub rounds: Sourced<u32>,
+    /// `budget`: the spend limit of a run of the formula a start does not replace (docs/design/formula-budgets.md).
+    pub budget: Option<crate::usd::Usd>,
     /// The values of its inputs the project and the orchestrator config give, the project's first; a start fills an
     /// input it is not given from here (docs/design/config.md "Formula").
     pub defaults: BTreeMap<String, Sourced<Value>>,

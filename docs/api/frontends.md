@@ -66,6 +66,8 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   with the usage text.
 - `--key` on a mutating command sets the idempotency key.
 - `loop-manager run start <project> [<rig>] <formula>` (options after the positionals) prints the bare run id.
+  `--budget <USD>` (`budget_usd` of `POST /v1/runs`, a decimal string) replaces the formula's `budget` as the run's
+  spend limit ([config](../design/config.md), "Formula"); the run view gives it as `budget_usd`.
   With `--json`, read the id from the reply's `run` field. Without the rig the run takes the rig of the id prefix of
   the issue its task names, else works in the project root. When a task input `{"next_ready": true}` finds nothing
   ready it exits 3, with a message on stderr by default or `"nothing_ready": true` in the JSON reply. Inside an agent

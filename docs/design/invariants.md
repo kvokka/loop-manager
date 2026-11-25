@@ -35,6 +35,7 @@ times, how long) are config parameters with defaults; the choice of a reaction i
 | 18 | An operator hold beats automation: a pause or cancel by a human is a record in the state read by every automatic decision | contracts 6.2, 7 |
 | 19 | A worktree has one owner, the run it is named after: only that run's end removes it, and only when its commits are reachable from refs; a run never removes a worktree it inherited (the `worktree` addon) | `loop-manager-addons/src/worktree.rs` |
 | 20 | An event is a reason to re-read the state; resync is mandatory; ambiguity means zero effects and a loud `resync.diverged` (a repeated or skipped driver `seq` included) | [event model](event-model.md) |
+| 21 | A live run with a budget has spent less than it, its subtree included: the charge that reaches the limit fails the outermost such run and stops its subtree in the same transaction, and no attempt starts in the scope of a spent budget | [formula budgets](formula-budgets.md), contracts 6.2; `loop-manager-testkit/tests/core/budget.rs` |
 
 How they are checked: the deterministic chaos stand (`loop-manager-testkit/tests/chaos`) plays seeded sequences of
 commands, harness behaviour, policy hooks, operator actions, lost and repeated deliveries and daemon crashes, and
