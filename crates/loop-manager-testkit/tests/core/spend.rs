@@ -3,7 +3,7 @@
 
 use crate::common;
 
-use common::{POLICY, World, hollow_turn, last, world};
+use common::{FILES, POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
     driver::{Normalized, Tokens},
     run::{Decision, Reader},
@@ -15,11 +15,16 @@ use std::time::Duration;
 
 /// A running total of counter `m1` (input, cache read, cache write 5m, output) with a harness cost in micro-USD.
 fn total(tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
+    total_of("anthropic", "m1", tokens, micro_usd)
+}
+
+/// [`total`] of `model` from `provider`, the model naming the counter.
+fn total_of(provider: &str, model: &str, tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
     let [input, cache_read, cache_write_5m, output] = tokens;
     Normalized::UsageTotal {
-        counter: "m1".into(),
-        provider: "anthropic".into(),
-        model: "m1".into(),
+        counter: model.into(),
+        provider: provider.into(),
+        model: model.into(),
         tokens: Tokens {
             input,
             cache_read,
@@ -125,4 +130,23 @@ async fn a_resumed_session_after_a_restart_is_charged_only_its_new_work() {
     let costs: Vec<_> = attempts.iter().map(|a| (&a["input_tokens"], &a["cost_usd"])).collect();
     assert_eq!(costs, [(&json!(100), &json!("0.4")), (&json!(50), &json!("0.1"))]);
     assert_eq!(view["usage"], usage(150, 0, 0, 12, "0.5"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_total_without_a_harness_cost_is_priced_by_the_users_entry_and_an_unpriced_model_costs_zero() {
+    let pricing = "[[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\ninput = 2\ncache_read = 0.5\ncache_write = 3\n\
+        output = 10\n";
+    let config = format!("{}{pricing}", FILES[0].1);
+    let w = world(&[("config.toml", config.as_str())]);
+    let mut steps = hollow_turn();
+    let totals = [
+        total_of("proxy", "m1", [1000, 2000, 100, 50], None),
+        total_of("proxy", "private", [7, 0, 0, 3], None),
+    ];
+    steps.splice(1..1, totals.map(Step::Emit));
+    w.driver.script(steps);
+    let run = w.create().await;
+    w.events(&run, Duration::from_millis(200)).await;
+    // (1000 * 2 + 2000 * 0.5 + 100 * 3 + 50 * 10) / 1M USD; the private model's tokens count at no cost.
+    assert_eq!(view(&w, &run)["usage"], usage(1007, 2000, 100, 53, "0.0038"));
 }

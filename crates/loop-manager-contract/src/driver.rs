@@ -232,7 +232,7 @@ pub enum Normalized {
     /// The running total of one usage counter of the session, as the harness keeps it (contracts 4.3): the core
     /// charges the increment over the total it recorded last for the same session and counter.
     UsageTotal {
-        /// Which counter of the session: claude names it by the model, codex by the thread.
+        /// Which counter of the session: one per model, or one per thread of a harness with threads.
         counter: String,
         /// The provider the requests went to, as the harness tells it.
         provider: String,

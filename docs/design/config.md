@@ -379,12 +379,35 @@ focus = "security"
 inherit_env = false                 # the daemon's whole environment (default false: PATH, HOME, LANG only)
 env = { GH_TOKEN = "${LOOP_MANAGER_GH_TOKEN}" }  # merged by key under the project's and the step's
 
+[[pricing]]                         # the price of a model from one provider (docs/design/formula-budgets.md)
+provider = "openrouter"             # as the harness reports it: codex its `model_provider`; claude the host of
+                                    # ANTHROPIC_BASE_URL, else `anthropic`
+model = "gpt-5.3-codex"             # the model id as the harness reports it
+service_tier = "priority"           # optional: the entry is for that tier only
+input = 1.75                        # USD per 1M tokens of ordinary input; at most six decimals
+cache_read = 0.175                  # optional, default `input`
+cache_write = 1.75                  # optional, default `input`: a cache write of the short duration (Anthropic: 5m)
+cache_write_1h = 3.5                # optional, default `cache_write`
+output = 14
+long_context_over = 272000          # optional: a request with more input tokens (ordinary, read and written) than this
+long_context = { input = 3.5, output = 21 }  # takes these rates, the missing ones defaulting as above
+
 [settings]                          # layer 2
 [agents.implementer]                # layer 10: an edit of an agent of any project (no `base`)
 ```
 
 Each `[watchdog]` value is a duration with one unit (`ms`, `s`, `m`, `h`) from 1 ms to 8760 h; an unknown key is an
 error. A reload applies to the deadlines set from then on: a deadline already set keeps its time.
+
+A request whose harness reports no cost is priced by the `[[pricing]]` entry of its provider and model (the entry of
+its service tier first, then the one with none), else by the catalog of official API prices shipped with loop-manager,
+`crates/loop-manager-contract/src/config/pricing.toml`: the entries for GPT and Claude models of the
+[OpenAI](https://developers.openai.com/api/docs/pricing) and [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing)
+pages on its `date`, whatever provider serves the model. Publishing a new catalog means verifying every price on
+those pages and changing its `date`. A model priced by neither costs zero; its tokens still count. `provider` and
+`model` are compared as written. `provider`, `model`, `input` and `output` are required; two entries of one provider,
+model and tier, a negative rate, a rate of more than six decimals and an unknown key are load errors. Each charge
+keeps the price it used (its source, its rates and the catalog's date): a reload applies to charges from then on.
 
 The file need not live in `~/.config/loop-manager`: `loop-manager daemon` takes another one with `--config <file>`, and
 so do `loop-manager doctor` and `loop-manager config check|explain`, which then check that file with no daemon instead

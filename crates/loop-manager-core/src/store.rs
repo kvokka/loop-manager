@@ -118,7 +118,8 @@ CREATE TABLE attempts (
 CREATE INDEX attempts_instance ON attempts (instance);
 CREATE INDEX attempts_session ON attempts (session);
 -- The spend ledger (docs/design/formula-budgets.md): sums per attempt, agent, provider, model and the price used.
--- `price` is the JSON of the price used, its `source` `harness` or `none`. `cost` is in pico-USD.
+-- `price` is the JSON of the price used: its `source` (`harness`, `user`, `catalog`, `none`), and for a table price the
+-- rates in USD per 1M tokens and the catalog's `date`. `cost` is in pico-USD.
 CREATE TABLE spend (
     run TEXT NOT NULL,
     attempt INTEGER NOT NULL,

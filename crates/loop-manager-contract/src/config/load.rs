@@ -90,6 +90,10 @@ impl Loader {
                 .none(file, format!("`timezone`: {e}"))
                 .unwrap_or(jiff::tz::TimeZone::UTC),
         };
+        let pricing = super::pricing::pricing(raw.pricing).unwrap_or_else(|errors| {
+            errors.into_iter().for_each(|e| self.fail(file, e));
+            super::pricing::catalog()
+        });
         let mut config = Config {
             api_tcp: raw.api_tcp,
             api_token: String::new(),
@@ -109,6 +113,7 @@ impl Loader {
             service_prefix: Vec::new(),
             addon_data: None,
             service_wait: std::time::Duration::from_secs(30),
+            pricing,
         };
         super::subagents::check(&mut self, &config);
         // A harness of the build the steps run on gets its defaults, none without its section.

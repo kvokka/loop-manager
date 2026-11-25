@@ -202,6 +202,9 @@ pub(super) struct OrchestratorFile {
     pub inputs: Map<String, Value>,
     #[serde(default)]
     pub exec: super::env::ExecFile,
+    /// `[[pricing]]`: the user's price of a model from a provider (docs/design/formula-budgets.md).
+    #[serde(default)]
+    pub pricing: Vec<super::pricing::PriceFile>,
 }
 
 /// A harness agents may choose and its defaults (docs/design/config.md).

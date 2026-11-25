@@ -155,7 +155,7 @@ impl RunHandler {
                     tokens,
                     cost: *cost,
                 };
-                super::spend::charge(tx, &run, attempt, &total)?;
+                super::spend::charge(tx, &self.config.pricing, &run, attempt, &total)?;
             }
         }
         for (run, attempt, _) in owners {

@@ -17,6 +17,7 @@ mod config_targets;
 mod config_triggers;
 mod cron;
 mod journal;
+mod pricing;
 mod template;
 mod toon;
 mod usd;

@@ -13,6 +13,7 @@ mod formula_file;
 mod items;
 mod load;
 mod places;
+mod pricing;
 mod prompt;
 mod retired;
 pub(crate) mod schema;
@@ -31,6 +32,7 @@ pub use env::{ExecEnv, env_literal, env_value};
 pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, Settings, Skill};
 pub use formula_file::{Formula, Input, InputType, OnItemFailure, Step, StepKind};
 pub use places::Scope;
+pub use pricing::{Price, Pricing, Rates, Source as PriceSource, catalog};
 pub use prompt::{Prompt, TEMPLATE};
 pub use service::{Health, Service, ServiceScope};
 pub use sources::{Checkouts, GitSource, commit_id, git_sources};
@@ -77,6 +79,8 @@ pub struct Config {
     pub service_wait: Duration,
     /// Runtime prefix for service commands. The Linux daemon supplies its parent-death launcher.
     pub service_prefix: Vec<String>,
+    /// The user's `[[pricing]]` over the shipped catalog: a reload applies to charges from then on.
+    pub pricing: Pricing,
 }
 
 /// The thresholds of `[watchdog]` in the orchestrator file, in milliseconds (contracts 6.1).

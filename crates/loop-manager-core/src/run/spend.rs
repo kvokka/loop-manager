@@ -2,6 +2,7 @@
 //! from the running totals the harness reports over a checkpoint kept per session and counter.
 
 use crate::{
+    config::Pricing,
     driver::Tokens,
     usd::Usd,
     writer::{Error, Tx},
@@ -31,7 +32,7 @@ pub(super) struct Total<'a> {
 /// Charges to `(run, attempt)` what `total` adds over the checkpoint of its counter, and moves the checkpoint. A total
 /// below the checkpoint in any field means the harness counts from zero again: it is charged whole. Each request is
 /// thereby charged once, however often a total that includes it is repeated, across a resume and a restart.
-pub(super) fn charge(tx: &Tx<'_>, run: &str, attempt: u32, total: &Total<'_>) -> Result<(), Error> {
+pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, total: &Total<'_>) -> Result<(), Error> {
     let now = fields(total.tokens).map(sql_int);
     let cost = total.cost.map(|c| c.0);
     let last: Option<([i64; 5], Option<i64>)> = tx
@@ -68,9 +69,22 @@ pub(super) fn charge(tx: &Tx<'_>, run: &str, attempt: u32, total: &Total<'_>) ->
     if delta.iter().all(|d| *d == 0) && delta_cost.unwrap_or_default() == 0 {
         return Ok(());
     }
-    let price = match delta_cost {
-        Some(_) => json!({ "source": "harness" }),
-        None => json!({ "source": "none" }),
+    // The harness's cost first, an explicit zero included; else the user's price or the catalog's; else zero.
+    let [input, cache_read, cache_write_5m, cache_write_1h, output] = delta.map(|d| u64::try_from(d).unwrap_or(0));
+    let tokens = Tokens {
+        input,
+        cache_read,
+        cache_write_5m,
+        cache_write_1h,
+        output,
+    };
+    let (price, amount) = match (delta_cost, pricing.lookup(total.provider, total.model, None)) {
+        (Some(cost), _) => (json!({ "source": "harness" }), cost),
+        (None, Some((source, price))) => {
+            let rates = price.rates(&tokens);
+            (pricing.record(source, rates), rates.cost(&tokens).0)
+        }
+        (None, None) => (json!({ "source": "none" }), 0),
     };
     tx.sql().execute(
         "INSERT INTO spend (run, attempt, agent, provider, model, price, input, cache_read, cache_write_5m, \
@@ -93,7 +107,7 @@ pub(super) fn charge(tx: &Tx<'_>, run: &str, attempt: u32, total: &Total<'_>) ->
             delta[2],
             delta[3],
             delta[4],
-            delta_cost.unwrap_or_default()
+            amount
         ],
     )?;
     Ok(())
