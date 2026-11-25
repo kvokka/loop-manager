@@ -28,6 +28,27 @@ codex plugin add loop-manager@loop-manager
 When installing unpublished changes, use the absolute path to the repository root in the marketplace
 command. Run the install command for each plugin you want.
 
+### Codex plugin hook updates
+
+Install the plugin with Codex, then open `/hooks` and trust each hook you want to use once.
+For the run card, approve both `PreToolUse` and `PostToolUse`. After Codex updates the installed plugin,
+a running LM daemon renews approval for enabled hooks that Codex reports as modified. New hooks still
+need their first approval. Codex manages plugin installation and version updates.
+
+The default selection is the run card. To change it, set the list in
+`$XDG_CONFIG_HOME/loop-manager/preferences.toml` (usually `~/.config/loop-manager/preferences.toml`):
+
+```toml
+[codex.plugin_hooks]
+auto_trust_updates = ["t3-run-card@loop-manager"]
+```
+
+The list replaces the default. Use exact Codex plugin IDs such as `name@marketplace`,
+`["*"]` for every plugin, or `[]` to keep update approvals manual. The daemon watches preference
+and plugin changes and uses its operator's `CODEX_HOME` (default `~/.codex`). Point the daemon and
+the interactive client at the same home. You can check the result in `/hooks`. LM addon session
+hooks and orchestrator hooks have their own lifecycle.
+
 ## Find and install addons
 
 With the operator plugin installed, ask “What loop-manager addons are available?” or “Install version X.Y.Z

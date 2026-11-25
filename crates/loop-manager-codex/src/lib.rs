@@ -6,11 +6,13 @@
 mod adapter;
 mod chat;
 mod part;
+mod plugin_hooks;
 mod roles;
 mod rpc;
 mod stream;
 
 pub use adapter::ADAPTER;
+pub use plugin_hooks::watch_plugin_hooks;
 
 use loop_manager_contract::{
     BoxFuture,

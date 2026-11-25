@@ -156,7 +156,11 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     let stop = stop_signal().map_err(|e| format!("signals: {e}"))?;
     eprintln!("loop-manager daemon listening on {}", paths.socket.display());
     // A core that stopped leaves an API that can only fail: the daemon exits with an error, for a supervisor to see.
+    let preferences = dirs::xdg("XDG_CONFIG_HOME", ".config")?.join("loop-manager/preferences.toml");
+    let codex_home = dirs::xdg("CODEX_HOME", ".codex")?;
+    let codex = binary("codex", None).0;
     let served = tokio::select! {
+        () = loop_manager_codex::watch_plugin_hooks(&codex, &preferences, &codex_home) => unreachable!(),
         served = api::serve(listener, tcp, api, stop) => served,
         died = &mut task => {
             let _ = std::fs::remove_file(&paths.socket);

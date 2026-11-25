@@ -658,6 +658,7 @@ version = "0.0.1"
 dependencies = [
  "loop-manager-contract",
  "loop-manager-testkit",
+ "notify",
  "rustix",
  "serde",
  "serde_json",

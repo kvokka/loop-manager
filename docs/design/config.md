@@ -30,6 +30,13 @@ error in every file.
   such as `max_sessions` (a harness `model` is fine), or of which projects have a tracker is refused: drivers
   and trackers are made at daemon start.
 
+## Operator preferences
+
+`$XDG_CONFIG_HOME/loop-manager/preferences.toml` holds per-user settings shared by the user's daemons.
+In `[codex.plugin_hooks]`, `auto_trust_updates` lists installed plugins whose previously approved hooks
+receive renewed trust after an update. It defaults to `["t3-run-card@loop-manager"]`. The daemon watches
+this file independently of orchestrator config reloads. See [initial approval and selection examples](../../plugins/README.md#codex-plugin-hook-updates).
+
 ## Settings (any layer)
 
 One table shape for every layer (see "Effective config"): `[settings]` of the orchestrator, a project and a rig;
