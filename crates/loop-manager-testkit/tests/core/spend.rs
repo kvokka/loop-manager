@@ -300,3 +300,35 @@ async fn each_charge_keeps_the_price_it_was_made_at_across_a_reload() {
     ];
     assert_eq!(prices(&w, &run), expected);
 }
+
+/// A run that continues the session of a finished run is charged only what the session adds after it, and the first
+/// run keeps its own spend.
+#[tokio::test(start_paused = true)]
+async fn a_continued_session_charges_the_new_run_only_its_new_work() {
+    let w = world(&[]);
+    w.driver
+        .script(spending(total([100, 0, 0, 10], Some(400_000)), Duration::ZERO));
+    let first = w.create().await;
+    w.events(&first, Duration::from_secs(1)).await;
+    w.driver
+        .script(spending(total([130, 0, 0, 15], Some(600_000)), Duration::ZERO));
+    let create = Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: "build".into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: 0,
+        parent_run: None,
+        token: None,
+        continue_from: Some(first.clone()),
+        budget: None,
+    };
+    let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
+    let second = reply["run"].as_str().unwrap().to_owned();
+    w.events(&second, Duration::from_secs(1)).await;
+    let (one, two) = (view(&w, &first), view(&w, &second));
+    assert_eq!(one["attempts"][0]["session"], two["attempts"][0]["session"]);
+    assert_eq!(one["usage"], usage(100, 0, 0, 10, "0.4"));
+    assert_eq!(two["usage"], usage(30, 0, 0, 5, "0.2"));
+}

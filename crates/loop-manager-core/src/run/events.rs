@@ -163,6 +163,9 @@ impl RunHandler {
                     .optional()?,
             };
             if let Some((run, attempt)) = owner {
+                // shortcut: a total reported before the attempt knows its session is checkpointed under the attempt,
+                // and the next one under the session would be charged whole; both adapters report usage only after
+                // their session is open. Upgrade when a harness reports usage before it.
                 let key = session.clone().unwrap_or_else(|| format!("{run}/{attempt}"));
                 let total = super::spend::Total {
                     session: &key,
