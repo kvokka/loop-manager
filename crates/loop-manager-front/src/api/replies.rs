@@ -79,6 +79,36 @@ pub(crate) struct Usage {
     cost_usd: String,
 }
 
+/// The spend report of a run and its subtree (docs/api/frontends.md): failed attempts and harness subagents count.
+#[derive(ToSchema)]
+pub(crate) struct Spend {
+    run: String,
+    /// The run's spend limit in USD, a decimal; null when it has none.
+    budget_usd: Option<String>,
+    /// `total`, `agent` or `model`.
+    detail: String,
+    total: Usage,
+    /// Absent at `total`: a row per agent, or per agent, provider and model, ordered by them; the rows sum to `total`.
+    rows: Option<Vec<SpendRow>>,
+}
+
+/// A row of a spend report: an unpriced model's tokens at a `cost_usd` of `0`.
+#[derive(ToSchema)]
+pub(crate) struct SpendRow {
+    /// Null for the part the harness reported without naming its agent.
+    agent: Option<String>,
+    /// `model` detail only.
+    provider: Option<String>,
+    /// `model` detail only.
+    model: Option<String>,
+    input_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    output_tokens: u64,
+    /// USD as an exact decimal.
+    cost_usd: String,
+}
+
 /// `Outcome` of docs/design/contracts.md 1.3.
 #[derive(ToSchema)]
 pub(crate) struct Outcome {

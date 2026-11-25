@@ -6,7 +6,7 @@ use crate::common;
 use common::{FILES, POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
     driver::{Normalized, Tokens},
-    run::{Create, Decision, Msg, Reader},
+    run::{Create, Decision, Msg, Reader, SpendDetail},
     usd::Usd,
 };
 use loop_manager_testkit::Step;
@@ -331,4 +331,93 @@ async fn a_continued_session_charges_the_new_run_only_its_new_work() {
     assert_eq!(one["attempts"][0]["session"], two["attempts"][0]["session"]);
     assert_eq!(one["usage"], usage(100, 0, 0, 10, "0.4"));
     assert_eq!(two["usage"], usage(30, 0, 0, 5, "0.2"));
+}
+
+/// `note` run by agent `rev`, so that a child spends under an agent of its own.
+const REV: &[(&str, &str)] = &[
+    (
+        "shop/formulas/note.toml",
+        "name = \"note\"\n[[step]]\nkind = \"ai\"\nagent = \"rev\"\n",
+    ),
+    ("shop/agents/rev/agent.toml", "harness = \"scripted\"\n"),
+    ("shop/agents/rev/prompt.template.md", "Review."),
+];
+
+fn spend(w: &World, run: &str, detail: SpendDetail) -> Value {
+    Reader::open(&w.dir.path().join("state.db"))
+        .unwrap()
+        .spend(run, detail)
+        .unwrap()
+        .unwrap()
+}
+
+/// A row of a spend report: `agent`, then `provider` and `model` when given, and the usage.
+fn row(agent: &str, model: Option<(&str, &str)>, usage: Value) -> Value {
+    let mut row = usage;
+    row["agent"] = json!(agent);
+    if let Some((provider, model)) = model {
+        row["provider"] = json!(provider);
+        row["model"] = json!(model);
+    }
+    row
+}
+
+/// The three levels of a spend report agree: the same total of the run and its child, whose one attempt failed, and
+/// rows by agent and by agent, provider and model that sum to it; an unpriced model is a row at no cost.
+#[tokio::test(start_paused = true)]
+async fn the_three_levels_of_a_spend_report_agree_on_the_total() {
+    let w = world(REV);
+    let mut parent_turn = spending(total([100, 0, 0, 10], Some(1_000_000)), Duration::from_secs(60));
+    parent_turn.insert(1, Step::Emit(total_of("proxy", "private", None, [7, 0, 0, 3], None)));
+    w.driver.script(parent_turn);
+    let parent = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let token = w.driver.token(&parent, 1).unwrap();
+    w.driver
+        .script(spending(total([20, 5, 0, 2], Some(200_000)), Duration::ZERO));
+    let child = Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: "note".into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: 0,
+        parent_run: Some(parent.clone()),
+        token: Some(token),
+        continue_from: None,
+        budget: None,
+    };
+    let reply = w.core.send(None, Msg::Create(child)).await.unwrap();
+    let child = reply["run"].as_str().unwrap().to_owned();
+    w.events(&child, Duration::from_secs(5)).await;
+    assert_eq!(view(&w, &child)["state"], "failed");
+    w.events(&parent, Duration::from_secs(60)).await;
+    let total = usage(127, 5, 0, 15, "1.2");
+    let report = spend(&w, &parent, SpendDetail::Total);
+    assert_eq!(
+        report,
+        json!({ "run": parent, "budget_usd": null, "detail": "total", "total": total })
+    );
+    let by_agent = spend(&w, &parent, SpendDetail::Agent);
+    assert_eq!(by_agent["total"], total);
+    let agents = [
+        row("shop.dev", None, usage(107, 0, 0, 13, "1")),
+        row("shop.rev", None, usage(20, 5, 0, 2, "0.2")),
+    ];
+    assert_eq!(by_agent["rows"], json!(agents));
+    let by_model = spend(&w, &parent, SpendDetail::Model);
+    assert_eq!(by_model["total"], total);
+    let models = [
+        row("shop.dev", Some(("anthropic", "m1")), usage(100, 0, 0, 10, "1")),
+        row("shop.dev", Some(("proxy", "private")), usage(7, 0, 0, 3, "0")),
+        row("shop.rev", Some(("anthropic", "m1")), usage(20, 5, 0, 2, "0.2")),
+    ];
+    assert_eq!(by_model["rows"], json!(models));
+    assert!(
+        Reader::open(&w.dir.path().join("state.db"))
+            .unwrap()
+            .spend("nope", SpendDetail::Agent)
+            .unwrap()
+            .is_none()
+    );
 }

@@ -34,6 +34,15 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   that falls behind the tap's buffer (256 messages) gets `lagged` with `{"missed": n}` and goes on. The stream ends
   once it has read past the run's terminal event, and when the client leaves. A later attempt's session is picked up
   as it starts.
+- **Spend of a run** (`GET /v1/runs/{id}/spend?detail=total|agent|model`, default `agent`; another detail is
+  `bad_request`, a run that does not exist `not_found`): what a running or ended run and its subtree (the runs its
+  sessions and steps started, not those a trigger started) spent, failed attempts and harness subagents included
+  ([formula budgets](../design/formula-budgets.md)). The reply is `{run, budget_usd, detail, total, rows}`: `total` is
+  a `Usage` (contracts 1.3), `budget_usd` the run's limit or null. `total` detail has no `rows`; `agent` detail has a
+  row per agent and `model` detail a row per agent, provider and model, each with the four token counts and
+  `cost_usd`, ordered by agent, provider and model. The rows are the same ledger rows as the total, only grouped, so
+  the three levels agree exactly. A row whose `agent` is null is the part the harness reported without naming its
+  agent. A model with no price is a row with its tokens and a `cost_usd` of `"0"`.
 - `GET /v1/runs/{id}/live?chat=true` streams the conversation from the beginning of the current attempt’s session.
   Each `chat` event carries a JSON object with a `type` of `user` or `assistant` (with `text`), `tool_call`
   (with `name` and `input`), or `tool_result` (with `output`). Calls and results carry the matching `id` when supplied
@@ -49,7 +58,7 @@ agents that may call it, the agent itself left out of both; `loop-manager agent 
 formulas, packs, addons (list), config check, explain and reload; the issues of a project: one with its comments
 (`GET /v1/projects/{project}/issues/{issue}`), those under a root (`GET /v1/projects/{project}/issues?under=<root>`),
 filing one (`POST /v1/projects/{project}/issues`) and closing one (`POST /v1/projects/{project}/issues/{issue}/close`); runs
-(start, list, state, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
+(start, list, state, spend, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
 account); events; daemon status, drain and planned restart.
 
@@ -77,6 +86,11 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   of the parent's live current attempt is `rejected` ("stale attempt"). From a shell of its own the run starts a new
   correlation at depth 0. `loop-manager run list --parent <run>` lists a run's children; cancelling a run cancels the
   live runs its sessions started (reason `parent_cancelled`), while its pass or failure leaves them alone.
+- `loop-manager run spend <run> [--detail total|agent|model] [--table]` (`GET /v1/runs/{id}/spend`, default
+  `agent`) prints the spend report of a running or ended run, as TOON or with `--json` as JSON. `--table` (not with
+  `--json`) prints an aligned plain-text table instead: a row per agent, `unattributed` for the part no agent was
+  named for, with provider and model at `model` detail; the input, cache read, cache write and output tokens; the
+  cost in USD rounded to four decimals; then a `total` line and, when the run has a limit, a `budget` line.
 - `GET /v1/formulas` gives every formula with `internal` (bool): an internal formula only starts as a step of
   another formula, not directly. `loop-manager formula list` leaves the internal ones out; `--all` shows them too.
 - `loop-manager events` and `loop-manager run watch <run>` print each event as it arrives, with a blank line between

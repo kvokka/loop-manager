@@ -4,7 +4,7 @@ mod sessions;
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Commented, Failed, Finished, Keyed, Run, Started},
+    replies::{Commented, Failed, Finished, Keyed, Run, Spend, Started},
 };
 use axum::{
     Json,
@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use loop_manager_core::{
-    run::{Create, Msg, Outcome, RunFilter},
+    run::{Create, Msg, Outcome, RunFilter, SpendDetail},
     usd::Usd,
 };
 use serde::Deserialize;
@@ -167,6 +167,34 @@ pub(crate) async fn get(
         .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))??;
     run["bases"] = serde_json::json!(bases);
     Ok(Json(run))
+}
+
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct SpendQuery {
+    /// `total`, `agent` (the default) or `model`; another is a bad request.
+    pub(super) detail: Option<String>,
+}
+
+/// What a run and its subtree spent, live or ended (docs/api/frontends.md): the total, or with it a row per agent, or
+/// per agent, provider and model.
+#[utoipa::path(get, path = "/v1/runs/{id}/spend", params(("id" = String, Path), SpendQuery),
+    responses((status = OK, body = Spend), (status = BAD_REQUEST, description = BAD_QUERY, body = ErrorReply),
+        (status = NOT_FOUND, description = "`not_found`: no such run", body = ErrorReply), Failed))]
+pub(crate) async fn spend(
+    state: State,
+    Param(Path(id)): Param<Path<String>>,
+    Param(Query(query)): Param<Query<SpendQuery>>,
+) -> Reply {
+    let name = query.detail.as_deref().unwrap_or("agent");
+    let detail = SpendDetail::parse(name).ok_or_else(|| {
+        let why = format!("no spend detail `{name}`; one of total, agent, model");
+        ApiError::new(StatusCode::BAD_REQUEST, "bad_request", why)
+    })?;
+    let report = state.reader.spend(&id, detail)?;
+    Ok(Json(report.ok_or_else(|| {
+        ApiError::new(StatusCode::NOT_FOUND, "not_found", format!("no run `{id}`"))
+    })?))
 }
 
 #[derive(Deserialize, ToSchema)]

@@ -2566,6 +2566,82 @@
         }
       }
     },
+    "/v1/runs/{id}/spend": {
+      "get": {
+        "summary": "What a run and its subtree spent, live or ended (docs/api/frontends.md): the total, or with it a row per agent, or\nper agent, provider and model.",
+        "operationId": "spend",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "detail",
+            "in": "query",
+            "description": "`total`, `agent` (the default) or `model`; another is a bad request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Spend"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the query is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage` or `journal`: the daemon could not read its state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/triggers": {
       "get": {
         "summary": "Lists every trigger on every rig it runs on, with its source and next firing (`next_at`, null for an event\ntrigger) and whether it is `enabled`.",
@@ -4294,6 +4370,102 @@
           },
           "workdir": {
             "type": "string"
+          }
+        }
+      },
+      "Spend": {
+        "type": "object",
+        "description": "The spend report of a run and its subtree (docs/api/frontends.md): failed attempts and harness subagents count.",
+        "required": [
+          "run",
+          "detail",
+          "total"
+        ],
+        "properties": {
+          "budget_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run's spend limit in USD, a decimal; null when it has none."
+          },
+          "detail": {
+            "type": "string",
+            "description": "`total`, `agent` or `model`."
+          },
+          "rows": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SpendRow"
+            },
+            "description": "Absent at `total`: a row per agent, or per agent, provider and model, ordered by them; the rows sum to `total`."
+          },
+          "run": {
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Usage"
+          }
+        }
+      },
+      "SpendRow": {
+        "type": "object",
+        "description": "A row of a spend report: an unpriced model's tokens at a `cost_usd` of `0`.",
+        "required": [
+          "input_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "output_tokens",
+          "cost_usd"
+        ],
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null for the part the harness reported without naming its agent."
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cost_usd": {
+            "type": "string",
+            "description": "USD as an exact decimal."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`model` detail only."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`model` detail only."
           }
         }
       },

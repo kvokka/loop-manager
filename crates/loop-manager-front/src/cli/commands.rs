@@ -3,6 +3,7 @@
 use super::{encode, follow, print, run_path};
 use crate::client::{Client, ClientError};
 use clap::Subcommand;
+use loop_manager_core::usd::Usd;
 use serde_json::{Map, Value, json};
 use std::process::ExitCode;
 
@@ -49,6 +50,16 @@ pub enum RunCommand {
     },
     /// Show a run.
     Show { id: String },
+    /// Show what a run and its subtree spent, live or ended: the total, a row per agent, or per agent, provider and
+    /// model.
+    Spend {
+        id: String,
+        #[arg(long, default_value = "agent", value_parser = ["total", "agent", "model"])]
+        detail: String,
+        /// Print an aligned table, costs in USD to four decimals, in place of TOON or JSON.
+        #[arg(long, conflicts_with = "json")]
+        table: bool,
+    },
     /// Follow a run live until it ends: its events from `--from` (default: the oldest held) and the raw messages of
     /// its session from now on. Exits 0 however the run ends; `loop-manager run wait` gives the outcome.
     Watch {
@@ -197,6 +208,7 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             print(json, &runs);
         }
         RunCommand::Show { id } => print(json, &client.request("GET", &run_path(&id, ""), None, None).await?),
+        RunCommand::Spend { id, detail, table } => spend(client, json, &id, &detail, table).await?,
         RunCommand::Watch { id, chat: true, .. } => {
             return super::chat::follow(client.stream(&run_path(&id, "/live?chat=true")).await?, json).await;
         }
@@ -238,6 +250,78 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the spend report of run `id` at `detail`: as a table with `table`.
+async fn spend(client: &Client, json: bool, id: &str, detail: &str, table: bool) -> Result<(), ClientError> {
+    let path = run_path(id, &format!("/spend?detail={detail}"));
+    let report = client.request("GET", &path, None, None).await?;
+    match table {
+        true => println!("{}", spend_table(&report)),
+        false => print(json, &report),
+    }
+    Ok(())
+}
+
+/// A spend report as an aligned table: a row per agent (`unattributed` for the part no agent was named for), with
+/// provider and model at `model` detail, then the total and the budget when the run has one.
+fn spend_table(report: &Value) -> String {
+    let by_model = report["detail"] == "model";
+    let labels = if by_model { 3 } else { 1 };
+    let mut head = vec!["agent", "provider", "model"];
+    head.truncate(labels);
+    head.extend(["input", "cache read", "cache write", "output", "cost USD"]);
+    let line = |mut label: Vec<String>, usage: &Value| {
+        label.resize(labels, String::new());
+        let tokens = [
+            "input_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+        ];
+        label.extend(tokens.map(|t| usage[t].to_string()));
+        label.push(usd4(&usage["cost_usd"]));
+        label
+    };
+    let mut lines = vec![head.iter().map(|h| (*h).to_owned()).collect::<Vec<_>>()];
+    for row in report["rows"].as_array().into_iter().flatten() {
+        let agent = row["agent"].as_str().unwrap_or("unattributed");
+        let label = [
+            agent,
+            row["provider"].as_str().unwrap_or_default(),
+            row["model"].as_str().unwrap_or_default(),
+        ];
+        lines.push(line(label.map(str::to_owned).to_vec(), row));
+    }
+    lines.push(line(vec!["total".to_owned()], &report["total"]));
+    if !report["budget_usd"].is_null() {
+        let mut budget = vec![String::new(); head.len() - 1];
+        budget[0] = "budget".to_owned();
+        budget.push(usd4(&report["budget_usd"]));
+        lines.push(budget);
+    }
+    let widths: Vec<usize> = (0..head.len())
+        .map(|c| lines.iter().map(|l| l[c].chars().count()).max().unwrap_or(0))
+        .collect();
+    let aligned = lines.iter().map(|l| {
+        let cells = l
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(c, (cell, w))| match c < labels {
+                true => format!("{cell:<w$}"),
+                false => format!("{cell:>w$}"),
+            });
+        cells.collect::<Vec<_>>().join("  ").trim_end().to_owned()
+    });
+    aligned.collect::<Vec<_>>().join("\n")
+}
+
+/// A decimal USD amount rounded to four decimals, half up.
+fn usd4(usd: &Value) -> String {
+    let pico = usd.as_str().and_then(|u| u.parse::<Usd>().ok()).map_or(0, |u| u.0);
+    let ten_thousandths = (pico + 50_000_000) / 100_000_000;
+    format!("{}.{:04}", ten_thousandths / 10_000, ten_thousandths % 10_000)
 }
 
 pub(super) async fn gate(client: &Client, json: bool, command: GateCommand) -> Result<(), ClientError> {
@@ -437,3 +521,6 @@ fn input(text: &str) -> (String, Value) {
     let value = parsed.unwrap_or_else(|| Value::String(value.to_owned()));
     (name.to_owned(), value)
 }
+
+#[cfg(test)]
+mod tests;

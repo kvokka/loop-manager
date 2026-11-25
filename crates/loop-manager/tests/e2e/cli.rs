@@ -111,6 +111,53 @@ async fn runs_and_gates_by_hand_from_the_cli() {
     assert!(status.contains(&version), "{status}");
 }
 
+/// `run spend` shows what a run spent as TOON, JSON or a table, with its budget.
+#[tokio::test]
+async fn run_spend_reports_a_runs_spend_in_toon_json_and_a_table() {
+    let d = Daemon::start(|_| {}).await;
+    let run = d.json(&["run", "start", "shop", "web", "check", "--budget", "2.5"])["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    d.until_state(&run, "passed").await;
+    let zero = json!({ "input_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0,
+        "cost_usd": "0" });
+    let report = d.json(&["run", "spend", &run]);
+    let want = json!({ "run": run, "budget_usd": "2.5", "detail": "agent", "total": zero, "rows": [] });
+    assert_eq!(report, want);
+    let total = d.json(&["run", "spend", &run, "--detail", "total"]);
+    assert!(total.get("rows").is_none() && total["total"] == zero, "{total}");
+    let out = d.cli(&["run", "spend", &run, "--detail", "model"], &[]);
+    let toon = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        toon.contains("detail: model\n") && toon.contains("budget_usd: \"2.5\"\n"),
+        "{toon}"
+    );
+    let out = d.cli(&["run", "spend", &run, "--table"], &[]);
+    let table = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines.len(), 3, "{table}");
+    assert!(
+        lines[0].starts_with("agent") && lines[0].ends_with("cost USD"),
+        "{table}"
+    );
+    assert!(
+        lines[1].starts_with("total") && lines[1].ends_with(" 0.0000"),
+        "{table}"
+    );
+    assert!(
+        lines[2].starts_with("budget") && lines[2].ends_with(" 2.5000"),
+        "{table}"
+    );
+    for wrong in [&["--detail", "all"][..], &["--table", "--json"]] {
+        let out = d.cli(&[&["run", "spend", &run][..], wrong].concat(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{wrong:?}");
+    }
+    let out = d.cli(&["--json", "run", "spend", "nope"], &[]);
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "not_found");
+}
+
 #[tokio::test]
 async fn the_finisher_reports_the_answer_and_needs_the_session_environment() {
     let d = Daemon::start(|_| {}).await;

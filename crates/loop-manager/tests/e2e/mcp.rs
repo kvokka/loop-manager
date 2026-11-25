@@ -148,6 +148,14 @@ async fn a_run_started_over_mcp_is_followed_listed_and_cancelled_there() {
         field(modern["content"][0]["text"].as_str().unwrap(), "state"),
         "cancelled"
     );
+    // With `spend`, the run's spend report comes under `spend`.
+    let (view, error) = call(&d, "run_state", json!({ "id": run, "spend": "model" })).await;
+    assert!(
+        !error && view.contains("\nspend:\n") && view.contains("\n  detail: model\n"),
+        "{view}"
+    );
+    let (text, error) = call(&d, "run_state", json!({ "id": run, "spend": "all" })).await;
+    assert!(error && text.starts_with("bad_request"), "{text}");
 
     let (text, error) = call(
         &d,

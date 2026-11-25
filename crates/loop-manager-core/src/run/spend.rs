@@ -1,6 +1,7 @@
 //! The spend ledger (docs/design/formula-budgets.md): what each attempt spent, by agent, provider and model, charged
 //! from the running totals the harness reports over a checkpoint kept per session and counter.
 
+use super::SpendDetail;
 use crate::{
     config::Pricing,
     driver::Tokens,
@@ -115,20 +116,23 @@ pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, to
     Ok(())
 }
 
+/// The sums of the `usage` of contracts 1.3 over ledger rows, in the column order [`usage_at`] reads.
+const SUMS: &str = "COALESCE(SUM(input), 0), COALESCE(SUM(cache_read), 0), \
+    COALESCE(SUM(cache_write_5m + cache_write_1h), 0), COALESCE(SUM(output), 0), COALESCE(SUM(cost), 0)";
+
+/// The `usage` the [`SUMS`] give from column `at` of `r` on.
+fn usage_at(r: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "input_tokens": r.get::<_, i64>(at)?, "cache_read_tokens": r.get::<_, i64>(at + 1)?,
+        "cache_write_tokens": r.get::<_, i64>(at + 2)?, "output_tokens": r.get::<_, i64>(at + 3)?,
+        "cost_usd": Usd(r.get(at + 4)?).to_string(),
+    }))
+}
+
 /// `usage` of contracts 1.3 from the ledger rows a `WHERE` clause over `spend` selects, its `?1` bound to `key`.
 fn sums(conn: &Connection, filter: &str, key: impl rusqlite::Params) -> Result<Value, Error> {
-    let sql = format!(
-        "SELECT COALESCE(SUM(input), 0), COALESCE(SUM(cache_read), 0), \
-         COALESCE(SUM(cache_write_5m + cache_write_1h), 0), COALESCE(SUM(output), 0), COALESCE(SUM(cost), 0) \
-         FROM spend WHERE {filter}"
-    );
-    Ok(conn.query_row(&sql, key, |r| {
-        Ok(json!({
-            "input_tokens": r.get::<_, i64>(0)?, "cache_read_tokens": r.get::<_, i64>(1)?,
-            "cache_write_tokens": r.get::<_, i64>(2)?, "output_tokens": r.get::<_, i64>(3)?,
-            "cost_usd": Usd(r.get(4)?).to_string(),
-        }))
-    })?)
+    let sql = format!("SELECT {SUMS} FROM spend WHERE {filter}");
+    Ok(conn.query_row(&sql, key, |r| usage_at(r, 0))?)
 }
 
 /// The ledger rows of a run (`?1`) and its subtree (docs/design/formula-budgets.md): the runs its sessions and steps
@@ -139,6 +143,31 @@ const SUBTREE: &str = "run IN (WITH RECURSIVE tree(id) AS (SELECT ?1 UNION ALL \
 /// What a run and its subtree spent.
 pub(super) fn usage(conn: &Connection, run: &str) -> Result<Value, Error> {
     sums(conn, SUBTREE, [run])
+}
+
+/// The rows of a spend report on the subtree of `run` (docs/api/frontends.md): its ledger grouped by agent, or by
+/// agent, provider and model, in that order; none for [`SpendDetail::Total`]. The rows sum to [`usage`] exactly: the
+/// same rows, only grouped. An unattributed part has a null `agent`.
+pub(super) fn rows(conn: &Connection, run: &str, detail: SpendDetail) -> Result<Vec<Value>, Error> {
+    let keys = match detail {
+        SpendDetail::Total => return Ok(Vec::new()),
+        SpendDetail::Agent => "agent",
+        SpendDetail::Model => "agent, provider, model",
+    };
+    let sql = format!("SELECT {keys}, {SUMS} FROM spend WHERE {SUBTREE} GROUP BY {keys} ORDER BY {keys}");
+    let mut stmt = conn.prepare(&sql)?;
+    let by_model = matches!(detail, SpendDetail::Model);
+    let rows = stmt.query_map([run], |r| {
+        let mut row = usage_at(r, if by_model { 3 } else { 1 })?;
+        let agent: String = r.get(0)?;
+        row["agent"] = json!((!agent.is_empty()).then_some(agent));
+        if by_model {
+            row["provider"] = json!(r.get::<_, String>(1)?);
+            row["model"] = json!(r.get::<_, String>(2)?);
+        }
+        Ok(row)
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// The outermost live run whose budget the spend of its subtree has reached, from `run` up the runs whose subtree

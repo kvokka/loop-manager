@@ -74,7 +74,7 @@ Shared objects:
   it. The read API (`GET /v1/runs/{id}`, `loop-manager run show`) gives the `RunView` with `project`, `rig`,
   `correlation`, `inputs`, `waiting_for`, `outcome`, `steps` (the outcomes of the other steps the run went through, by
   name: the last attempt of each; a skipped step has none), `attempts`, `usage` (`Usage`, of the run and its
-  subtree), `budget_usd` (the run's spend limit in USD as a decimal string, null without one) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the oldest closure
+  subtree; `GET /v1/runs/{id}/spend` breaks it down by agent and by model, docs/api/frontends.md), `budget_usd` (the run's spend limit in USD as a decimal string, null without one) and: `reason` (the veto text, the cancel reason, `pass`, or the failure reason), `gate` (the oldest closure
   of the run's keys while it waits on a gate or is `parked`, else null) and `round` (the round of the formula's
   checks, 6.1: 1, and one more each time a check sends the run back) and `step_attempt` (the execution of the
   step in the round, an integer from 1: a repeat under `max_attempts` adds one, a new entry into the step or a `back_to`

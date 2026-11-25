@@ -48,8 +48,11 @@ fn tools() -> Value {
               "budget_usd": { "type": "string", "description": "The run's spend limit in USD, a decimal such as \
                   \"2.5\", in place of its formula's `budget`." },
               "idempotency_key": key } } },
-        { "name": "run_state", "description": "The state of a run: its view, where it waits, its attempts.",
-          "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": id } } },
+        { "name": "run_state", "description": "The state of a run: its view, where it waits, its attempts; with \
+            `spend`, also what it and its subtree spent.",
+          "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": id,
+              "spend": { "type": "string", "enum": ["total", "agent", "model"], "description": "Adds the spend \
+                  report under `spend`: the total, a row per agent, or per agent, provider and model." } } } },
         { "name": "list_runs", "description": "Runs, newest first.",
           "inputSchema": { "type": "object", "properties": { "project": text, "state": text,
               "limit": { "type": "integer", "minimum": 1 } } } },
@@ -148,16 +151,13 @@ async fn call(state: State, params: &Value) -> Option<Value> {
             (Err(e), _) => Err(e),
             (_, Err(e)) => Err(parse(e)),
         },
-        "run_state" => match id() {
-            Ok(id) => {
-                runs::get(
-                    state,
-                    Param(Path(id)),
-                    Param(axum::extract::Query(runs::HistoryQuery::default())),
-                )
-                .await
-            }
-            Err(e) => Err(e),
+        "run_state" => match (
+            id(),
+            serde_json::from_value::<runs::SpendQuery>(json!({ "detail": args["spend"] })),
+        ) {
+            (Ok(id), Ok(spend)) => run_state(state, id, spend).await,
+            (Err(e), _) => Err(e),
+            (_, Err(e)) => Err(parse(e)),
         },
         "list_runs" => match serde_json::from_value::<ListQuery>(args.clone()) {
             Ok(query) => runs::list(state, Param(Query(query))).await,
@@ -178,6 +178,17 @@ async fn call(state: State, params: &Value) -> Option<Value> {
             json!({ "content": [{ "type": "text", "text": text }], "isError": true })
         }
     })
+}
+
+/// `run_state`: the run's view, and with `spend.detail` its spend report under `spend`.
+async fn run_state(state: State, id: String, spend: runs::SpendQuery) -> super::Reply {
+    let history = Param(Query(runs::HistoryQuery::default()));
+    let Json(mut run) = runs::get(state.clone(), Param(Path(id.clone())), history).await?;
+    if spend.detail.is_some() {
+        let Json(report) = runs::spend(state, Param(Path(id)), Param(Query(spend))).await?;
+        run["spend"] = report;
+    }
+    Ok(Json(run))
 }
 
 /// The headers of a call to `tool` whose `args` carry an `idempotency_key` (taken out of them): what

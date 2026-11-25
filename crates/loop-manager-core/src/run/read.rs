@@ -45,6 +45,31 @@ pub struct RunFilter {
     pub limit: Option<u32>,
 }
 
+/// How finely a spend report breaks the spend of a run and its subtree down (docs/api/frontends.md).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SpendDetail {
+    /// The total alone.
+    Total,
+    /// A row per agent.
+    Agent,
+    /// A row per agent, provider and model.
+    Model,
+}
+
+impl SpendDetail {
+    /// The levels by name, as the frontends take them.
+    pub const ALL: [(&str, Self); 3] = [("total", Self::Total), ("agent", Self::Agent), ("model", Self::Model)];
+
+    /// The level named `name`; `None` for another name.
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.iter().find(|(n, _)| *n == name).map(|(_, d)| *d)
+    }
+
+    pub fn name(self) -> &'static str {
+        Self::ALL.iter().find(|(_, d)| *d == self).map_or("", |(n, _)| n)
+    }
+}
+
 impl Reader {
     /// Opens the state database `store::open` created.
     pub fn open(path: &Path) -> Result<Self, Error> {
@@ -102,6 +127,26 @@ impl Reader {
         let budget: Option<i64> = conn.query_row("SELECT budget FROM runs WHERE id = ?1", [id], |r| r.get(0))?;
         view["budget_usd"] = json!(budget.map(|b| crate::usd::Usd(b).to_string()));
         Ok(Some(view))
+    }
+
+    /// The spend report of run `id` at `detail` (docs/api/frontends.md): its `budget_usd`, the `total` of its subtree
+    /// and, below the `total` level, its `rows`; `None` if there is no such run.
+    pub fn spend(&self, id: &str, detail: SpendDetail) -> Result<Option<Value>, Error> {
+        let mut conn = self.conn();
+        // One read transaction: the total and the rows come from one snapshot of a live run's ledger.
+        let conn = conn.transaction()?;
+        let budget: Option<Option<i64>> = conn
+            .query_row("SELECT budget FROM runs WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        let Some(budget) = budget else {
+            return Ok(None);
+        };
+        let mut report = json!({ "run": id, "budget_usd": budget.map(|b| crate::usd::Usd(b).to_string()),
+            "detail": detail.name(), "total": super::spend::usage(&conn, id)? });
+        if detail != SpendDetail::Total {
+            report["rows"] = json!(super::spend::rows(&conn, id, detail)?);
+        }
+        Ok(Some(report))
     }
 
     /// The bases of run `id` (docs/design/config.md "Formula"), by place: in its own place its `workdir`; in each other
