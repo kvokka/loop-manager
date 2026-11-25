@@ -33,7 +33,7 @@ pub(super) struct Total<'a> {
 
 /// Charges to `(run, attempt)` what `total` adds over the checkpoint of its counter, and moves the checkpoint to it.
 /// Each request is thereby charged once, however often a total that includes it is repeated, across a resume and a
-/// restart. A field below its checkpoint adds nothing: a claude process killed in a turn loses what it added since its
+/// restart. A field below its checkpoint adds nothing: a harness process killed in a turn loses what it added since its
 /// session last saved its totals, so the next total can fall back (docs/design/experiments.md, experiment 11);
 /// charging it whole would charge the saved part twice.
 pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, total: &Total<'_>) -> Result<(), Error> {
