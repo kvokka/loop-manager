@@ -8,9 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+LEVELS = ("off", "total", "agent", "model")
+
 event = json.load(sys.stdin)
 kind, run, data = event["type"], event["run"], event["data"]
 socket = os.path.realpath(os.environ["LOOP_MANAGER_SOCKET"])
+spend = json.loads(os.environ.get("LOOP_MANAGER_ADDON_PARAMS") or "{}").get("spend", "agent")
 threads = Path(socket).parent / "t3-threads"
 try:
     origin = json.loads((threads / run).read_text())
@@ -24,6 +27,20 @@ try:
 except FileExistsError:
     sys.exit(0)
 
+
+def spend_table():
+    """The run's spend as the table `run spend` prints at the level of the param `spend`, or None: off, a wrong
+    level, or a failed call leave the notice without it."""
+    if kind not in ("run.passed", "run.failed", "run.cancelled") or spend not in LEVELS[1:]:
+        return None
+    command = ["loop-manager", "--socket", socket, "run", "spend", run, "--detail", spend, "--table"]
+    try:
+        table = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return f"```\n{table}\n```" if table else None
+
+
 view = data["run"]
 name = f"{run} ({view['formula']}{', issue ' + view['issue'] if view['issue'] else ''})"
 cli = f"loop-manager --socket '{socket}'"
@@ -32,6 +49,7 @@ outcome = data.get("outcome") or {}
 report = "".join(f"\n\n{title}:\n{text}" for title, text in (
     ("Reason", data.get("reason")),
     (f"Summary of the last step, {view['step']}", outcome.get("summary")),
+    ("Spend", spend_table()),
 ) if text)
 steps = f"`{cli} run show {run}` has the outcome of every step."
 text = {
@@ -61,3 +79,6 @@ except (OSError, subprocess.CalledProcessError):
 if kind != "run.started" and kind != "run.awaiting":
     for path in [threads / run, *threads.glob(f"{run}.*")]:
         path.unlink(missing_ok=True)
+if spend not in LEVELS:
+    # The notice went out without the table; the failed hook names the wrong value in the journal.
+    sys.exit(f"t3-notify: the param spend is {spend!r}; it is one of {', '.join(LEVELS)}")

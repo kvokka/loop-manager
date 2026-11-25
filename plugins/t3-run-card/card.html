@@ -18,11 +18,16 @@ button{font:inherit;color:inherit}nav{display:flex;align-items:center;gap:.5em;m
 #rounds button{position:relative;width:24px;height:24px;padding:0;line-height:1;border:1px solid var(--line);border-radius:4px;background:transparent;cursor:pointer}
 @media(pointer:coarse){#rounds button::after{content:"";position:absolute;inset:-10px}}
 #rounds button:disabled{opacity:.35;cursor:default}#round{min-width:8ch;text-align:center;font-variant-numeric:tabular-nums}
+#spend{margin:10px 4px 0;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}#spend caption{text-align:left;color:var(--dim);padding-bottom:2px}
+#spend th,#spend td{padding:1px 0 1px 12px;text-align:right;font-weight:400;white-space:nowrap}#spend th:first-child{padding-left:0;text-align:left}#spend thead{color:var(--dim)}
 </style>
 <details open><summary><strong id="heading">T3 Code run card</strong><span id="position" aria-live="polite">Connecting…</span></summary>
 <nav id="rounds" aria-label="Run rounds"><button id="prev" type="button" aria-label="Previous round" disabled>&lt;</button>
 <span id="round" aria-live="polite">Round 1</span><button id="next" type="button" aria-label="Next round" disabled>&gt;</button></nav>
 <div id="graph"><svg aria-hidden="true"></svg><ol id="steps"></ol></div>
+<table id="spend" hidden><caption>Spend of the run and the runs it started</caption><thead><tr><th scope="col">Agent</th>
+<th scope="col">Input</th><th scope="col">Cache read</th><th scope="col">Cache write</th><th scope="col">Output</th>
+<th scope="col">USD</th></tr></thead><tbody></tbody></table>
 <footer><span id="route"></span> <span id="notice" role="status"></span> <span id="open-status" role="status"></span></footer></details>
 <script>
 "use strict";
@@ -98,6 +103,30 @@ function stepTitle(s, agent) {
 }
 function countLabel(value, limit) {
   return Number.isInteger(limit) && limit >= value ? `${value}/${limit}` : String(value);
+}
+// The run's spend by agent, then its total and budget; none for a run that spent nothing and has no budget.
+function showSpend(spend) {
+  const table = el("spend");
+  table.hidden = !spend || (!spend.rows.length && spend.budget_usd == null);
+  if (table.hidden) return;
+  const tokens = ["input_tokens","cache_read_tokens","cache_write_tokens","output_tokens"];
+  const line = (label, values) => {
+    const row = document.createElement("tr");
+    const head = document.createElement("th");
+    head.scope = "row";
+    head.textContent = label;
+    row.append(head, ...values.map(value => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      return cell;
+    }));
+    return row;
+  };
+  const usage = u => [...tokens.map(t => u[t].toLocaleString()), Number(u.cost_usd).toFixed(4)];
+  const rows = spend.rows.map(r => line(r.agent ?? "unattributed", usage(r)));
+  rows.push(line("Total", usage(spend.total)));
+  if (spend.budget_usd != null) rows.push(line("Budget", ["","","","",Number(spend.budget_usd).toFixed(4)]));
+  table.tBodies[0].replaceChildren(...rows);
 }
 function display(data) {
   model = data;
@@ -207,6 +236,7 @@ function display(data) {
   if (isCurrent && returns.length) detail.push(`↶ ${returns.map(s => stepTitle(s)).join(", ")} → ${steps[start] ? stepTitle(steps[start]) : "earlier step"}`);
   if (isCurrent && c.reason && c.state !== "passed") detail.push(c.reason);
   el("route").textContent = detail.join(" · ");
+  showSpend(c.spend);
   drawEdges();
 }
 function moveRound(delta) {

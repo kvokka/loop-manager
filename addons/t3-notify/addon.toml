@@ -1,5 +1,8 @@
 name = "t3-notify"
-version = "0.2.0"
+version = "0.3.0"
+
+[params]
+spend = "agent" # the spend table of a run's last notice: "off", "total", "agent" or "model" (README.md)
 
 # One hook for the five moments of a run its T3 Code thread is told about (README.md).
 [[hook]]

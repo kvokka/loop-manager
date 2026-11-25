@@ -210,3 +210,32 @@ async fn the_card_opens_for_a_run_a_trigger_started_on_the_change_of_a_tool_call
         "{opened}"
     );
 }
+
+/// The card has the run's spend by agent: its budget, its total and a row per agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_card_has_the_spend_of_its_run_by_agent() {
+    use loop_manager_testkit::anthropic::{Provider, Reply};
+    let finish = format!("{} finish pass --summary built", common::EXE);
+    let usage = json!({ "input_tokens": 1200, "output_tokens": 34 });
+    let plan = vec![
+        Reply::Usage(usage, Box::new(Reply::Bash(finish))),
+        Reply::Text("Done.".into()),
+    ];
+    let provider = Provider::start(plan).await;
+    let d = crate::claude::daemon(&provider).await;
+    let body = json!({ "project": "shop", "rig": "web", "formula": "build", "budget_usd": "100" });
+    let run = d.post("/v1/runs", body, None).await.unwrap()["run"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    d.until_state(&run, "passed").await;
+    let spend = &card(&d, "show_run_card", json!({ "run": run }))["card"]["spend"];
+    assert_eq!(spend["budget_usd"], "100", "{spend}");
+    let rows = spend["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{spend}");
+    assert_eq!(rows[0]["agent"], "shop.dev", "{spend}");
+    assert!(rows[0]["input_tokens"].as_u64().unwrap() >= 1200, "{spend}");
+    for key in ["input_tokens", "output_tokens", "cost_usd"] {
+        assert_eq!(rows[0][key], spend["total"][key], "{spend}");
+    }
+}

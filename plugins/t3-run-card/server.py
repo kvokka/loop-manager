@@ -216,6 +216,8 @@ def snapshot(path, run, existing_links=False):
             and attempts and attempts[-1]["step"] == state["step"] and attempts[-1]["n"] == state["attempt"]):
         summaries[state["step"]] = outcome["summary"]
     card["summaries"] = summaries
+    report = read(path, f"/v1/runs/{run}/spend?detail=agent")
+    card["spend"] = {key: report[key] for key in ("budget_usd", "total", "rows")}
     names = recorded_agents(path, run, cursor) if any(a["session"] for a in attempts) else {}
     rounds = {}
     native_ids = {a["n"]: native for a, native in working_sessions(state)}

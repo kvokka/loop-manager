@@ -9,6 +9,8 @@ run. A run no thread started is told to nobody.
 
 - The `t3` command on the daemon's `PATH`, and the T3 Code server of the thread on the daemon's host.
 - `python3` 3.15.2 or newer.
+- `loop-manager` on the daemon's `PATH`, for the spend table (see Params). Without it, or on a build without
+  `loop-manager run spend`, the notices go out without the table.
 - The plugin [`t3-run-card`](../../plugins/README.md#follow-a-run-in-t3-code) 0.5.0 or newer in the harness of the
   thread, with its auto-open on. Its hook writes down which thread started which run.
 
@@ -23,7 +25,7 @@ array.
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/t3-notify/0.2.0"
+rev = "addons/t3-notify/0.3.0"
 dir = "addons/t3-notify"
 
 [settings]
@@ -32,7 +34,19 @@ addons = [{ name = "t3-notify" }]
 
 Run `loop-manager config check`, then `loop-manager config reload` to apply the change on the project's daemon.
 
-It has no params.
+## Params
+
+| Param | Default | What |
+|---|---|---|
+| `spend` | `"agent"` | the detail of the spend table in the notice of a run's end: `"total"`, `"agent"`, `"model"`, or `"off"` |
+
+For example, `addons = [{ name = "t3-notify", params = { spend = "model" } }]`. The table is what
+`loop-manager run spend <run> --detail <spend> --table` prints: the run and the runs it started, a row per agent (per
+agent, provider and model at `model` detail, none at `total`), then the total and the run's budget, if it has one. A
+call that fails leaves the notice without the table.
+
+The load checks only the type of a param. With a `spend` other than these four, each notice goes out without the
+table and then its hook fails: `addon.hook_failed` in the journal names the value.
 
 ## How it works
 
@@ -47,9 +61,9 @@ with `t3 thread send`; a busy thread gets it as its next turn.
 |---|---|
 | `run.started` | The run left the queue: show its card. Skipped when the run had started before the tool call returned, since that call shows the card. |
 | `run.awaiting` | The run waits for a decision at an `await` step, until when, and the `loop-manager run resolve` command that answers it. |
-| `run.passed` | The summary of the last step, and a request to report what the run did. |
-| `run.failed` | The failure class and reason, and the summary the agent declared, if any. |
-| `run.cancelled` | The reason. |
+| `run.passed` | The summary of the last step, the spend table, and a request to report what the run did. |
+| `run.failed` | The failure class and reason, the summary the agent declared, if any, and the spend table. |
+| `run.cancelled` | The reason and the spend table. |
 
 Every message names the run, its formula and issue, and the arguments of `show_run_card` for the daemon's socket.
 

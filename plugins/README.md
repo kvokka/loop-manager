@@ -71,8 +71,11 @@ results. It does not start or steer an LM run.
 Each step shows its `title` from the formula, or else its name made readable (`review_owner` reads
 **Review owner**). A passed script shows no `exit 0`. When the run does not move, the current step says why:
 the rig's `max_writers` with the runs active in that rig, a full `max_runs`, a gate, a stopping daemon. When it
-waits in an `await` step, the step also shows the `loop-manager run resolve` command that answers it. The card
-updates only while its T3 thread is running: in an idle thread it shows the last state it read.
+waits in an `await` step, the step also shows the `loop-manager run resolve` command that answers it. Below the
+steps, a table gives what the run and the runs it started spent, as `loop-manager run spend <run> --table` does: a
+row per agent with its tokens and cost in USD, the total and the run's budget; a run that spent nothing and has no
+budget has no table. The card updates only while its T3 thread is running: in an idle thread it shows the last state
+it read.
 
 The card can also open without asking. After a tool call of the agent starts a run, a plugin hook asks it to
 show that run's card. The call can start the run itself (`loop-manager run start`, the `start_run` MCP tool) on
@@ -88,9 +91,9 @@ change the daemon reads late. This is a per-user setting, off by default:
 With auto-open on, the hook also writes down which thread started each run, in `t3-threads/<run>` beside the daemon's
 socket. A daemon that attaches the addon [`t3-notify`](../addons/t3-notify/README.md) then tells that thread when the
 run leaves the queue, waits for a decision or ends, as the thread's next message: its agent shows the card again, asks
-for your decision or reports the result. A run that waits for a free place gets its card when it starts, and the
-thread needs no watcher. The hook also finds a run whose ID the call printed on a registered daemon, as
-`devloop/lm run start` does.
+for your decision or reports the result, with the run's spend table. A run that waits for a free place gets its card
+when it starts, and the thread needs no watcher. The hook also finds a run whose ID the call printed on a registered
+daemon, as `devloop/lm run start` does.
 
 The T3 run card MCP server requires Python 3.8+ and uses **stdio only** between the host and the plugin.
 It reads the local daemon over its Unix socket. By default it follows `LOOP_MANAGER_SOCKET`, then the
