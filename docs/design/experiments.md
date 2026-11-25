@@ -552,6 +552,7 @@ of a role (`kit.qa`) and the raw app-server lines were logged once.
 | Link to the parent | The child's `turn/started` has `turn.rootTurnId` = the parent's turn. `thread/read` of the child answers a thread with `parentThreadId`, `agentRole` (`kit.qa`), `agentNickname`, `model`, `modelProvider`, `threadSource: "subagent"` and `source.subAgent.thread_spawn{parent_thread_id, depth, agent_path, agent_nickname, agent_role}`; its rollout's `session_meta` says the same. |
 | The child's usage | Its `thread/tokenUsage/updated` comes on the same connection under the child's thread id, with its own running total; in these runs after the parent's `turn/completed`. |
 
+### Subagent definitions and nesting
 
 From the owner's research session (claude on a fake provider and on haiku, codex on `gpt-6-luna`; scripts not kept),
 not run again here:
