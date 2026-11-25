@@ -11,7 +11,7 @@ what is specific to developing loop-manager.
 
 ```text
 packs/review-loop/      the pack: any project can list it
-  formulas/epic.toml    code -> tests -> review -> gate -> close, with conditional owner waits
+  formulas/epic.toml    code -> ci_report -> ci_route -> review -> gate -> close, with conditional owner waits
   agents/               coder and reviewer (steps of the formula); helper, subcoder, expert (subagents of the coder)
   bin/                  the commands of the exec steps: CI report and routing, gate, owner answer, close
   tests/                their self-tests, run by `mise run ci`

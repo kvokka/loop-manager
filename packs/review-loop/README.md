@@ -16,6 +16,9 @@ review-loop/
 
 ## Use it in a project
 
+`pack.toml` declares `context-budget` by the path `../../addons/context-budget`: the pack works from a checkout of
+this repository, with `addons/` beside `packs/`.
+
 List the pack in the project's `loop-manager.toml`, give the formula its inputs and start runs with a trigger or by
 hand:
 
