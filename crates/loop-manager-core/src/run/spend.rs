@@ -395,6 +395,8 @@ pub(super) fn metrics(conn: &Connection, by: SpendBy, project: Option<&str>) -> 
          FROM k LEFT JOIN a ON a.key = k.key AND a.run = k.run LEFT JOIN s ON s.key = k.key AND s.run = k.run \
          GROUP BY k.key ORDER BY k.key"
     );
+    // shortcut: a live attempt's time runs to the system's now, not the core's `Clock`, so under a managed clock it
+    // mixes the two; take now from the caller when a test needs the session time of a live attempt.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
