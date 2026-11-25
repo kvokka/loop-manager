@@ -99,6 +99,7 @@ fn router() -> OpenApiRouter<Arc<Api>> {
         .routes(routes!(runs::create, runs::list))
         .routes(routes!(runs::get))
         .routes(routes!(runs::spend))
+        .routes(routes!(runs::metrics))
         .routes(routes!(live::live))
         .routes(routes!(runs::cancel))
         .routes(routes!(runs::resolve))

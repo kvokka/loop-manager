@@ -4,7 +4,7 @@ mod sessions;
 
 use super::{
     ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Commented, Failed, Finished, Keyed, Run, Spend, Started},
+    replies::{Commented, Failed, Finished, Keyed, Run, Spend, SpendMetricsReport, Started},
 };
 use axum::{
     Json,
@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use loop_manager_core::{
-    run::{Create, Msg, Outcome, RunFilter, SpendDetail},
+    run::{Create, Msg, Outcome, RunFilter, SpendBy, SpendDetail},
     usd::Usd,
 };
 use serde::Deserialize;
@@ -195,6 +195,32 @@ pub(crate) async fn spend(
     Ok(Json(report.ok_or_else(|| {
         ApiError::new(StatusCode::NOT_FOUND, "not_found", format!("no run `{id}`"))
     })?))
+}
+
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct MetricsQuery {
+    /// `run` (the default), `formula` or `agent`; another is a bad request.
+    pub(super) by: Option<String>,
+    /// Only the runs of this project.
+    pub(super) project: Option<String>,
+}
+
+/// The spend metrics of every run, or of a project's, grouped by run, formula or agent (docs/api/frontends.md): a row
+/// per key with its runs, attempts, turns, session time and usage.
+#[utoipa::path(get, path = "/v1/spend", params(MetricsQuery),
+    responses((status = OK, body = SpendMetricsReport),
+        (status = BAD_REQUEST, description = BAD_QUERY, body = ErrorReply), Failed))]
+pub(crate) async fn metrics(state: State, Param(Query(query)): Param<Query<MetricsQuery>>) -> Reply {
+    let name = query.by.as_deref().unwrap_or("run");
+    let by = SpendBy::parse(name).ok_or_else(|| {
+        let why = format!("no spend grouping `{name}`; one of run, formula, agent");
+        ApiError::new(StatusCode::BAD_REQUEST, "bad_request", why)
+    })?;
+    let rows = state.reader.metrics(by, query.project.as_deref())?;
+    Ok(Json(
+        serde_json::json!({ "by": name, "project": query.project, "rows": rows }),
+    ))
 }
 
 #[derive(Deserialize, ToSchema)]

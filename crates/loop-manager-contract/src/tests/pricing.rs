@@ -162,7 +162,10 @@ fn the_pricing_blocks_of_the_guide_load() {
     let p = &config.pricing;
     let (source, price) = p.lookup("openrouter", "gpt-5.3-codex", None).unwrap();
     assert_eq!(source, PriceSource::User);
-    assert_eq!((price.rates.cache_read, price.rates.cache_write_1h), (175_000, 3_500_000));
+    assert_eq!(
+        (price.rates.cache_read, price.rates.cache_write_1h),
+        (175_000, 3_500_000)
+    );
     let fast = p.lookup("openrouter", "gpt-5.3-codex", Some("priority")).unwrap().1;
     assert_eq!(fast.rates.output, 28_000_000);
     assert!(p.lookup("llm.internal.example", "house-coder-2", None).is_some());

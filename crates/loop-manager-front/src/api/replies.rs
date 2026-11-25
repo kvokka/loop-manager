@@ -109,6 +109,39 @@ pub(crate) struct SpendRow {
     cost_usd: String,
 }
 
+/// The spend metrics of every run, or of a project's, grouped by run, formula or agent (docs/api/frontends.md). Each
+/// run counts its own spend, not its subtree's, so the rows of every grouping add up to the same sums.
+#[derive(ToSchema)]
+pub(crate) struct SpendMetricsReport {
+    /// `run`, `formula` or `agent`.
+    by: String,
+    /// The project the runs were taken from; null for every project.
+    project: Option<String>,
+    /// A row per key, ordered by it.
+    rows: Vec<SpendMetrics>,
+}
+
+/// The spend of one key of a grouping: an unpriced model's tokens at a `cost_usd` of `0`.
+#[derive(ToSchema)]
+pub(crate) struct SpendMetrics {
+    /// The run id, the formula (`<project>.<name>`) or the agent; null for the part the harness reported without
+    /// naming its agent.
+    key: Option<String>,
+    /// The runs with an attempt or spend under the key.
+    runs: u64,
+    attempts: u64,
+    /// The turns of those attempts.
+    turns: u64,
+    /// The seconds their attempts with a harness session ran; a live one counts until now.
+    session_s: u64,
+    input_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    output_tokens: u64,
+    /// USD as an exact decimal.
+    cost_usd: String,
+}
+
 /// `Outcome` of docs/design/contracts.md 1.3.
 #[derive(ToSchema)]
 pub(crate) struct Outcome {

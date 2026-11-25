@@ -1,6 +1,7 @@
 //! The CLI against a real `loop-manager daemon` (docs/api/frontends.md): native TOON and JSON output.
 
 use crate::common::{self, Daemon};
+use loop_manager_front::client::ClientError;
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -156,6 +157,66 @@ async fn run_spend_reports_a_runs_spend_in_toon_json_and_a_table() {
     let out = d.cli(&["--json", "run", "spend", "nope"], &[]);
     let error: Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(error["error"]["code"], "not_found");
+}
+
+/// `spend` shows the spend metrics of the runs by run, formula or agent as TOON, JSON or a table; the groupings add
+/// up to the same tokens.
+#[tokio::test(flavor = "multi_thread")]
+async fn spend_reports_the_metrics_of_the_runs_by_run_formula_and_agent() {
+    use loop_manager_testkit::anthropic::{Provider, Reply};
+    let finish = format!("{} finish pass --summary built", common::EXE);
+    let usage = json!({ "input_tokens": 1200, "output_tokens": 34 });
+    let plan = vec![
+        Reply::Usage(usage, Box::new(Reply::Bash(finish))),
+        Reply::Text("Done.".into()),
+    ];
+    let provider = Provider::start(plan).await;
+    let d = crate::claude::daemon(&provider).await;
+    for formula in ["build", "check"] {
+        let run = d.json(&["run", "start", "shop", "web", formula])["run"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        d.until_state(&run, "passed").await;
+    }
+    let out = d.cli(&["spend", "--by", "formula"], &[]);
+    let toon = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        toon.contains("by: formula\n") && toon.contains("shop.build") && toon.contains("shop.check"),
+        "{toon}"
+    );
+    let out = d.cli(&["spend", "--by", "agent", "--table"], &[]);
+    let table = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines.len(), 2, "{table}");
+    assert!(
+        lines[0].starts_with("agent ") && lines[0].ends_with("cost USD"),
+        "{table}"
+    );
+    assert!(lines[1].starts_with("shop.dev "), "{table}");
+    let by_run = d.json(&["spend"]);
+    assert_eq!((&by_run["by"], &by_run["project"]), (&json!("run"), &json!(null)));
+    let rows = by_run["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{by_run}");
+    assert!(rows.iter().all(|r| r["runs"] == 1 && r["attempts"] == 1), "{by_run}");
+    let tokens = |report: &Value| -> u64 {
+        let rows = report["rows"].as_array().unwrap();
+        rows.iter().map(|r| r["input_tokens"].as_u64().unwrap()).sum()
+    };
+    assert!(tokens(&by_run) >= 1200, "{by_run}");
+    for by in ["formula", "agent"] {
+        let grouped = d.json(&["spend", "--by", by, "--project", "shop"]);
+        assert_eq!(grouped["project"], "shop", "{grouped}");
+        assert_eq!(tokens(&grouped), tokens(&by_run), "{grouped}");
+    }
+    let other = d.json(&["spend", "--project", "nope"]);
+    assert_eq!(other["rows"], json!([]), "{other}");
+    let out = d.cli(&["spend", "--by", "model"], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    match d.client.request("GET", "/v1/spend?by=model", None, None).await {
+        Err(ClientError::Api { status: 400, error }) => assert_eq!(error["code"], "bad_request"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[tokio::test]

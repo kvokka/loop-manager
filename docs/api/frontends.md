@@ -43,6 +43,15 @@ Code: `crates/loop-manager-front/src/api/`. Reference: `docs/api/openapi.json`.
   `cost_usd`, ordered by agent, provider and model. The rows are the same ledger rows as the total, only grouped, so
   the three levels agree exactly. A row whose `agent` is null is the part the harness reported without naming its
   agent. A model with no price is a row with its tokens and a `cost_usd` of `"0"`.
+- **Spend metrics** (`GET /v1/spend?by=run|formula|agent&project=<name>`, default `run`; another grouping is
+  `bad_request`): what the runs spent, of every project or of `project` only, grouped by run, formula or agent. The
+  reply is `{by, project, rows}`, `project` null without the filter. A row is `{key, runs, attempts, turns, session_s,
+  input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, cost_usd}`, ordered by `key`: the run id, the
+  formula (`<project>.<name>`) or the agent; at `agent` a null `key` is the part the harness reported without naming
+  its agent. `runs` counts the runs with an attempt or spend under the key, `attempts` and `turns` their attempts and
+  turns, `session_s` the seconds their attempts with a harness session ran (a live one until now); `cost_usd` is a
+  decimal string. Each run counts its own spend, not its subtree's, so the token counts and costs of every grouping
+  add up to the same sums.
 - `GET /v1/runs/{id}/live?chat=true` streams the conversation from the beginning of the current attempt’s session.
   Each `chat` event carries a JSON object with a `type` of `user` or `assistant` (with `text`), `tool_call`
   (with `name` and `input`), or `tool_result` (with `output`). Calls and results carry the matching `id` when supplied
@@ -58,7 +67,7 @@ agents that may call it, the agent itself left out of both; `loop-manager agent 
 formulas, packs, addons (list), config check, explain and reload; the issues of a project: one with its comments
 (`GET /v1/projects/{project}/issues/{issue}`), those under a root (`GET /v1/projects/{project}/issues?under=<root>`),
 filing one (`POST /v1/projects/{project}/issues`) and closing one (`POST /v1/projects/{project}/issues/{issue}/close`); runs
-(start, list, state, spend, live view, cancel, finish, resolve); triggers (list, enable, disable, fire by hand);
+(start, list, state, spend, live view, cancel, finish, resolve) and their spend metrics; triggers (list, enable, disable, fire by hand);
 instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
 account); events; daemon status, drain and planned restart.
 
@@ -91,6 +100,11 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   `--json`) prints an aligned plain-text table instead: a row per agent, `unattributed` for the part no agent was
   named for, with provider and model at `model` detail; the input, cache read, cache write and output tokens; the
   cost in USD rounded to four decimals; then a `total` line and, when the run has a limit, a `budget` line.
+- `loop-manager spend [--by run|formula|agent] [--project <name>] [--table]` (`GET /v1/spend`, default `run`) prints
+  the spend metrics of the runs as TOON or with `--json` as JSON. `--table` (not with `--json`) prints an aligned
+  plain-text table instead: a row per key under a column named by the grouping, `unattributed` for the part no agent
+  was named for; the runs, attempts, turns and session seconds; the input, cache read, cache write and output tokens;
+  the cost in USD rounded to four decimals.
 - `GET /v1/formulas` gives every formula with `internal` (bool): an internal formula only starts as a step of
   another formula, not directly. `loop-manager formula list` leaves the internal ones out; `--all` shows them too.
 - `loop-manager events` and `loop-manager run watch <run>` print each event as it arrives, with a blank line between

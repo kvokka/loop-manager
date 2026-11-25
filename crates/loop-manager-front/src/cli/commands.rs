@@ -1,4 +1,5 @@
-//! The command groups of the CLI: `run`, `gate`, `trigger` and `instance`, each with the API calls behind it.
+//! The command groups of the CLI: `run`, `gate`, `trigger` and `instance`, each with the API calls behind it, and the
+//! spend metrics of `spend`.
 
 use super::{encode, follow, print, run_path};
 use crate::client::{Client, ClientError};
@@ -300,7 +301,67 @@ fn spend_table(report: &Value) -> String {
         budget.push(usd4(&report["budget_usd"]));
         lines.push(budget);
     }
-    let widths: Vec<usize> = (0..head.len())
+    align(&lines, labels)
+}
+
+/// Prints the spend metrics of every run, or of `project`'s, grouped `by`: as a table with `table`.
+pub(super) async fn metrics(
+    client: &Client,
+    json: bool,
+    by: &str,
+    project: Option<String>,
+    table: bool,
+) -> Result<(), ClientError> {
+    let project = project.map(|p| format!("&project={}", encode(&p))).unwrap_or_default();
+    let report = client
+        .request("GET", &format!("/v1/spend?by={by}{project}"), None, None)
+        .await?;
+    match table {
+        true => println!("{}", metrics_table(&report)),
+        false => print(json, &report),
+    }
+    Ok(())
+}
+
+/// Spend metrics as an aligned table: a row per key, headed by the grouping (`unattributed` for the part no agent
+/// was named for), with its runs, attempts, turns, session seconds, token counts and cost.
+fn metrics_table(report: &Value) -> String {
+    let by = report["by"].as_str().unwrap_or("key");
+    let counts = [
+        "runs",
+        "attempts",
+        "turns",
+        "session_s",
+        "input_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "output_tokens",
+    ];
+    let head = [
+        by,
+        "runs",
+        "attempts",
+        "turns",
+        "session s",
+        "input",
+        "cache read",
+        "cache write",
+        "output",
+        "cost USD",
+    ];
+    let mut lines = vec![head.map(str::to_owned).to_vec()];
+    for row in report["rows"].as_array().into_iter().flatten() {
+        let mut line = vec![row["key"].as_str().unwrap_or("unattributed").to_owned()];
+        line.extend(counts.map(|c| row[c].to_string()));
+        line.push(usd4(&row["cost_usd"]));
+        lines.push(line);
+    }
+    align(&lines, 1)
+}
+
+/// `lines` of cells as aligned text: the first `labels` columns to the left, the others to the right.
+fn align(lines: &[Vec<String>], labels: usize) -> String {
+    let widths: Vec<usize> = (0..lines.first().map_or(0, Vec::len))
         .map(|c| lines.iter().map(|l| l[c].chars().count()).max().unwrap_or(0))
         .collect();
     let aligned = lines.iter().map(|l| {

@@ -2642,6 +2642,73 @@
         }
       }
     },
+    "/v1/spend": {
+      "get": {
+        "summary": "The spend metrics of every run, or of a project's, grouped by run, formula or agent (docs/api/frontends.md): a row\nper key with its runs, attempts, turns, session time and usage.",
+        "operationId": "metrics",
+        "parameters": [
+          {
+            "name": "by",
+            "in": "query",
+            "description": "`run` (the default), `formula` or `agent`; another is a bad request.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "description": "Only the runs of this project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendMetricsReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`bad_request`: the query is malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthorized`: over TCP, without `Authorization: Bearer <api_token>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`storage` or `journal`: the daemon could not read its state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReply"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/triggers": {
       "get": {
         "summary": "Lists every trigger on every rig it runs on, with its source and next firing (`next_at`, null for an event\ntrigger) and whether it is `enabled`.",
@@ -4408,6 +4475,105 @@
           },
           "total": {
             "$ref": "#/components/schemas/Usage"
+          }
+        }
+      },
+      "SpendMetrics": {
+        "type": "object",
+        "description": "The spend of one key of a grouping: an unpriced model's tokens at a `cost_usd` of `0`.",
+        "required": [
+          "runs",
+          "attempts",
+          "turns",
+          "session_s",
+          "input_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "output_tokens",
+          "cost_usd"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cost_usd": {
+            "type": "string",
+            "description": "USD as an exact decimal."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run id, the formula (`<project>.<name>`) or the agent; null for the part the harness reported without\nnaming its agent."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The runs with an attempt or spend under the key.",
+            "minimum": 0
+          },
+          "session_s": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The seconds their attempts with a harness session ran; a live one counts until now.",
+            "minimum": 0
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The turns of those attempts.",
+            "minimum": 0
+          }
+        }
+      },
+      "SpendMetricsReport": {
+        "type": "object",
+        "description": "The spend metrics of every run, or of a project's, grouped by run, formula or agent (docs/api/frontends.md). Each\nrun counts its own spend, not its subtree's, so the rows of every grouping add up to the same sums.",
+        "required": [
+          "by",
+          "rows"
+        ],
+        "properties": {
+          "by": {
+            "type": "string",
+            "description": "`run`, `formula` or `agent`."
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The project the runs were taken from; null for every project."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendMetrics"
+            },
+            "description": "A row per key, ordered by it."
           }
         }
       },

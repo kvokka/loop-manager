@@ -24,6 +24,7 @@ pub const OPERATIONS: &[(&str, &str, &str)] = &[
     ("run list", "GET", "/v1/runs"),
     ("run show", "GET", "/v1/runs/{id}"),
     ("run spend", "GET", "/v1/runs/{id}/spend"),
+    ("spend", "GET", "/v1/spend"),
     ("run watch", "GET", "/v1/runs/{id}/live"),
     ("run cancel", "POST", "/v1/runs/{id}/cancel"),
     ("run resolve", "POST", "/v1/runs/{id}/resolve"),
@@ -111,6 +112,18 @@ pub enum Command {
     /// Runs of formulas.
     #[command(subcommand)]
     Run(RunCommand),
+    /// Show the spend metrics of every run, or of a project's, a row per run, formula or agent: runs, attempts,
+    /// turns, session time, tokens and cost. Each run counts its own spend, so every grouping adds up the same.
+    Spend {
+        #[arg(long, default_value = "run", value_parser = ["run", "formula", "agent"])]
+        by: String,
+        /// Only the runs of this project.
+        #[arg(long)]
+        project: Option<String>,
+        /// Print an aligned table, costs in USD to four decimals, in place of TOON or JSON.
+        #[arg(long, conflicts_with = "json")]
+        table: bool,
+    },
     /// Issue gates: pause and resume what starts.
     #[command(subcommand)]
     Gate(GateCommand),
@@ -284,6 +297,7 @@ async fn execute(client: &Client, cli: Cli) -> Result<ExitCode, ClientError> {
         Command::Doctor { .. } => return Ok(doctor(json, &client.request("GET", "/v1/doctor", None, None).await?)),
         Command::Config(command) => return config::config(client, json, command).await,
         Command::Run(command) => return commands::run(client, json, command).await,
+        Command::Spend { by, project, table } => commands::metrics(client, json, &by, project, table).await?,
         Command::Gate(command) => commands::gate(client, json, command).await?,
         Command::Instance(command) => commands::instance(client, json, command).await?,
         Command::Trigger(command) => commands::trigger(client, json, command).await?,
