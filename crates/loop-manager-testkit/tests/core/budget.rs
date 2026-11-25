@@ -108,6 +108,60 @@ async fn a_child_that_spends_its_budget_fails_and_counts_in_the_outer_total() {
     assert_eq!(view(&w, &outer)["usage"]["cost_usd"], "5");
 }
 
+/// One charge of a child spends both its budget and its outer run's: the outermost one fails and stops its subtree, so
+/// no spent run is left working.
+#[tokio::test(start_paused = true)]
+async fn a_charge_that_spends_nested_budgets_fails_the_outermost() {
+    let w = world(&[NOTE]);
+    w.driver.script(turn(0, &[100], 120));
+    let outer = start(&w, "build", None, Some("4")).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    w.driver.script(turn(1, &[300], 60));
+    let child = start(&w, "note", Some(&outer), None).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(end(&w, &outer), ended("failed", "budget_exceeded", "4"));
+    assert_eq!(end(&w, &child), ended("cancelled", "parent_failed", "3"));
+}
+
+/// No attempt starts in the scope of a spent budget: a budget lowered below the spend while the run waits fails it on
+/// its next attempt, which never opens a session.
+#[tokio::test(start_paused = true)]
+async fn an_attempt_is_not_admitted_once_the_budget_is_spent() {
+    let mut w = world(POLICY);
+    w.driver.script(turn(0, &[50], 3600));
+    let run = start(&w, "build", None, Some("1")).await;
+    w.until(Some(&run), "run.state_changed", 2).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    w.restart().await;
+    let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
+    let lowered = db
+        .execute("UPDATE runs SET budget = 400000000000 WHERE id = ?1", [&run])
+        .unwrap();
+    assert_eq!(lowered, 1);
+    w.driver.script(turn(1, &[], 60));
+    let decision = Decision::Resume {
+        after: Duration::ZERO,
+        gate: None,
+    };
+    w.decide(&run, "run.attempt_failed", 0, decision).await;
+    w.events(&run, Duration::from_secs(5)).await;
+    assert_eq!(end(&w, &run), ended("failed", "budget_exceeded", "0.5"));
+    assert_eq!(view(&w, &run)["attempts"].as_array().unwrap().len(), 1);
+}
+
+/// A start may raise its formula's default: a run of `note` (3 USD) started with 5 USD spends 4 within it.
+#[tokio::test(start_paused = true)]
+async fn a_start_raises_the_formulas_default_budget() {
+    let w = world(&[NOTE]);
+    w.driver.script(turn(1, &[400], 0));
+    let run = start(&w, "note", None, Some("5")).await;
+    w.events(&run, Duration::from_secs(5)).await;
+    let (state, reason, cost) = end(&w, &run);
+    assert_eq!((state.as_str(), cost.as_str()), ("failed", "4"));
+    assert_ne!(reason, "budget_exceeded");
+    assert_eq!(view(&w, &run)["budget_usd"], "5");
+}
+
 /// The outer run reaches its own budget while two children without one work: it fails and both are stopped.
 #[tokio::test(start_paused = true)]
 async fn an_outer_run_at_its_budget_fails_and_stops_its_working_children() {
@@ -170,8 +224,8 @@ async fn spend_before_a_restart_counts_toward_the_budget_after_it() {
     assert_eq!(view(&w, &run)["attempts"].as_array().unwrap().len(), 2);
 }
 
-/// Each invocation owns its budget: two runs of one formula in one correlation, a start's budget above the
-/// formula's default, and a run with no budget at all, spend on their own.
+/// Each invocation owns its budget: two runs of one formula in one correlation and a start's budget below the
+/// formula's default spend on their own.
 #[tokio::test(start_paused = true)]
 async fn each_invocation_has_its_own_budget() {
     let w = world(&[NOTE]);
