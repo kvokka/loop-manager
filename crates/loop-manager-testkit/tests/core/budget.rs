@@ -203,3 +203,32 @@ async fn each_invocation_has_its_own_budget() {
     assert_eq!(ends[2], "budget_exceeded");
     assert_eq!(view(&w, &runs[2])["budget_usd"], "2");
 }
+
+/// The estimates of a turn's requests count toward the budget as they come: a limit they reach stops the run before
+/// the harness tells its running total.
+#[tokio::test(start_paused = true)]
+async fn estimates_reach_a_limit_before_the_turn_ends() {
+    let pricing = "[[pricing]]\nprovider = \"anthropic\"\nmodel = \"m1\"\ninput = 100000\noutput = 100000\n";
+    let config = format!("{}{pricing}", common::FILES[0].1);
+    let w = world(&[("config.toml", config.as_str())]);
+    let estimate = Normalized::UsageEstimate {
+        owner: Owner::Session,
+        provider: "anthropic".into(),
+        model: "m1".into(),
+        tokens: Tokens {
+            input: 10,
+            ..Tokens::default()
+        },
+    };
+    let mut steps = hollow_turn();
+    let mid = [
+        Step::Emit(estimate.clone()),
+        Step::Emit(estimate),
+        Step::Wait(Duration::from_secs(3600)),
+    ];
+    steps.splice(1..1, mid);
+    w.driver.script(steps);
+    let run = start(&w, "build", None, Some("1.5")).await;
+    w.events(&run, Duration::from_secs(10)).await;
+    assert_eq!(end(&w, &run), ended("failed", "budget_exceeded", "2"));
+}
