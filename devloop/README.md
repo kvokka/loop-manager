@@ -115,7 +115,9 @@ its directory first on the daemon's `PATH` for child commands. The dev database 
 The daemon runs this installed copy, not the checkout's build, and keeps the config and pack it read at start
 until an explicit reload. A run may therefore change the product's interface, including the names the devloop pack
 uses, without affecting the running daemon; the change takes effect when the owner installs the new binary and
-restarts the service.
+restarts the service. The step scripts and the hooks of the addons attached by `path` are the exception: the daemon
+runs them from the checkout, so a change of a name they read reaches them at once, and an addon's hook does nothing
+or fails until the service runs the new build.
 
 For an authorized upgrade, install the new artifact between epics with `mise run devloop-install`, then restart the
 registered service through its manager. Installation replaces the file atomically. Subsequent CLI invocations use

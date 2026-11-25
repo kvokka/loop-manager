@@ -4,9 +4,9 @@ What the owner decided. An agent does not revisit a decision: a change needs the
 in the code is a defect, not an option. What is not listed here and is not said by the owner elsewhere is an
 implementation choice or an [assumption](assumptions.md).
 
-The numbers are stable: old notes say "decision 49". Missing numbers were assumptions (12, 33, 34) or are retired
-(23 and 88: the line budgets; 31, 53, 55: the readiness file and the spec; 144: replaced by 149). The behaviour itself is
-described in the document named under each heading; this file only marks it as decided.
+The numbers are stable: old notes say "decision 49". Missing numbers were assumptions (12, 33, 34) or are retired (23
+and 88: the line budgets; 31, 53, 55: the readiness file and the spec; 144: replaced by 149; 160: replaced by 161). The
+behaviour itself is described in the document named under each heading; this file only marks it as decided.
 
 ## The shape of the product — [overview](../overview.md), [architecture](../architecture.md)
 
@@ -133,7 +133,7 @@ described in the document named under each heading; this file only marks it as d
 | 96 | A rig's bead carries the rig's prefix: the acronym of its name (`backend` → `b`, `my-project` → `mp`) or the rig's `prefix` key; the root's beads carry no rig prefix |
 | 147 | A failure of a bead is one that cannot be repaired: the rounds or the attempts for the work ran out. Red tests on a second round, a reviewer sending the work back, one more round are not failures. The key that bounds the failures of a bead says so by its name and by what it counts: `bead_failed_runs`, the runs of the bead that ended `failed` (2026-11-19) |
 | 159 | A `drain` of a rig's run gives only the beads of its rig under its root; a `drain` of a root run gives the beads of any rig under its root, each into the base of its rig. A bead of another place or outside the subtree is foreign: it is not given, and that is no error. The step does not end while an open bead of its own under the root waits, directly or through a chain, on an open foreign blocker (`deferred` and `in_progress` blockers hold, a blocked epic blocks all its descendants, a `blocked` status set by hand is a lock); its own failed beads do not hold it. The wait is bounded by the step's `timeout`; the tracker watcher's `bead.closed` wakes it (2026-11-23) |
-| 160 | The product names the tracker's entity a bead. It is loop-manager's own term, as `rig` is: no harness tool and no forge object carries the name, so an agent in any harness does not take a bead for a forge's issue and reach for the harness's issue tooling. A tracker adapter translates it to the tracker's own name (br says issue). The rename is whole: no aliases and no compatibility with the old names (2026-11-25) |
+| 161 | The product names the tracker's entity a bead. It is loop-manager's own term, as `rig` is: no harness tool and no forge object carries the name, so an agent in any harness does not take a bead for a forge's issue and reach for the harness's issue tooling. A tracker adapter translates it to the tracker's own name (br says issue). The rename is whole: no aliases and no compatibility with the old names (2026-11-25) |
 
 ## Addons — [addon guide](../guide/addons.md), [writing an addon](../guide/addon-development.md), [contracts 3](../design/contracts.md#3-orchestrator-hooks-decisions-and-timeouts)
 
