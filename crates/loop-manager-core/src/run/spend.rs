@@ -1,7 +1,7 @@
 //! The spend ledger (docs/design/formula-budgets.md): what each attempt spent, by agent, provider and model, charged
 //! from the running totals the harness reports over a checkpoint kept per session and counter.
 
-use super::SpendDetail;
+use super::{SpendBy, SpendDetail};
 use crate::{
     config::Pricing,
     driver::{Owner, Tokens},
@@ -370,4 +370,44 @@ pub(super) fn exhausted(conn: &Connection, run: &str) -> Result<Option<String>, 
 /// What one attempt spent, its session's subagents included.
 pub(super) fn attempt_usage(conn: &Connection, run: &str, attempt: u32) -> Result<Value, Error> {
     sums(conn, "run = ?1 AND attempt = ?2", params![run, attempt])
+}
+
+/// The spend metrics of [`super::Reader::metrics`]. An attempt's session time runs from its start to its end, or to
+/// now while it lasts; a subagent has spend and no attempts of its own, a step without an agent has no agent row.
+pub(super) fn metrics(conn: &Connection, by: SpendBy, project: Option<&str>) -> Result<Vec<Value>, Error> {
+    let (attempt_key, spend_key, agents_only) = match by {
+        SpendBy::Run => ("a.run", "s.run", ""),
+        SpendBy::Formula => ("r.formula", "r.formula", ""),
+        SpendBy::Agent => ("a.agent", "s.agent", "AND a.agent IS NOT NULL"),
+    };
+    let sql = format!(
+        "WITH a AS (SELECT {attempt_key} AS key, a.run, COUNT(*) AS attempts, SUM(a.turns) AS turns, \
+           SUM(CASE WHEN a.session IS NULL THEN 0 ELSE COALESCE(a.ended_ms, ?2) - a.started_ms END) AS ms \
+           FROM attempts a JOIN runs r ON r.id = a.run WHERE (?1 IS NULL OR r.project = ?1) {agents_only} \
+           GROUP BY key, a.run), \
+         s AS (SELECT {spend_key} AS key, s.run, SUM(s.input) AS input, SUM(s.cache_read) AS cache_read, \
+           SUM(s.cache_write_5m + s.cache_write_1h) AS cache_write, SUM(s.output) AS output, SUM(s.cost) AS cost \
+           FROM spend s JOIN runs r ON r.id = s.run WHERE (?1 IS NULL OR r.project = ?1) GROUP BY key, s.run), \
+         k AS (SELECT key, run FROM a UNION SELECT key, run FROM s) \
+         SELECT k.key, COUNT(*), COALESCE(SUM(a.attempts), 0), COALESCE(SUM(a.turns), 0), COALESCE(SUM(a.ms), 0), \
+           COALESCE(SUM(s.input), 0), COALESCE(SUM(s.cache_read), 0), COALESCE(SUM(s.cache_write), 0), \
+           COALESCE(SUM(s.output), 0), COALESCE(SUM(s.cost), 0) \
+         FROM k LEFT JOIN a ON a.key = k.key AND a.run = k.run LEFT JOIN s ON s.key = k.key AND s.run = k.run \
+         GROUP BY k.key ORDER BY k.key"
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![project, now], |r| {
+        let mut row = usage_at(r, 5)?;
+        let key: String = r.get(0)?;
+        row["key"] = json!((!key.is_empty()).then_some(key));
+        row["runs"] = json!(r.get::<_, i64>(1)?);
+        row["attempts"] = json!(r.get::<_, i64>(2)?);
+        row["turns"] = json!(r.get::<_, i64>(3)?);
+        row["session_s"] = json!(r.get::<_, i64>(4)? / 1000);
+        Ok(row)
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }

@@ -70,6 +70,24 @@ impl SpendDetail {
     }
 }
 
+/// What the spend metrics are grouped by (docs/api/frontends.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpendBy {
+    Run,
+    Formula,
+    Agent,
+}
+
+impl SpendBy {
+    /// The groupings by name, as the frontends take them.
+    pub const ALL: [(&str, Self); 3] = [("run", Self::Run), ("formula", Self::Formula), ("agent", Self::Agent)];
+
+    /// The grouping named `name`; `None` for another name.
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.iter().find(|(n, _)| *n == name).map(|(_, d)| *d)
+    }
+}
+
 impl Reader {
     /// Opens the state database `store::open` created.
     pub fn open(path: &Path) -> Result<Self, Error> {
@@ -147,6 +165,14 @@ impl Reader {
             report["rows"] = json!(super::spend::rows(&conn, id, detail)?);
         }
         Ok(Some(report))
+    }
+
+    /// The spend metrics of every run, of `project` only when given, grouped `by` (docs/api/frontends.md): a row per
+    /// key with its runs, attempts, turns, session time and usage. Each run counts its own spend, not its subtree's,
+    /// so the rows of every grouping add up to the same sums.
+    pub fn metrics(&self, by: SpendBy, project: Option<&str>) -> Result<Vec<Value>, Error> {
+        let conn = self.conn();
+        super::spend::metrics(&conn, by, project)
     }
 
     /// The bases of run `id` (docs/design/config.md "Formula"), by place: in its own place its `workdir`; in each other

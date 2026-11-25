@@ -290,7 +290,7 @@ impl RunHandler {
                     StopReason::Failed => 3,
                 };
                 tx.sql().execute(
-                    "UPDATE attempts SET turn_ended = ?3 WHERE run = ?1 AND n = ?2",
+                    "UPDATE attempts SET turn_ended = ?3, turns = turns + 1 WHERE run = ?1 AND n = ?2",
                     params![row.id, attempt, ended],
                 )?;
                 silence(tx, &row, w.silence_ms)

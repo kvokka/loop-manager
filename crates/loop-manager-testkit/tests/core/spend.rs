@@ -6,7 +6,7 @@ use crate::common;
 use common::{FILES, POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
     driver::{Normalized, Owner, Tokens},
-    run::{Create, Decision, Msg, Reader, SpendDetail},
+    run::{Create, Decision, Msg, Reader, SpendBy, SpendDetail},
     usd::Usd,
 };
 use loop_manager_testkit::Step;
@@ -469,4 +469,54 @@ async fn a_total_settles_the_estimates_of_its_agents_and_keeps_the_harness_cost(
         row("shop.dev", None, usage(150, 0, 0, 0, "0.000383333333")),
     ];
     assert_eq!(report["rows"], json!(agents));
+}
+
+/// The spend metrics group every run's own spend by run, formula or agent, and each grouping adds up to the same
+/// sums; a subagent has spend and no attempts or turns of its own.
+#[tokio::test(start_paused = true)]
+async fn spend_metrics_by_run_formula_and_agent_add_up() {
+    let pricing = "[[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\ninput = 1\noutput = 1\n";
+    let config = format!("{}{pricing}", FILES[0].1);
+    let w = world(&[("config.toml", config.as_str())]);
+    let mut first = spending(total_of("proxy", "m1", None, [300, 0, 0, 0], None), Duration::ZERO);
+    first.insert(1, Step::Emit(estimate(Owner::Subagent("helper".into()), 100)));
+    w.driver.script(first);
+    let one = w.create().await;
+    w.events(&one, Duration::from_millis(200)).await;
+    w.driver.script(spending(
+        total_of("proxy", "m1", None, [50, 0, 0, 0], None),
+        Duration::ZERO,
+    ));
+    let two = w.create().await;
+    w.events(&two, Duration::from_millis(200)).await;
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    let metrics = |by| reader.metrics(by, None).unwrap();
+    let sum = |rows: &[Value], key: &str| rows.iter().map(|r| r[key].as_i64().unwrap()).sum::<i64>();
+    let by_run = metrics(SpendBy::Run);
+    assert_eq!(by_run.len(), 2, "{by_run:?}");
+    assert!(
+        by_run.iter().all(|r| r["runs"] == 1 && r["turns"].as_i64() >= Some(1)),
+        "{by_run:?}"
+    );
+    let (turns, attempts) = (sum(&by_run, "turns"), sum(&by_run, "attempts"));
+    let by_formula = metrics(SpendBy::Formula);
+    assert_eq!(by_formula.len(), 1, "{by_formula:?}");
+    let formula = &by_formula[0];
+    assert_eq!((&formula["runs"], &formula["turns"]), (&json!(2), &json!(turns)));
+    assert_eq!(formula["attempts"], attempts);
+    assert_eq!(
+        (&formula["input_tokens"], &formula["cost_usd"]),
+        (&json!(350), &json!("0.00035"))
+    );
+    let by_agent = metrics(SpendBy::Agent);
+    let helper = json!({ "key": "helper", "runs": 1, "attempts": 0, "turns": 0, "session_s": 0,
+        "input_tokens": 100, "cache_read_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0, "cost_usd": "0.0001" });
+    assert_eq!(by_agent[0], helper);
+    assert_eq!(by_agent[1]["key"], "shop.dev");
+    assert_eq!(
+        (&by_agent[1]["turns"], &by_agent[1]["input_tokens"]),
+        (&json!(turns), &json!(250))
+    );
+    assert_eq!(by_agent[1]["cost_usd"], "0.00025");
+    assert!(reader.metrics(SpendBy::Run, Some("elsewhere")).unwrap().is_empty());
 }

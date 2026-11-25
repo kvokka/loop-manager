@@ -100,6 +100,7 @@ CREATE TABLE attempts (
     handle TEXT,
     session TEXT,
     turn_ended INTEGER NOT NULL DEFAULT 0,
+    turns INTEGER NOT NULL DEFAULT 0, -- The turns of its session that ended in the attempt.
     -- What was left of the step timeout when its turn ended: the step timeout pauses between turns.
     paused_ms INTEGER,
     started_ms INTEGER NOT NULL,
