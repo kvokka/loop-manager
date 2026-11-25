@@ -45,15 +45,15 @@ pub(crate) struct Play {
 }
 
 /// The run of the idempotency key `key`: of `build` (0, 1), of the three steps of `ship` (2, 3), of `fix` on the
-/// issues b-1 and b-2 (4, 5), of `sweep` on the root b-3 (6).
+/// beads b-1 and b-2 (4, 5), of `sweep` on the root b-3 (6).
 fn create(key: u64) -> Create {
-    let (formula, issue) = match key {
+    let (formula, bead) = match key {
         0 | 1 => ("build", None),
         2 | 3 => ("ship", None),
         4 | 5 => ("fix", Some(format!("b-{}", key - 3))),
         _ => ("sweep", Some("b-3".to_owned())),
     };
-    let inputs = issue.map(|b| ("issue".to_owned(), serde_json::json!(b)));
+    let inputs = bead.map(|b| ("bead".to_owned(), serde_json::json!(b)));
     Create {
         project: "shop".into(),
         rig: Some("web".into()),
@@ -233,7 +233,7 @@ pub(crate) async fn step(w: &mut World, rng: &mut Rng, play: &mut Play, calm: bo
 type Run = (String, String, u32, Option<i64>);
 
 /// A create with the idempotency key `key` ([`create`]), which may come again: the client retried (invariant 10).
-/// A run on an issue is refused while another live run holds the issue.
+/// A run on a bead is refused while another live run holds the bead.
 pub(crate) async fn create_keyed(w: &World, play: &mut Play, key: u64) {
     let msg = Msg::Create(create(key));
     let run = match w.core.send(Some(&format!("create-{key}")), msg).await {

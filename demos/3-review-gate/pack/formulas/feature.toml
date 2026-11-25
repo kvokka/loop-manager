@@ -2,14 +2,14 @@ name = "feature"
 description = "A feature over the repositories of the project, gated on the review of its pull requests"
 
 [inputs]
-task = { type = "task", required = true }   # the request: its text becomes the root issue
+task = { type = "task", required = true }   # the request: its text becomes the root bead
 feedback_from = { type = "string" }         # whose comments reach the reviser: GitHub logins, comma-separated;
                                             # none given, nobody's
 
-# Each repository keeps the work of the feature on one branch, `feature/<issue>`, across every round, so the formula
+# Each repository keeps the work of the feature on one branch, `feature/<bead>`, across every round, so the formula
 # has no `worktree`: a worktree is a branch per run. The scripts find the repositories with `loop-manager project list`.
 
-# The request becomes issues, and the coders do them.
+# The request becomes beads, and the coders do them.
 [[step]]
 name = "build"
 kind = "formula"
@@ -23,7 +23,7 @@ kind = "exec"
 if = { back_from = "review" }
 command = ["sh", "-c", '''
 set -eu
-branch="feature/$LOOP_MANAGER_ISSUE"
+branch="feature/$LOOP_MANAGER_BEAD"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
 dir=$(printf '%s' "$places" | jq -r '.[0].dir')
@@ -44,12 +44,12 @@ done
 [ -s "$taken" ] || { echo "collect: no new comment"; exit 0; }
 # A repeat of the step finds no new comment and keeps the file of the one before.
 mkdir -p "$dir/feedback"
-jq -r '"## \(.url)\(if .path then " (`\(.path)`)" else "" end)\n\n\(.body)\n"' "$taken" >"$dir/feedback/$LOOP_MANAGER_ISSUE.md"
+jq -r '"## \(.url)\(if .path then " (`\(.path)`)" else "" end)\n\n\(.body)\n"' "$taken" >"$dir/feedback/$LOOP_MANAGER_BEAD.md"
 for id in $(jq -r .id "$taken"); do
   gh api graphql -f id="$id" \
     -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' >/dev/null
 done
-echo "collect: $(wc -l <"$taken" | tr -d ' ') comment(s) in $dir/feedback/$LOOP_MANAGER_ISSUE.md"
+echo "collect: $(wc -l <"$taken" | tr -d ' ') comment(s) in $dir/feedback/$LOOP_MANAGER_BEAD.md"
 ''']
 
 # The reviser works the comments, from the file only.
@@ -67,12 +67,12 @@ name = "pr"
 kind = "exec"
 command = ["sh", "-c", '''
 set -eu
-branch="feature/$LOOP_MANAGER_ISSUE"
+branch="feature/$LOOP_MANAGER_BEAD"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
-title=$(loop-manager --json issue show --project "$project" "$LOOP_MANAGER_ISSUE" | jq -r .title)
+title=$(loop-manager --json bead show --project "$project" "$LOOP_MANAGER_BEAD" | jq -r .title)
 page=$(mktemp)
-printf '# %s\n\nThe feature `%s`. Its pull requests in the other repositories:\n\n' "$title" "$LOOP_MANAGER_ISSUE" >"$page"
+printf '# %s\n\nThe feature `%s`. Its pull requests in the other repositories:\n\n' "$title" "$LOOP_MANAGER_BEAD" >"$page"
 # The work of the repository in $1 on the branch of the feature, pushed, with its pull request; prints its address.
 publish() {
   cd "$1"
@@ -94,7 +94,7 @@ for repo in $(printf '%s' "$places" | jq -r '.[0].rigs[].path'); do
 done
 root=$(printf '%s' "$places" | jq -r '.[0].root.path')
 mkdir -p "$root/features"
-cp "$page" "$root/features/$LOOP_MANAGER_ISSUE.md"
+cp "$page" "$root/features/$LOOP_MANAGER_BEAD.md"
 url=$(publish "$root")
 cd "$root" && gh pr edit "$url" -F "$page" >/dev/null
 echo "$url"
@@ -115,7 +115,7 @@ max_attempts = 3
 command = ["sh", "-c", '''
 set -eu
 echo "merge: MY_AWESOME_ENV_VAR is ${MY_AWESOME_ENV_VAR:-not set}"   # a literal of [exec] in root/config.toml
-branch="feature/$LOOP_MANAGER_ISSUE"
+branch="feature/$LOOP_MANAGER_BEAD"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
 failed=0

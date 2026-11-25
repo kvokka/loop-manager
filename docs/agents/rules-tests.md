@@ -5,7 +5,7 @@
 The installed daemon, its socket, state, binary and tracker serve real runs. Only an explicit owner
 request naming the operation on that daemon authorizes an update, a restart, a drain, a signal,
 a config reload, a state change or a test there. A development epic authorizes the agent to report
-on its assigned run and issue. Keep those operations separate from tests.
+on its assigned run and bead. Keep those operations separate from tests.
 
 The devloop CI step runs through `devloop/scripts/test-env`, which removes outer run credentials and gives the
 check private XDG directories and a private tracker path. For targeted checks in a working session use, for
@@ -14,7 +14,7 @@ Exercise CLI, API and tracker behavior through the isolated test fixtures descri
 fixture test if a changed user path lacks coverage. This also applies to reviewers and subagents.
 A temporary working directory or a change to XDG variables alone still leaves the parent's
 `LOOP_MANAGER_SOCKET` and the tracker's variables in each fresh shell call
-([issue trackers](../guide/issue-trackers.md#how-it-is-wired)).
+([trackers](../guide/trackers.md#how-it-is-wired)).
 
 ## What to run, and when
 

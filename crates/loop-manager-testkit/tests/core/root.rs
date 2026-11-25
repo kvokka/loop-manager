@@ -4,9 +4,9 @@
 use crate::common;
 
 use common::{
-    World, hollow_turn,
-    issues::{FIX, slow_turn},
-    last, world, world_with,
+    World,
+    beads::{FIX, slow_turn},
+    hollow_turn, last, world, world_with,
 };
 use loop_manager_core::{
     driver::{Normalized, SessionState, StopReason},
@@ -43,13 +43,13 @@ const TWO: &[(&str, &str)] = &[
 ];
 
 impl World {
-    /// A start of `formula` on `rig` (`None`: no rig named), on the issue `issue` if any.
-    async fn start_in(&self, formula: &str, rig: Option<&str>, issue: Option<Value>) -> String {
+    /// A start of `formula` on `rig` (`None`: no rig named), on the bead `bead` if any.
+    async fn start_in(&self, formula: &str, rig: Option<&str>, bead: Option<Value>) -> String {
         let create = Create {
             project: "shop".into(),
             rig: rig.map(Into::into),
             formula: formula.into(),
-            inputs: issue.map(|b| ("issue".to_owned(), b)).into_iter().collect(),
+            inputs: bead.map(|b| ("bead".to_owned(), b)).into_iter().collect(),
             correlation: None,
             depth: 0,
             parent_run: None,
@@ -165,16 +165,16 @@ async fn a_root_with_a_name_and_a_path_is_where_its_runs_work() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_issue_of_the_root_runs_in_the_root() {
+async fn a_bead_of_the_root_runs_in_the_root() {
     let w = world(&[&[ROOTED], FIX].concat());
     w.driver.script(slow_turn());
-    let issue = w.tracker.add(&[], None);
+    let bead = w.tracker.add(&[], None);
     w.changed().await;
-    let run = w.start_in("fix", None, Some(json!(issue))).await;
+    let run = w.start_in("fix", None, Some(json!(bead))).await;
     let events = w.events(&run, Duration::from_secs(1)).await;
     let queued = &last(&events, "run.queued")["run"];
-    assert_eq!((w.rig(&run), &queued["issue"]), ("root".to_owned(), &json!(issue)));
-    assert_eq!(w.assignee(&issue), Some(format!("loop-manager:{run}")));
+    assert_eq!((w.rig(&run), &queued["bead"]), ("root".to_owned(), &json!(bead)));
+    assert_eq!(w.assignee(&bead), Some(format!("loop-manager:{run}")));
 }
 
 #[tokio::test(start_paused = true)]

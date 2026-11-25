@@ -1,8 +1,8 @@
 //! The prompt of the step a run enters (docs/design/contracts.md 2.3, 5): rendered at once, or, when it shows the
-//! comments or the parents of the run's issue, once the tracker has given them as they are now. The read is an effect
+//! comments or the parents of the run's bead, once the tracker has given them as they are now. The read is an effect
 //! on the queue of the project's tracker, and the run waits for it in `preparing`, as it does for its claim.
 
-use super::{Msg, RunHandler, issues::tracker_key, row::Row};
+use super::{Msg, RunHandler, beads::tracker_key, row::Row};
 use crate::{
     config::Prompt,
     tracker::{Lineage, Tracker, TrackerError},
@@ -13,15 +13,15 @@ use serde_json::{Value, json};
 
 impl RunHandler {
     /// Renders the prompt of the step `row` enters and asks the `run.preparing` hooks; a prompt that shows the
-    /// comments or the parents of the run's issue reads them first.
+    /// comments or the parents of the run's bead reads them first.
     pub(super) fn render_and_prepare(&mut self, tx: &mut Tx<'_>, row: Row) -> Result<(), Error> {
         let shows =
             row.step_kind == "ai" && (self.config.prompt(&row.project, &row.agent)).is_ok_and(Prompt::shows_lineage);
-        let Some(issue) = row.issue.as_ref().filter(|_| shows) else {
+        let Some(bead) = row.bead.as_ref().filter(|_| shows) else {
             return self.render_now(tx, row);
         };
         // The step and the attempt name this entry of the step: an answer to another one is dropped.
-        let payload = json!({ "op": "tracker", "call": "lineage", "project": row.project, "issue": issue, "run": row.id,
+        let payload = json!({ "op": "tracker", "call": "lineage", "project": row.project, "bead": bead, "run": row.id,
             "step": row.step, "attempt": row.attempt });
         let dedupe = format!("lineage:{}:{}:{}", row.id, row.step, row.attempt);
         tx.effect(&tracker_key(&row.project), &dedupe, &payload)?;
@@ -51,7 +51,7 @@ impl RunHandler {
         self.deciding(tx, row, "run.preparing", data)
     }
 
-    /// The tracker answered the read of `payload`: the issue as it is now replaces the run's snapshot of it and the
+    /// The tracker answered the read of `payload`: the bead as it is now replaces the run's snapshot of it and the
     /// prompt renders. An answer to another entry of a step, or to a run that prepares no more, is dropped.
     pub(super) fn lineage(
         &mut self,
@@ -67,7 +67,7 @@ impl RunHandler {
             Ok(lineage) => {
                 tx.clear_deadline(&row.deadline("state"))?;
                 tx.sql().execute(
-                    "UPDATE runs SET issue_data = ?2 WHERE id = ?1",
+                    "UPDATE runs SET bead_data = ?2 WHERE id = ?1",
                     params![row.id, json!(lineage).to_string()],
                 )?;
                 self.render_now(tx, Row::load(tx, &row.id)?)
@@ -79,7 +79,7 @@ impl RunHandler {
                 row,
                 "failed",
                 Some("infrastructure"),
-                &format!("issue_unreadable: {e}"),
+                &format!("bead_unreadable: {e}"),
             ),
         }
     }
@@ -87,7 +87,7 @@ impl RunHandler {
 
 /// Runs the read of the effect `payload` and reports it; `false` retries it (the tracker was unavailable).
 pub(super) async fn read(tracker: &dyn Tracker, core: &CoreHandle<Msg>, payload: &Value) -> bool {
-    let result = tracker.lineage(payload["issue"].as_str().unwrap_or_default()).await;
+    let result = tracker.lineage(payload["bead"].as_str().unwrap_or_default()).await;
     let retry = matches!(result, Err(TrackerError::Unavailable { .. }));
     // A stopped writer drops the message; the effect is still queued and runs again at the next start.
     let _ = core

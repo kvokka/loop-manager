@@ -53,11 +53,11 @@ is for the review to catch.
   ([license](../../README.md#the-br-tracker-and-its-license)).
 - No implicit dependency on a tool. An addon, a crate, or a plugin and its skills do not call a concrete tracker,
   harness or other tool they are not the adapter of: they go through loop-manager's interfaces, the contract traits,
-  the CLI (`loop-manager comment`, `loop-manager finish`, `loop-manager run show`, `loop-manager issue show`) and the
+  the CLI (`loop-manager comment`, `loop-manager finish`, `loop-manager run show`, `loop-manager bead show`) and the
   environment they are given. Only the adapter of a tool runs it
   (`loop-manager-br` runs br, `loop-manager-claude` runs claude); a part that needs more of a tool asks for it through
   an interface of loop-manager. The devloop pack is exempt: it belongs to a br project by design
-  ([issue trackers](../guide/issue-trackers.md#the-br-tracker)).
+  ([trackers](../guide/trackers.md#the-br-tracker)).
 - mise is a convenience, not a requirement. A command that is not found: `mise exec -- <command>`.
 - Structural search in Rust is `ast-grep`: `ast-grep -l rust -p '$X.unwrap()' crates/`.
 

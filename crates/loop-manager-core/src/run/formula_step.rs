@@ -37,7 +37,7 @@ impl RunHandler {
             continue_from: None,
             budget: None,
         };
-        // A child refused, or with no issue ready to take, is no work of the formula: nothing ran (invariant 13).
+        // A child refused, or with no bead ready to take, is no work of the formula: nothing ran (invariant 13).
         match tx.unit(|tx| self.create(tx, create)) {
             Ok(reply) if reply["run"].is_null() => {
                 self.terminal(tx, row, "failed", Some("infrastructure"), "nothing_ready")
@@ -85,7 +85,7 @@ impl RunHandler {
         self.step_done(tx, row, &outcome)
     }
 
-    /// Cancels the live child of the formula step `row` failed in: its issue is no longer held for it.
+    /// Cancels the live child of the formula step `row` failed in: its bead is no longer held for it.
     pub(super) fn end_child(&mut self, tx: &mut Tx<'_>, row: &Row) -> Result<(), Error> {
         if row.step_kind != "formula" {
             return Ok(());
@@ -96,16 +96,16 @@ impl RunHandler {
         }
     }
 
-    /// The issue data of `parent` when its formula step lends `issue` to its child (docs/design/config.md,
-    /// docs/design/contracts.md 5): the child works on the issue and the parent keeps it; a child of that child may
+    /// The bead data of `parent` when its formula step lends `bead` to its child (docs/design/config.md,
+    /// docs/design/contracts.md 5): the child works on the bead and the parent keeps it; a child of that child may
     /// borrow it on.
-    pub(super) fn lent(tx: &Tx<'_>, parent: Option<&str>, issue: &str) -> Result<Option<String>, Error> {
+    pub(super) fn lent(tx: &Tx<'_>, parent: Option<&str>, bead: &str) -> Result<Option<String>, Error> {
         let Some(parent) = parent else { return Ok(None) };
         let data: Option<Option<String>> = tx
             .sql()
             .query_row(
-                "SELECT issue_data FROM runs WHERE id = ?1 AND issue = ?2 AND step_kind = 'formula'",
-                params![parent, issue],
+                "SELECT bead_data FROM runs WHERE id = ?1 AND bead = ?2 AND step_kind = 'formula'",
+                params![parent, bead],
                 |r| r.get(0),
             )
             .optional()?;

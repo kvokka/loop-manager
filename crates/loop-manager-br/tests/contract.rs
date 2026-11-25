@@ -4,7 +4,7 @@
 //! trail.
 
 use loop_manager_br::Br;
-use loop_manager_contract::tracker::{NewIssue, Tracker, TrackerError, Wait};
+use loop_manager_contract::tracker::{NewBead, Tracker, TrackerError, Wait};
 use std::{path::Path, process::Command, sync::mpsc, time::Duration};
 
 /// A fresh tracker in a temporary directory.
@@ -132,11 +132,11 @@ async fn repeating_a_close_keeps_the_bead_closed_and_checks_its_owner() {
     t.claim(owner, &id).await.unwrap();
     // An exec finalizer may close and publish the tracker before the daemon acknowledges the outcome.
     br(dir.path(), &["close", &id, "-r", "published report"]);
-    let before = t.lineage(&id).await.unwrap().issue.issue;
+    let before = t.lineage(&id).await.unwrap().bead.bead;
     for _ in 0..2 {
         t.close(owner, &id, "passed: report").await.unwrap();
     }
-    let after = t.lineage(&id).await.unwrap().issue.issue;
+    let after = t.lineage(&id).await.unwrap().bead.bead;
     assert_eq!(after.status, "closed");
     assert_eq!(after.assignee.as_deref(), Some(owner));
     assert_eq!(after.updated_at, before.updated_at, "replays do not mutate the tracker");
@@ -157,7 +157,7 @@ async fn releasing_a_bead_closed_by_someone_else_clears_its_owner_and_keeps_it_c
     t.claim(owner, &id).await.unwrap();
     br(dir.path(), &["close", &id, "-r", "done by hand"]);
     t.release(owner, &id).await.unwrap();
-    let bead = t.lineage(&id).await.unwrap().issue.issue;
+    let bead = t.lineage(&id).await.unwrap().bead.bead;
     assert_eq!(
         (bead.status.as_str(), bead.assignee),
         ("closed", None),
@@ -172,7 +172,7 @@ async fn a_status_of_the_project_policy_passes_release_and_close_as_text() {
     let policy = "workflow:\n  strict: true\n  statuses: [open, in_progress, rework, blocked, deferred, closed]\n";
     std::fs::write(dir.path().join(".beads/policy.yaml"), policy).unwrap();
     let state = async |id: &str| {
-        let bead = t.lineage(id).await.unwrap().issue.issue;
+        let bead = t.lineage(id).await.unwrap().bead.bead;
         (bead.status, bead.assignee)
     };
     let (one, two) = (create(dir.path(), "One", &[]), create(dir.path(), "Two", &[]));
@@ -244,7 +244,7 @@ async fn a_bead_filed_with_a_rig_prefix_under_a_root_keeps_it_and_parent_loses_i
 async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
     let (dir, t) = tracker();
     let root = create(dir.path(), "Root", &["-t", "epic"]);
-    let new = NewIssue {
+    let new = NewBead {
         title: "-Rig work".into(),
         description: "--not an option".into(),
         labels: vec!["agent:coder".into(), "x".into()],
@@ -259,9 +259,9 @@ async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
     );
     assert_eq!(filed.labels, ["agent:coder", "x"]);
     let changes = t.changes(0).await.unwrap();
-    let created = changes.iter().find(|c| c.issue.id == filed.id && c.kind == "created");
+    let created = changes.iter().find(|c| c.bead.id == filed.id && c.kind == "created");
     assert_eq!(created.unwrap().actor, "loop-manager:run_1");
-    let other = NewIssue {
+    let other = NewBead {
         title: "Other".into(),
         ..new.clone()
     };
@@ -274,7 +274,7 @@ async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
         1,
         "a repeated key files no second bead"
     );
-    let plain = NewIssue {
+    let plain = NewBead {
         labels: Vec::new(),
         parent: None,
         prefix: None,
@@ -287,7 +287,7 @@ async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
             .id
             .starts_with("t-")
     );
-    let orphan = NewIssue {
+    let orphan = NewBead {
         parent: Some("t-nope".into()),
         ..plain.clone()
     };
@@ -295,7 +295,7 @@ async fn file_keeps_its_fields_and_prefix_under_a_parent_once_per_key() {
         t.file("loop-manager:run_1", None, &orphan).await,
         Err(TrackerError::NotFound)
     );
-    let comma = NewIssue {
+    let comma = NewBead {
         labels: vec!["a,b".into()],
         ..plain
     };
@@ -329,10 +329,10 @@ async fn close_by_closes_whoever_holds_it_once_and_keeps_a_parent_with_open_chil
     let changes = t.changes(0).await.unwrap();
     let last = changes.last().unwrap();
     assert_eq!(
-        (last.kind.as_str(), last.actor.as_str(), last.issue.status.as_str()),
+        (last.kind.as_str(), last.actor.as_str(), last.bead.status.as_str()),
         ("closed", "bob", "closed")
     );
-    assert_eq!(last.issue.assignee.as_deref(), Some("loop-manager:run_1"));
+    assert_eq!(last.bead.assignee.as_deref(), Some("loop-manager:run_1"));
     t.close_by("bob", &held, "again").await.unwrap();
     assert_eq!(t.changes(last.seq).await.unwrap(), [], "a repeat writes nothing");
     match t.close_by("bob", &parent, "early").await {
@@ -341,7 +341,7 @@ async fn close_by_closes_whoever_holds_it_once_and_keeps_a_parent_with_open_chil
     }
     let shown = t.subtree(&parent).await.unwrap();
     assert!(shown.iter().any(|b| b.id == open && b.status == "open"));
-    assert_eq!(t.lineage(&open).await.unwrap().parents[0].issue.status, "open");
+    assert_eq!(t.lineage(&open).await.unwrap().parents[0].bead.status, "open");
     assert_eq!(t.close_by("bob", "t-nope", "x").await, Err(TrackerError::NotFound));
 }
 
@@ -362,7 +362,7 @@ async fn under_gives_the_ready_beads_at_any_depth_and_an_epic_once_its_children_
 /// A hold of `bead` by `blocker` in `status`, as `waiting` gives it.
 fn wait(bead: &str, blocker: &str, kind: &str, status: &str, under: bool) -> Wait {
     Wait {
-        issue: bead.to_owned(),
+        bead: bead.to_owned(),
         blocker: blocker.to_owned(),
         kind: kind.to_owned(),
         status: status.to_owned(),
@@ -388,7 +388,7 @@ async fn waiting_holds_every_bead_below_a_blocked_parent_up_past_the_root() {
         .into_iter()
         .chain(held)
         .collect();
-    expected.sort_by(|a, b| (&a.issue, &a.blocker).cmp(&(&b.issue, &b.blocker)));
+    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
     assert_eq!(t.waiting(&root).await.unwrap(), expected);
     assert_eq!(t.waiting("t-none").await, Err(TrackerError::NotFound));
 }
@@ -416,7 +416,7 @@ async fn waiting_takes_open_blockers_and_a_blocked_status_and_tells_those_under_
         wait(&kids[3], &kids[4], "waits-for", "blocked", true),
         wait(&kids[4], &kids[4], "status", "blocked", true),
     ];
-    expected.sort_by(|a, b| (&a.issue, &a.blocker).cmp(&(&b.issue, &b.blocker)));
+    expected.sort_by(|a, b| (&a.bead, &a.blocker).cmp(&(&b.bead, &b.blocker)));
     assert_eq!(t.waiting(&root).await.unwrap(), expected);
 }
 
@@ -432,23 +432,23 @@ async fn the_lineage_of_a_bead_is_its_fields_its_comments_and_its_parents_from_t
     br(dir.path(), &["comments", "add", &kid, "start with the parser"]);
     br(dir.path(), &["comments", "add", &kid, "two lines\nhere"]);
     let lineage = t.lineage(&kid).await.unwrap();
-    let issue = &lineage.issue.issue;
+    let bead = &lineage.bead.bead;
     assert_eq!(
         (
-            issue.id.as_str(),
-            issue.description.as_str(),
-            issue.status.as_str(),
-            &issue.labels
+            bead.id.as_str(),
+            bead.description.as_str(),
+            bead.status.as_str(),
+            &bead.labels
         ),
         (kid.as_str(), "Parse the input", "blocked", &vec!["review".to_owned()])
     );
-    let texts: Vec<&str> = lineage.issue.comments.iter().map(|c| c.text.as_str()).collect();
+    let texts: Vec<&str> = lineage.bead.comments.iter().map(|c| c.text.as_str()).collect();
     assert_eq!(texts, ["start with the parser", "two lines\nhere"]);
     assert!(
-        (lineage.issue.comments.iter()).all(|c| c.author == "alice" && !c.created_at.is_empty()),
+        (lineage.bead.comments.iter()).all(|c| c.author == "alice" && !c.created_at.is_empty()),
         "{lineage:?}"
     );
-    let parents: Vec<&str> = lineage.parents.iter().map(|p| p.issue.id.as_str()).collect();
+    let parents: Vec<&str> = lineage.parents.iter().map(|p| p.bead.id.as_str()).collect();
     assert_eq!(parents, [root.as_str(), epic.as_str()]);
     assert_eq!(lineage.parents[0].comments.len(), 1);
     assert!(lineage.parents[1].comments.is_empty());
@@ -485,7 +485,7 @@ async fn each_command_is_one_change_with_its_actor_and_the_watcher_signals_it() 
         ]
     );
     assert!(changes.windows(2).all(|w| w[0].seq < w[1].seq));
-    assert_eq!(changes[2].issue.status, "closed");
+    assert_eq!(changes[2].bead.status, "closed");
     let last = changes[2].seq;
     assert!(t.changes(last).await.unwrap().is_empty(), "nothing after the cursor");
 }
@@ -617,7 +617,7 @@ async fn a_comment_lands_on_its_bead_as_its_actor_and_a_missing_bead_is_not_foun
     let text = "--summary: two lines\nhere";
     t.comment("loop-manager:run_1:2", &id, text).await.unwrap();
     let lineage = t.lineage(&id).await.unwrap();
-    let comments: Vec<(&str, &str)> = (lineage.issue.comments.iter())
+    let comments: Vec<(&str, &str)> = (lineage.bead.comments.iter())
         .map(|c| (c.author.as_str(), c.text.as_str()))
         .collect();
     assert_eq!(comments, [("loop-manager:run_1:2", text)]);

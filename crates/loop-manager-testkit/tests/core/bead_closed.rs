@@ -1,5 +1,5 @@
-//! A run whose issue is closed by another actor ends `cancelled` with reason `issue_closed`, at whatever step
-//! (docs/design/contracts.md 6.2); its release leaves the issue closed, so no trigger takes it again.
+//! A run whose bead is closed by another actor ends `cancelled` with reason `bead_closed`, at whatever step
+//! (docs/design/contracts.md 6.2); its release leaves the bead closed, so no trigger takes it again.
 
 use crate::common;
 
@@ -8,17 +8,17 @@ use loop_manager_core::Journal;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// `web` lets one writer work at once, and every ready issue starts `hold` on it, as devloop's `epic-ready` does.
+/// `web` lets one writer work at once, and every ready bead starts `hold` on it, as devloop's `epic-ready` does.
 const FILES: &[(&str, &str)] = &[
     (
         "shop/loop-manager.toml",
-        "[rigs.web]\npath = \"web\"\nmax_writers = 1\n\n[[trigger]]\nname = \"epic-ready\"\non = \"issue.ready\"\n\
-         run = \"hold\"\nrig = \"web\"\ninputs = { issue = \"{{ event.issue.id }}\" }\n",
+        "[rigs.web]\npath = \"web\"\nmax_writers = 1\n\n[[trigger]]\nname = \"epic-ready\"\non = \"bead.ready\"\n\
+         run = \"hold\"\nrig = \"web\"\ninputs = { bead = \"{{ event.bead.id }}\" }\n",
     ),
     // A writer by its exec step, which waits for the owner first.
     (
         "shop/formulas/hold.toml",
-        "name = \"hold\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"hold\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nname = \"code_owner\"\nkind = \"await\"\n\
          [[step]]\nname = \"ci\"\nkind = \"exec\"\ncommand = [\"true\"]\n",
     ),
@@ -31,11 +31,11 @@ impl World {
         all.into_iter().filter(|e| e["type"] == kind).collect()
     }
 
-    /// The run that started on `issue`.
-    fn run_of(&self, issue: &str) -> String {
+    /// The run that started on `bead`.
+    fn run_of(&self, bead: &str) -> String {
         let queued = self.journal_of("run.queued");
-        let on = queued.iter().find(|e| e["data"]["run"]["issue"] == issue);
-        on.unwrap_or_else(|| panic!("no run on {issue}: {queued:?}"))["run"]
+        let on = queued.iter().find(|e| e["data"]["run"]["bead"] == bead);
+        on.unwrap_or_else(|| panic!("no run on {bead}: {queued:?}"))["run"]
             .as_str()
             .unwrap()
             .to_owned()
@@ -43,7 +43,7 @@ impl World {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_issue_closed_by_another_actor_cancels_its_waiting_run_and_frees_its_writer_slot() {
+async fn a_bead_closed_by_another_actor_cancels_its_waiting_run_and_frees_its_writer_slot() {
     let w = world(FILES);
     let (first, second) = (w.tracker.add(&["auto"], None), w.tracker.add(&["auto"], None));
     w.changed().await;
@@ -54,7 +54,7 @@ async fn an_issue_closed_by_another_actor_cancels_its_waiting_run_and_frees_its_
     let last = waits.iter().rfind(|e| e["run"] == queued.as_str()).unwrap();
     assert_eq!(last["data"]["waiting_for"], "writers", "{last:?}");
 
-    // The run's own attempt closing its issue is its own close, not this case.
+    // The run's own attempt closing its bead is its own close, not this case.
     w.tracker.close_as(&first, &format!("loop-manager:{held}:1"));
     w.changed().await;
     assert!(
@@ -69,44 +69,44 @@ async fn an_issue_closed_by_another_actor_cancels_its_waiting_run_and_frees_its_
     w.tracker.close_as(&first, "human");
     w.changed().await;
     let cancelled = w.until(Some(&held), "run.cancelled", 0).await;
-    assert_eq!(cancelled["reason"], "issue_closed", "{cancelled:?}");
+    assert_eq!(cancelled["reason"], "bead_closed", "{cancelled:?}");
     w.until(Some(&queued), "run.awaiting", 0).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     w.changed().await;
-    let issue = w.tracker.issue(&first).unwrap();
-    assert_eq!((issue.status.as_str(), issue.assignee), ("closed", None));
+    let bead = w.tracker.bead(&first).unwrap();
+    assert_eq!((bead.status.as_str(), bead.assignee), ("closed", None));
     let fired: Vec<Value> = (w.journal_of("trigger.fired").into_iter())
-        .filter(|e| e["data"]["inputs"]["issue"] == json!(first))
+        .filter(|e| e["data"]["inputs"]["bead"] == json!(first))
         .collect();
-    assert_eq!(fired.len(), 1, "no trigger takes the closed issue again: {fired:?}");
+    assert_eq!(fired.len(), 1, "no trigger takes the closed bead again: {fired:?}");
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_issue_whose_status_another_actor_sets_to_closed_cancels_its_waiting_run() {
+async fn a_bead_whose_status_another_actor_sets_to_closed_cancels_its_waiting_run() {
     let w = world(FILES);
-    let issue = w.tracker.add(&["auto"], None);
+    let bead = w.tracker.add(&["auto"], None);
     w.changed().await;
-    let held = w.run_of(&issue);
+    let held = w.run_of(&bead);
     w.until(Some(&held), "run.awaiting", 0).await;
 
     // `br update -s closed`: an update of the status, not a close.
-    w.tracker.set_status(&issue, "closed");
+    w.tracker.set_status(&bead, "closed");
     w.changed().await;
     let cancelled = w.until(Some(&held), "run.cancelled", 0).await;
-    assert_eq!(cancelled["reason"], "issue_closed", "{cancelled:?}");
+    assert_eq!(cancelled["reason"], "bead_closed", "{cancelled:?}");
 }
 
 #[tokio::test(start_paused = true)]
 async fn the_runs_own_close_read_after_a_status_write_of_another_actor_leaves_it_running() {
     let w = world(FILES);
-    let issue = w.tracker.add(&["auto"], None);
+    let bead = w.tracker.add(&["auto"], None);
     w.changed().await;
-    let held = w.run_of(&issue);
+    let held = w.run_of(&bead);
     w.until(Some(&held), "run.awaiting", 0).await;
 
-    // One read takes both writes, each with the issue as read: closed.
-    w.tracker.set_status(&issue, "in_progress");
-    w.tracker.close_as(&issue, &format!("loop-manager:{held}:1"));
+    // One read takes both writes, each with the bead as read: closed.
+    w.tracker.set_status(&bead, "in_progress");
+    w.tracker.close_as(&bead, &format!("loop-manager:{held}:1"));
     w.changed().await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(
@@ -119,14 +119,14 @@ async fn the_runs_own_close_read_after_a_status_write_of_another_actor_leaves_it
 #[tokio::test(start_paused = true)]
 async fn a_write_of_another_actor_without_status_read_after_the_runs_own_close_leaves_it_running() {
     let w = world(FILES);
-    let issue = w.tracker.add(&["auto"], None);
+    let bead = w.tracker.add(&["auto"], None);
     w.changed().await;
-    let held = w.run_of(&issue);
+    let held = w.run_of(&bead);
     w.until(Some(&held), "run.awaiting", 0).await;
 
-    // One read takes both writes, each with the issue as read: closed. The label does not tell who closed it.
-    w.tracker.close_as(&issue, &format!("loop-manager:{held}:1"));
-    w.tracker.label(&issue, "x");
+    // One read takes both writes, each with the bead as read: closed. The label does not tell who closed it.
+    w.tracker.close_as(&bead, &format!("loop-manager:{held}:1"));
+    w.tracker.label(&bead, "x");
     w.changed().await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(

@@ -95,13 +95,13 @@ pub(crate) fn skills(config: &EffectiveConfig) -> BTreeMap<String, PathBuf> {
 /// The `thread/start` (and `thread/resume`) parameters of a session, with its role files under `state` as `roles`:
 /// no parameter of the app-server, [`crate::roles::write`] takes it off.
 pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan, state: &Path) -> Result<Value, Failure> {
-    let (workdir, run, token, actor, issue) = match plan {
+    let (workdir, run, token, actor, bead) = match plan {
         SessionPlan::New {
             workdir,
             run,
             token,
             actor,
-            issue,
+            bead,
             ..
         }
         | SessionPlan::Resume {
@@ -109,9 +109,9 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
             run,
             token,
             actor,
-            issue,
+            bead,
             ..
-        } => (workdir, run, token, actor, issue),
+        } => (workdir, run, token, actor, bead),
     };
     let value = |s: &Option<loop_manager_contract::config::Sourced<String>>| s.as_ref().map(|s| s.value.clone());
     // The attempt environment and the tracker variables of the attempt, as the core planned it (contracts 5.1); the
@@ -122,11 +122,7 @@ pub(crate) fn session(config: &EffectiveConfig, plan: &SessionPlan, state: &Path
     ]);
     let tracker = actor.iter().flat_map(|a| a.env("codex", config));
     attempt.extend(tracker.map(|(name, value)| (name, json!(value))));
-    attempt.extend(
-        issue
-            .iter()
-            .map(|issue| ("LOOP_MANAGER_ISSUE".to_owned(), json!(issue))),
-    );
+    attempt.extend(bead.iter().map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), json!(bead))));
     let mut thread_config = json!({ "shell_environment_policy": { "set": attempt } });
     if let Some(effort) = value(&config.effort) {
         thread_config["model_reasoning_effort"] = json!(effort);

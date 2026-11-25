@@ -3,6 +3,8 @@
 
 mod await_step;
 mod bases;
+mod bead_events;
+mod beads;
 mod decide;
 mod drain;
 mod events;
@@ -12,8 +14,6 @@ mod finish;
 mod formula_step;
 mod gates;
 mod hooks;
-mod issue_events;
-mod issues;
 mod lineage;
 mod machine;
 mod msg;
@@ -127,7 +127,7 @@ struct RunHandler {
     /// The `seq` and reason of `daemon.stopping` once the daemon stops: queued and parked runs wait from then on.
     stopping: Option<(i64, String)>,
     drivers: Drivers,
-    trackers: issues::Trackers,
+    trackers: beads::Trackers,
 }
 
 impl Handler for RunHandler {
@@ -184,12 +184,12 @@ impl Handler for RunHandler {
             Msg::Lineage { payload, result } => self.lineage(tx, &payload, result),
             Msg::Ready {
                 project,
-                issues,
+                beads,
                 changes,
                 under,
                 waits,
             } => self
-                .ready(tx, &project, &issues, &changes)
+                .ready(tx, &project, &beads, &changes)
                 .and_then(|()| self.drained(tx, &project, &under, &waits)),
             Msg::TrackerChanged(project) => self.sync_trackers(tx, Some(&project), "changed"),
             Msg::Reload(config) => return self.reload(tx, config),

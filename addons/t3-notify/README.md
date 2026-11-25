@@ -25,7 +25,7 @@ array.
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/t3-notify/0.3.0"
+rev = "addons/t3-notify/0.4.0"
 dir = "addons/t3-notify"
 
 [settings]
@@ -51,7 +51,7 @@ table and then its hook fails: `addon.hook_failed` in the journal names the valu
 ## How it works
 
 A tool call of the thread's agent starts a run: `loop-manager run start`, the MCP tool `start_run`, or a change a
-trigger fires on, such as an issue filed with a label. The hook of the plugin finds the run and writes the thread's ID
+trigger fires on, such as a bead filed with a label. The hook of the plugin finds the run and writes the thread's ID
 to `t3-threads/<run>` beside the daemon's socket. It asks the agent for the card at once, as before.
 
 The hook `hooks/notify` runs on five events of the run. For a run with such a file it sends one message to the thread
@@ -65,7 +65,7 @@ with `t3 thread send`; a busy thread gets it as its next turn.
 | `run.failed` | The failure class and reason, the summary the agent declared, if any, and the spend table. |
 | `run.cancelled` | The reason and the spend table. |
 
-Every message names the run, its formula and issue, and the arguments of `show_run_card` for the daemon's socket.
+Every message names the run, its formula and bead, and the arguments of `show_run_card` for the daemon's socket.
 
 Each message goes out once: the hook keeps a marker per message in the same directory, and removes the files of a run
 with its last message. A message `t3` did not take fails the hook (`addon.hook_failed` in the journal) and is not

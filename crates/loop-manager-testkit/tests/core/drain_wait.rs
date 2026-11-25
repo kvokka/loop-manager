@@ -1,10 +1,10 @@
 //! What a `drain` step gives and what it waits for (docs/design/config.md "Formula", decision 159): a run of a rig
-//! gives only the issues of its rig under its root, a run of the root those of every rig; the step does not end while
-//! an issue of its own waits on a foreign blocker or a `blocked` status set by hand, up to the step's `timeout`.
+//! gives only the beads of its rig under its root, a run of the root those of every rig; the step does not end while
+//! a bead of its own waits on a foreign blocker or a `blocked` status set by hand, up to the step's `timeout`.
 
 use crate::common;
 
-use common::{World, drain::SWEEP, issues::slow_turn, world};
+use common::{World, beads::slow_turn, drain::SWEEP, world};
 use loop_manager_core::run::Verdict;
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, time::Duration};
@@ -15,7 +15,7 @@ impl World {
         for _ in 0..8 {
             self.driver.script(slow_turn());
         }
-        let reply = self.start_issue("sweep", Some(rig), json!(root)).await.unwrap();
+        let reply = self.start_bead("sweep", Some(rig), json!(root)).await.unwrap();
         reply["run"].as_str().unwrap().to_owned()
     }
 
@@ -28,9 +28,9 @@ impl World {
     }
 }
 
-/// An issue of another rig under the root is foreign to a run of a rig: not given, and not refused either.
+/// A bead of another rig under the root is foreign to a run of a rig: not given, and not refused either.
 #[tokio::test(start_paused = true)]
-async fn a_rig_run_gives_only_the_issues_of_its_rig() {
+async fn a_rig_run_gives_only_the_beads_of_its_rig() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let mine = w.tracker.add_in("w", &[], Some(&root));
@@ -41,13 +41,13 @@ async fn a_rig_run_gives_only_the_issues_of_its_rig() {
     assert_eq!(outcome["data"]["closed"], json!([mine]));
     assert_eq!(outcome["data"]["refused"], json!({}));
     assert!(w.kids(&run).iter().all(|k| k.1 != other));
-    assert_eq!(w.tracker.issue(&other).unwrap().status, "open");
+    assert_eq!(w.tracker.bead(&other).unwrap().status, "open");
 }
 
-/// An issue of its own blocked by a foreign issue holds the step; the foreign issue closed by someone else wakes it, and
-/// the issue is given.
+/// A bead of its own blocked by a foreign bead holds the step; the foreign bead closed by someone else wakes it, and
+/// the bead is given.
 #[tokio::test(start_paused = true)]
-async fn an_issue_blocked_by_a_foreign_issue_holds_the_step_until_it_closes() {
+async fn a_bead_blocked_by_a_foreign_bead_holds_the_step_until_it_closes() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let mine = w.tracker.add_in("w", &[], Some(&root));
@@ -63,9 +63,9 @@ async fn an_issue_blocked_by_a_foreign_issue_holds_the_step_until_it_closes() {
     assert_eq!(outcome["data"]["closed"], json!([mine]), "{outcome}");
 }
 
-/// A blocker of its own that failed does not hold the step: the issue behind it is left as before.
+/// A blocker of its own that failed does not hold the step: the bead behind it is left as before.
 #[tokio::test(start_paused = true)]
-async fn a_failed_issue_of_its_own_does_not_hold_the_step() {
+async fn a_failed_bead_of_its_own_does_not_hold_the_step() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let first = w.tracker.add_in("w", &[], Some(&root));
@@ -77,9 +77,9 @@ async fn a_failed_issue_of_its_own_does_not_hold_the_step() {
     assert_eq!(outcome["data"]["closed"], json!([]));
 }
 
-/// A `blocked` status set by hand on an issue of its own is a lock: the step waits until it is lifted.
+/// A `blocked` status set by hand on a bead of its own is a lock: the step waits until it is lifted.
 #[tokio::test(start_paused = true)]
-async fn an_issue_blocked_by_hand_holds_the_step() {
+async fn a_bead_blocked_by_hand_holds_the_step() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let locked = w.tracker.add_in("w", &[], Some(&root));
@@ -93,10 +93,10 @@ async fn an_issue_blocked_by_hand_holds_the_step() {
     assert_eq!(outcome["data"]["closed"], json!([locked]), "{outcome}");
 }
 
-/// A run of the root gives the issues of every rig under it, a blocker under the root among them, and waits only for
+/// A run of the root gives the beads of every rig under it, a blocker under the root among them, and waits only for
 /// a blocker outside its root.
 #[tokio::test(start_paused = true)]
-async fn a_root_run_gives_every_rig_and_waits_only_for_issues_outside_its_root() {
+async fn a_root_run_gives_every_rig_and_waits_only_for_beads_outside_its_root() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let api = w.tracker.add_in("a", &[], Some(&root));
@@ -117,7 +117,7 @@ async fn a_root_run_gives_every_rig_and_waits_only_for_issues_outside_its_root()
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     tokio::time::sleep(Duration::from_secs(120)).await;
-    assert_eq!(w.step_end(&run), None, "the step waits for the issue outside the root");
+    assert_eq!(w.step_end(&run), None, "the step waits for the bead outside the root");
     let kids: Vec<String> = w.kids(&run).into_iter().map(|k| k.1).collect();
     assert_eq!(kids, [api.clone(), web.clone()]);
     w.tracker.set_status(&outside, "closed");
@@ -131,7 +131,7 @@ async fn a_root_run_gives_every_rig_and_waits_only_for_issues_outside_its_root()
 async fn the_step_timeout_ends_the_wait() {
     let mut files = SWEEP.to_vec();
     let sweep = files.iter_mut().find(|f| f.0 == "shop/formulas/sweep.toml").unwrap();
-    sweep.1 = "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+    sweep.1 = "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
         [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"work\"\ntimeout = \"10m\"\n";
     let w = world(&files);
     let root = w.tracker.add(&[], None);
@@ -146,13 +146,13 @@ async fn the_step_timeout_ends_the_wait() {
     assert_eq!(failed["failure"]["kind"], "runaway_turn", "{failed}");
 }
 
-/// An issue of its own this entry already gave, which failed and now waits on a foreign blocker, does not hold the
-/// step: it ends with the issue in `failed`, not at the step's `timeout`.
+/// A bead of its own this entry already gave, which failed and now waits on a foreign blocker, does not hold the
+/// step: it ends with the bead in `failed`, not at the step's `timeout`.
 #[tokio::test(start_paused = true)]
-async fn a_given_issue_that_failed_and_waits_on_a_foreign_blocker_does_not_hold_the_step() {
+async fn a_given_bead_that_failed_and_waits_on_a_foreign_blocker_does_not_hold_the_step() {
     let mut files = SWEEP.to_vec();
     let sweep = files.iter_mut().find(|f| f.0 == "shop/formulas/sweep.toml").unwrap();
-    sweep.1 = "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+    sweep.1 = "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
         [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"work\"\ntimeout = \"10m\"\n\
         [[step]]\nname = \"wrap\"\nkind = \"ai\"\nagent = \"scribe\"\n";
     let w = world(&files);
@@ -160,7 +160,7 @@ async fn a_given_issue_that_failed_and_waits_on_a_foreign_blocker_does_not_hold_
     let mine = w.tracker.add_in("w", &[], Some(&root));
     let foreign = w.tracker.add_in("a", &[], Some(&root));
     let run = w.sweep_on(&root, "web").await;
-    // The child works on the issue when the foreign blocker comes.
+    // The child works on the bead when the foreign blocker comes.
     let stop = [mine.as_str()];
     assert_eq!(w.settle(&run, &[], &stop, &mut BTreeSet::new()).await, Value::Null);
     w.tracker.depend(&mine, &foreign, "blocks");

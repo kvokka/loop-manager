@@ -5,7 +5,7 @@ use std::fs;
 fn places(root: &str, rig: &str) -> Vec<String> {
     let project = format!(
         "packs = [\"../kit\"]\n{root}[rigs.backend]\npath = \"backend\"\ntriggers = [\"nightly\"]\n\
-         [[trigger]]\nname = \"implement-next\"\non = \"issue.ready\"\nrun = \"audit\"\n{rig}"
+         [[trigger]]\nname = \"implement-next\"\non = \"bead.ready\"\nrun = \"audit\"\n{rig}"
     );
     let dir = tempfile::tempdir().unwrap();
     for (path, text) in [

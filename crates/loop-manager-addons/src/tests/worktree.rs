@@ -265,10 +265,10 @@ fn runs_of_one_repository_prepared_at_once_each_get_a_worktree() {
     }
 }
 
-/// `run.finishing` of child `id` of a `drain` step with the key, on issue `w-1`, in `tree`; `last`: its `final`.
+/// `run.finishing` of child `id` of a `drain` step with the key, on bead `w-1`, in `tree`; `last`: its `final`.
 fn finishing(id: &str, tree: &Path, place: &Place, last: bool) -> Result<Option<Value>, String> {
     let mut event = event("run.finishing", id, tree);
-    event["data"]["run"]["issue"] = json!("w-1");
+    event["data"]["run"]["bead"] = json!("w-1");
     event["data"]["final"] = json!(last);
     run("worktree", &event, &json!({ "run": place }))
 }

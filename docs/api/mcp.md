@@ -15,7 +15,7 @@ token.
 | Tool | Arguments | Same as |
 |---|---|---|
 | `list_formulas` | `project`? | the formulas of the config a user can start, named as `start_run` takes them, with their inputs; internal ones are left out |
-| `start_run` | `project`, `rig`? (when absent: the prefix of the issue's id, else the project root), `formula`, `inputs`?, `continue_from`?, `budget_usd`? (the spend limit in USD, a decimal string, in place of the formula's `budget`), `idempotency_key`? | `POST /v1/runs` |
+| `start_run` | `project`, `rig`? (when absent: the prefix of the bead's id, else the project root), `formula`, `inputs`?, `continue_from`?, `budget_usd`? (the spend limit in USD, a decimal string, in place of the formula's `budget`), `idempotency_key`? | `POST /v1/runs` |
 | `run_state` | `id`, `spend`? (`total`, `agent` or `model`: adds the run's spend report at that detail under `spend`) | `GET /v1/runs/{id}`, with `spend` also `GET /v1/runs/{id}/spend` |
 | `list_runs` | `project`?, `state`?, `limit`? | `GET /v1/runs` |
 | `cancel_run` | `id`, `reason`?, `idempotency_key`? | `POST /v1/runs/{id}/cancel` |

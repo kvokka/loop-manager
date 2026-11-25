@@ -22,13 +22,13 @@ fn a_project_template_replaces_the_packs_and_a_file_of_the_project_fills_it() {
     let pack = prompt(&[]);
     assert!(pack.from.ends_with(TEMPLATE), "{}", pack.from.display());
     let own = prompt(&[
-        (OWN, "Check {{ issue.title }}:\n{{ agent.checks }}"),
+        (OWN, "Check {{ bead.title }}:\n{{ agent.checks }}"),
         (CHECKS, "- tests pass\n"),
     ]);
     assert!(own.from.ends_with(OWN), "{}", own.from.display());
     let text = own
         .template
-        .render(&json!({ "issue": { "title": "T" }, "agent": own.files }))
+        .render(&json!({ "bead": { "title": "T" }, "agent": own.files }))
         .unwrap();
     assert_eq!(text, "Check T:\n- tests pass\n");
     // The pack's file fills the template when the project has none; the project's is stronger.
@@ -94,12 +94,12 @@ fn a_template_fits_every_formula_whose_steps_name_its_agent() {
     );
     fails(
         &[review],
-        "`{{ issue.title }}` is not a value of the runs of `kit.review`",
+        "`{{ bead.title }}` is not a value of the runs of `kit.review`",
     );
-    let plain = (TEMPLATE, "Implement {{ inputs.issue }} in {{ rig.path }}.");
+    let plain = (TEMPLATE, "Implement {{ inputs.bead }} in {{ rig.path }}.");
     fails(
         &[review, plain],
-        "`{{ inputs.issue }}` is not a value of the runs of `kit.review`",
+        "`{{ inputs.bead }}` is not a value of the runs of `kit.review`",
     );
     assert!(load_with(&[review, (TEMPLATE, "Work in {{ rig.path }}.")]).is_ok());
 }
@@ -120,35 +120,35 @@ fn a_variant_runs_on_the_template_of_its_base_agent() {
 fn a_prompt_template_may_use_only_values_its_runs_have() {
     let template = TEMPLATE;
     fails(&[(template, "{{ inputs.nope }}")], "`{{ inputs.nope }}`");
-    fails(&[(template, "{{ issue.nope }}")], "`{{ issue.nope }}`");
+    fails(&[(template, "{{ bead.nope }}")], "`{{ bead.nope }}`");
     fails(&[(template, "{{ run.nope }}")], "`{{ run.nope }}`");
     fails(&[(template, "{{ project.nope }}")], "`{{ project.nope }}`");
     fails(&[(template, "{{ secrets.token }}")], "starts with none of");
-    fails(&[(template, "{{ inputs.issue")], "unclosed");
-    let no_issue = BASE[8].1.replace(r#"type = "task""#, r#"type = "string""#);
+    fails(&[(template, "{{ inputs.bead")], "unclosed");
+    let no_bead = BASE[8].1.replace(r#"type = "task""#, r#"type = "string""#);
     fails(
-        &[("kit/formulas/implement.toml", no_issue.as_str())],
-        "`{{ issue.title }}`",
+        &[("kit/formulas/implement.toml", no_bead.as_str())],
+        "`{{ bead.title }}`",
     );
 }
 
 #[test]
-fn a_prompt_shows_the_comments_and_the_parents_of_its_issue_and_no_field_below_them() {
-    assert!(prompt(&[(OWN, "{{ issue.comments }}\n{{ issue.parents }}")]).shows_lineage());
+fn a_prompt_shows_the_comments_and_the_parents_of_its_bead_and_no_field_below_them() {
+    assert!(prompt(&[(OWN, "{{ bead.comments }}\n{{ bead.parents }}")]).shows_lineage());
     assert!(!prompt(&[]).shows_lineage());
-    for path in ["issue.comment", "issue.comments.text", "issue.parents.title"] {
+    for path in ["bead.comment", "bead.comments.text", "bead.parents.title"] {
         let template = format!("{{{{ {path} }}}}");
         let error = format!("`{{{{ {path} }}}}` is not a value of the runs of `kit.implement`");
         fails(&[(OWN, template.as_str())], &error);
     }
-    // A formula without a task input has no issue.
+    // A formula without a task input has no bead.
     let review = (
         "kit/formulas/review.toml",
         "name = \"review\"\n[[step]]\nkind = \"ai\"\nagent = \"implementer\"\n",
     );
     fails(
-        &[review, (TEMPLATE, "{{ issue.comments }}")],
-        "`{{ issue.comments }}` is not a value of the runs of `kit.review`",
+        &[review, (TEMPLATE, "{{ bead.comments }}")],
+        "`{{ bead.comments }}` is not a value of the runs of `kit.review`",
     );
 }
 
@@ -157,7 +157,7 @@ fn last_comments_is_a_positive_count_on_an_ai_step() {
     use crate::config::StepKind;
     let implement = |keys: &str| {
         let text = format!(
-            "name = \"implement\"\n[inputs]\nissue = {{ type = \"task\", required = true }}\n[[step]]\n{keys}\n"
+            "name = \"implement\"\n[inputs]\nbead = {{ type = \"task\", required = true }}\n[[step]]\n{keys}\n"
         );
         ("kit/formulas/implement.toml", text)
     };

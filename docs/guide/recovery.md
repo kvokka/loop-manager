@@ -4,7 +4,7 @@ Inside a live run the policy recovers by itself: a failed attempt is resumed or 
 ([default policy](../design/contracts.md#10-default-policy-as-decisions)). A run that has failed for good is yours
 to sort out. No recovery fits every failure, so loop-manager gives you the tools and leaves the choice to you: look at
 what failed, then continue the session, start a new session on the same task with or without a note, or abandon the
-task. The examples use a project `shop` with a formula `fix` whose `task` input takes an issue
+task. The examples use a project `shop` with a formula `fix` whose `task` input takes a bead
 ([runs over a tracker](first-formula.md#runs-over-a-tracker)).
 
 The skill `recover` of the loop-manager plugin for Claude Code and Codex walks your agent through the same steps: it
@@ -24,17 +24,17 @@ loop-manager run show <run>                        # TOON by default, --json for
 ```
 
 `loop-manager run show` gives the run's `class` (`agent`, `check`, `hollow_done`, `infrastructure`) and `reason`, the
-`issue` it worked on, its `workdir`, and its `attempts`: for each one the `kind` (`new_session` or `resume`), the
+`bead` it worked on, its `workdir`, and its `attempts`: for each one the `kind` (`new_session` or `resume`), the
 `failure_kind` ([failure kinds](../design/contracts.md#44-failure-kinds)) and the `session`, the harness's own
 reference (claude `{session_id, config_dir, workdir}`, codex `{thread_id, codex_home}`). With it you can read or open
 the conversation with the harness's own tools. `loop-manager run list --state failed` gives the same view for
 every run in the list. A run of a formula with children (a `drain` or `formula` step) lists them with
 `loop-manager run list --parent <run>`.
 
-A run that failed has already let go of its issue: the issue is open and unassigned again, and its count of failed runs
-went up by one (a passed run resets it). At `issue_failed_runs` failed runs (default 3) loop-manager closes the gate
-`issue:<project>/<id>`: no run takes the issue until you open it (`loop-manager gate list`,
-`loop-manager gate open issue:shop/<id>`); opening it resets the count.
+A run that failed has already let go of its bead: the bead is open and unassigned again, and its count of failed runs
+went up by one (a passed run resets it). At `bead_failed_runs` failed runs (default 3) loop-manager closes the gate
+`bead:<project>/<id>`: no run takes the bead until you open it (`loop-manager gate list`,
+`loop-manager gate open bead:shop/<id>`); opening it resets the count.
 
 ## Continue the session
 
@@ -42,7 +42,7 @@ A new run continues the last session of the failed one, in the same workdir (a r
 its branch):
 
 ```sh
-loop-manager run start shop web fix --continue-from <run> --input task=<issue>
+loop-manager run start shop web fix --continue-from <run> --input task=<bead>
 ```
 
 The formula's first step must be `ai`, on the harness of the session; its prompt goes into the resumed session.
@@ -50,10 +50,10 @@ Only the first step continues the session; later steps start their own.
 
 ## Start a new session on the same task
 
-A new run of the formula on the same issue takes it up again, in a new session:
+A new run of the formula on the same bead takes it up again, in a new session:
 
 ```sh
-loop-manager run start shop web fix --input task=<issue>
+loop-manager run start shop web fix --input task=<bead>
 ```
 
 With `worktree = true` the new run gets a new worktree; the work of the failed run stays on its branch
@@ -69,7 +69,7 @@ the agent of `fix`, and `agents/refixer/prompt.template.md`:
 ```markdown
 {{ inputs.note }}
 
-Fix {{ issue.title }}: {{ issue.description }}
+Fix {{ bead.title }}: {{ bead.description }}
 ```
 
 and `formulas/refix.toml`:
@@ -86,7 +86,7 @@ agent = "refixer"
 ```
 
 ```sh
-loop-manager run start shop web refix --input task=<issue> \
+loop-manager run start shop web refix --input task=<bead> \
   --input 'note=This task was started before by run <run>; its state is unknown. Find out what was done, then finish it.'
 ```
 
@@ -100,7 +100,7 @@ then remove the worktree with `git worktree remove <path>` and the branch once i
 `loop-manager run show <run>` gives the bases of a run under `bases`: the directories its children branched from and
 merged into.
 
-An issue whose child failed for good is taken up again by a later entry of its `drain` step, or by a run you start, on a
+A bead whose child failed for good is taken up again by a later entry of its `drain` step, or by a run you start, on a
 new branch from the current tip of the base; the old branch stays beside it for you to compare, merge or delete.
 
 A merge cut short by a crash of the daemon leaves `MERGE_HEAD` in the base. Once the daemon is back the hook runs
@@ -113,15 +113,15 @@ by hand.
 ## Abandon it
 
 A run that is not over yet (in `queued`, `parked` or `interrupted`, say) is stopped with `loop-manager run cancel <run>
---reason <text>`: its session stops, its issue is released without counting a failure, and the runs its sessions started
-are cancelled too. Closing the issue of a live run with `loop-manager issue close --project <project> --reason <text>
-<issue>` cancels the run as well, with reason `issue_closed`, and the issue stays closed. A run that already failed
-cannot be cancelled and needs nothing more; its issue is open again, so a trigger on `issue.ready` or a `next_ready`
+--reason <text>`: its session stops, its bead is released without counting a failure, and the runs its sessions started
+are cancelled too. Closing the bead of a live run with `loop-manager bead close --project <project> --reason <text>
+<bead>` cancels the run as well, with reason `bead_closed`, and the bead stays closed. A run that already failed
+cannot be cancelled and needs nothing more; its bead is open again, so a trigger on `bead.ready` or a `next_ready`
 task may take it. To keep every run off it, close its gate:
 
 ```sh
-loop-manager gate close issue:shop/<issue> --reason "abandoned"
+loop-manager gate close bead:shop/<bead> --reason "abandoned"
 ```
 
-A run that names the issue then waits `queued` and `next_ready` passes it over, until
-`loop-manager gate open issue:shop/<issue>`. To drop the task for good, close the issue in the tracker.
+A run that names the bead then waits `queued` and `next_ready` passes it over, until
+`loop-manager gate open bead:shop/<bead>`. To drop the task for good, close the bead in the tracker.

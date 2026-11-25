@@ -174,7 +174,7 @@ pub(super) struct OrchestratorFile {
     #[serde(default)]
     pub projects: Vec<PathBuf>,
     pub max_runs: Option<NonZeroU32>,
-    pub issue_failed_runs: Option<NonZeroU32>,
+    pub bead_failed_runs: Option<NonZeroU32>,
     pub api_tcp: Option<std::net::SocketAddr>,
     /// The IANA name of the zone `cron` is read in; the system zone when absent.
     pub timezone: Option<String>,
@@ -281,7 +281,7 @@ pub(super) struct RootFile {
 #[serde(deny_unknown_fields)]
 pub(super) struct RigFile {
     pub path: PathBuf,
-    /// The prefix of the ids of the rig's issues; the acronym of the rig's name without it.
+    /// The prefix of the ids of the rig's beads; the acronym of the rig's name without it.
     #[serde(default)]
     pub prefix: Option<String>,
     #[serde(default)]

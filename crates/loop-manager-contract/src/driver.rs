@@ -63,7 +63,7 @@ impl Split {
 
 /// What the session of an attempt is; `run` and `attempt` name files in the state directory. The attempt environment:
 /// `run`, `token` (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`, contracts 6.3), `actor` (the project's tracker
-/// variables, 5.1) and `issue` (`LOOP_MANAGER_ISSUE`, the run's issue when it has one).
+/// variables, 5.1) and `bead` (`LOOP_MANAGER_BEAD`, the run's bead when it has one).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionPlan {
     New {
@@ -72,7 +72,7 @@ pub enum SessionPlan {
         attempt: u32,
         token: String,
         actor: Option<Actor>,
-        issue: Option<String>,
+        bead: Option<String>,
     },
     Resume {
         session: SessionRef,
@@ -81,7 +81,7 @@ pub enum SessionPlan {
         attempt: u32,
         token: String,
         actor: Option<Actor>,
-        issue: Option<String>,
+        bead: Option<String>,
     },
 }
 

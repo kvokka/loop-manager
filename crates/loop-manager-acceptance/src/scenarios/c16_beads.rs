@@ -1,7 +1,7 @@
-//! Criterion 16 on the real br: the daemon claims a run's issue and holds the claim through the death of the step
-//! (a `kill -9` of the daemon mid-step) and its resumed attempt; `passed` closes the issue, `failed` returns it; five
-//! requests at once for the next ready issue of an epic of three give each issue to exactly one run; an issue whose runs
-//! ended `failed` `issue_failed_runs` times is no longer given out; every step gets the tracker's path in
+//! Criterion 16 on the real br: the daemon claims a run's bead and holds the claim through the death of the step
+//! (a `kill -9` of the daemon mid-step) and its resumed attempt; `passed` closes the bead, `failed` returns it; five
+//! requests at once for the next ready bead of an epic of three give each bead to exactly one run; a bead whose runs
+//! ended `failed` `bead_failed_runs` times is no longer given out; every step gets the tracker's path in
 //! `BEADS_DIR`; br holds no record of loop-manager's own beyond claims and closes.
 
 use super::{br, exec_formula, tracker};
@@ -14,13 +14,13 @@ use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
 
 const WITHIN: Duration = Duration::from_secs(60);
 
-/// The issue `id` as br shows it.
+/// The bead `id` as br shows it.
 fn show(root: &Path, id: &str) -> Value {
     let shown: Value = serde_json::from_str(&br(root, &["show", id, "--json"])).unwrap();
     shown[0].clone()
 }
 
-/// Waits until br shows the issue `id` with `status` and `assignee`: br is written after the run's transaction.
+/// Waits until br shows the bead `id` with `status` and `assignee`: br is written after the run's transaction.
 async fn until_shown(root: &Path, id: &str, status: &str, assignee: &Value) {
     let deadline = std::time::Instant::now() + WITHIN;
     loop {
@@ -36,20 +36,20 @@ async fn until_shown(root: &Path, id: &str, status: &str, assignee: &Value) {
     }
 }
 
-/// Starts `formula` on the task input `issue`; the reply.
-async fn start(d: &Daemon, formula: &str, issue: Value) -> Value {
-    let body = json!({ "project": "shop", "rig": "web", "formula": formula, "inputs": { "issue": issue } });
+/// Starts `formula` on the task input `bead`; the reply.
+async fn start(d: &Daemon, formula: &str, bead: Value) -> Value {
+    let body = json!({ "project": "shop", "rig": "web", "formula": formula, "inputs": { "bead": bead } });
     d.post("/v1/runs", body).await.unwrap()
 }
 
 pub(crate) async fn run(env: Arc<Env>) -> String {
-    let mut issues: Vec<String> = Vec::new();
+    let mut beads: Vec<String> = Vec::new();
     let mut d = Daemon::start(&env, |root| {
         write(
             root.join("config/loop-manager/config.toml"),
-            "projects = [\"shop\"]\nissue_failed_runs = 2\n",
+            "projects = [\"shop\"]\nbead_failed_runs = 2\n",
         );
-        let input = "issue = { type = \"task\", required = true }";
+        let input = "bead = { type = \"task\", required = true }";
         exec_formula(
             root,
             "hold",
@@ -58,27 +58,27 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
         );
         exec_formula(root, "break", input, "\"sh\", \"-c\", \"exit 3\"");
         tracker(root);
-        issues.push(br(root, &["create", "Alone", "--silent"]));
+        beads.push(br(root, &["create", "Alone", "--silent"]));
         let many = br(root, &["create", "Many", "-t", "epic", "--silent"]);
         for n in 1..=3 {
-            issues.push(br(
+            beads.push(br(
                 root,
                 &["create", &format!("Part {n}"), "--parent", &many, "--silent"],
             ));
         }
         let once = br(root, &["create", "Once", "-t", "epic", "--silent"]);
-        issues.push(br(root, &["create", "Flaky", "--parent", &once, "--silent"]));
-        issues.extend([many, once]);
+        beads.push(br(root, &["create", "Flaky", "--parent", &once, "--silent"]));
+        beads.extend([many, once]);
     })
     .await;
-    let (alone, parts, flaky, many, once) = (&issues[0], &issues[1..4], &issues[4], &issues[5], &issues[6]);
+    let (alone, parts, flaky, many, once) = (&beads[0], &beads[1..4], &beads[4], &beads[5], &beads[6]);
     let root = d.dir.path().to_owned();
     let tracker_dir = root.join("config/loop-manager/shop/.beads");
     // The first read of the tracker fills the ready set the daemon picks from.
-    let leaves: HashSet<&str> = issues[..5].iter().map(String::as_str).collect();
+    let leaves: HashSet<&str> = beads[..5].iter().map(String::as_str).collect();
     let ready = |seen: &[(String, Value)]| {
-        let ids = seen.iter().filter(|(k, _)| k == "issue.ready");
-        ids.filter_map(|(_, e)| e["data"]["issue"]["id"].as_str())
+        let ids = seen.iter().filter(|(k, _)| k == "bead.ready");
+        ids.filter_map(|(_, e)| e["data"]["bead"]["id"].as_str())
             .filter(|id| leaves.contains(id))
             .count()
     };
@@ -111,7 +111,7 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     until_shown(&root, alone, "closed", &json!(owner)).await;
 
     check_concurrent_claims(&d, many, parts).await;
-    check_failed_issue_limit(&d, once, flaky).await;
+    check_failed_bead_limit(&d, once, flaky).await;
 
     // Every step had the tracker's path; br holds nothing of loop-manager's but claims and closes.
     let journal = d
@@ -125,22 +125,22 @@ pub(crate) async fn run(env: Arc<Env>) -> String {
     }
     let listed: Value = serde_json::from_str(&br(&root, &["list", "--all", "--json"])).unwrap();
     let all = listed["issues"].as_array().expect("issues");
-    assert_eq!(all.len(), issues.len(), "no issue of loop-manager's own: {listed}");
-    for issue in all.iter().map(|b| show(&root, b["id"].as_str().unwrap())) {
-        assert_eq!(issue["created_by"], "alice", "{issue}");
-        let labels = issue["labels"].as_array().map_or(0, Vec::len);
-        let comments = issue["comments"].as_array().map_or(0, Vec::len);
+    assert_eq!(all.len(), beads.len(), "no bead of loop-manager's own: {listed}");
+    for bead in all.iter().map(|b| show(&root, b["id"].as_str().unwrap())) {
+        assert_eq!(bead["created_by"], "alice", "{bead}");
+        let labels = bead["labels"].as_array().map_or(0, Vec::len);
+        let comments = bead["comments"].as_array().map_or(0, Vec::len);
         assert_eq!(
             (labels, comments),
             (0, 0),
-            "no label or comment of loop-manager's: {issue}"
+            "no label or comment of loop-manager's: {bead}"
         );
     }
     "claim held through a crash; 5 requests for an epic of 3: 3 runs, 2 nothing_ready; out after 2 failed runs".into()
 }
 
 async fn check_concurrent_claims(d: &Daemon, many: &str, parts: &[String]) {
-    // Five requests at once for the next ready issue of an epic of three.
+    // Five requests at once for the next ready bead of an epic of three.
     let next = json!({ "next_ready": true, "epic": many });
     let replies = futures_join(d, &next).await;
     let runs: Vec<&str> = replies.iter().filter_map(|r| r["run"].as_str()).collect();
@@ -150,19 +150,19 @@ async fn check_concurrent_claims(d: &Daemon, many: &str, parts: &[String]) {
     for run in &runs {
         let view = d.until_state(run, "passed", WITHIN).await;
         assert!(
-            given.insert(view["issue"].as_str().unwrap().to_owned()),
-            "an issue given twice: {view}"
+            given.insert(view["bead"].as_str().unwrap().to_owned()),
+            "a bead given twice: {view}"
         );
     }
     assert_eq!(
         given,
         parts.iter().cloned().collect(),
-        "each issue of the epic to one run"
+        "each bead of the epic to one run"
     );
 }
 
-async fn check_failed_issue_limit(d: &Daemon, once: &str, flaky: &str) {
-    // `failed` returns the issue, and after `issue_failed_runs` failed runs it is no longer given out.
+async fn check_failed_bead_limit(d: &Daemon, once: &str, flaky: &str) {
+    // `failed` returns the bead, and after `bead_failed_runs` failed runs it is no longer given out.
     for n in 1..=2 {
         let run = start(d, "break", json!({ "next_ready": true, "epic": once })).await;
         let run = run["run"]
@@ -175,7 +175,7 @@ async fn check_failed_issue_limit(d: &Daemon, once: &str, flaky: &str) {
         let again = |seen: &[(String, Value)]| {
             let ready = seen
                 .iter()
-                .filter(|(k, e)| k == "issue.ready" && e["data"]["issue"]["id"] == flaky);
+                .filter(|(k, e)| k == "bead.ready" && e["data"]["bead"]["id"] == flaky);
             ready.count() > n
         };
         d.journal_until(WITHIN, again).await;

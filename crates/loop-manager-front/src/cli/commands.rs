@@ -15,12 +15,12 @@ pub enum RunCommand {
     #[command(allow_missing_positional = true)]
     Start {
         project: String,
-        /// Optional: without it the run works in the project root, or on the rig of the issue its task names (its
+        /// Optional: without it the run works in the project root, or on the rig of the bead its task names (its
         /// id prefix).
         rig: Option<String>,
         formula: String,
         /// An input as `name=value`: text, which an integer or a boolean input takes as its number or `true`/`false`
-        /// and a task input as the task or the id of the issue it takes up; a JSON object or array (a task input's
+        /// and a task input as the task or the id of the bead it takes up; a JSON object or array (a task input's
         /// `{"next_ready": true}`) is taken as JSON.
         #[arg(long = "input", value_name = "NAME=VALUE", value_parser = name_value)]
         inputs: Vec<String>,
@@ -177,7 +177,7 @@ pub(super) async fn run(client: &Client, json: bool, command: RunCommand) -> Res
             match reply["run"].as_str() {
                 _ if json => print(json, &reply),
                 Some(run) => println!("{run}"),
-                None => eprintln!("loop-manager: nothing ready: no ready issue to take, no run started"),
+                None => eprintln!("loop-manager: nothing ready: no ready bead to take, no run started"),
             }
             for (id, why) in reply["passed_over"].as_object().into_iter().flatten().filter(|_| !json) {
                 eprintln!("loop-manager: passed over {id}: {}", why.as_str().unwrap_or_default());
@@ -457,20 +457,20 @@ pub(super) async fn instance(client: &Client, json: bool, command: InstanceComma
 }
 
 #[derive(Subcommand)]
-pub enum IssueCommand {
-    /// Show an issue of a project from its tracker: description, status, labels and comments.
+pub enum BeadCommand {
+    /// Show a bead of a project from its tracker: description, status, labels and comments.
     Show {
-        issue: String,
+        bead: String,
         #[arg(long)]
         project: String,
     },
-    /// List the issues under a root issue at any depth, closed ones too, with their status.
+    /// List the beads under a root bead at any depth, closed ones too, with their status.
     List {
         root: String,
         #[arg(long)]
         project: String,
     },
-    /// File an issue in the project's tracker; prints its id. Inside an agent session (`LOOP_MANAGER_RUN`,
+    /// File a bead in the project's tracker; prints its id. Inside an agent session (`LOOP_MANAGER_RUN`,
     /// `LOOP_MANAGER_ATTEMPT_TOKEN`) the session's attempt files it.
     Create {
         #[arg(long)]
@@ -479,23 +479,23 @@ pub enum IssueCommand {
         title: String,
         #[arg(long, default_value = "")]
         description: String,
-        /// A label of the issue; repeat it for more.
+        /// A label of the bead; repeat it for more.
         #[arg(long = "label")]
         labels: Vec<String>,
-        /// The issue it lies under.
+        /// The bead it lies under.
         #[arg(long)]
         parent: Option<String>,
-        /// The rig it is filed for: its id takes the rig's prefix. Without it, an issue of the project root.
+        /// The rig it is filed for: its id takes the rig's prefix. Without it, a bead of the project root.
         #[arg(long)]
         rig: Option<String>,
         /// The idempotency key: a repeat with the same key files nothing more.
         #[arg(long = "key")]
         idempotency: Option<String>,
     },
-    /// Close an issue of a project, whoever holds it; a live run that holds it is cancelled, unless this session is
+    /// Close a bead of a project, whoever holds it; a live run that holds it is cancelled, unless this session is
     /// that run's.
     Close {
-        issue: String,
+        bead: String,
         #[arg(long)]
         project: String,
         #[arg(long)]
@@ -506,18 +506,18 @@ pub enum IssueCommand {
     },
 }
 
-pub(super) async fn issue(client: &Client, json: bool, command: IssueCommand) -> Result<(), ClientError> {
-    let issues = |project: &str| format!("/v1/projects/{}/issues", encode(project));
+pub(super) async fn bead(client: &Client, json: bool, command: BeadCommand) -> Result<(), ClientError> {
+    let beads = |project: &str| format!("/v1/projects/{}/beads", encode(project));
     match command {
-        IssueCommand::Show { issue, project } => {
-            let path = format!("{}/{}", issues(&project), encode(&issue));
+        BeadCommand::Show { bead, project } => {
+            let path = format!("{}/{}", beads(&project), encode(&bead));
             print(json, &client.request("GET", &path, None, None).await?);
         }
-        IssueCommand::List { root, project } => {
-            let path = format!("{}?under={}", issues(&project), encode(&root));
+        BeadCommand::List { root, project } => {
+            let path = format!("{}?under={}", beads(&project), encode(&root));
             print(json, &client.request("GET", &path, None, None).await?);
         }
-        IssueCommand::Create {
+        BeadCommand::Create {
             project,
             title,
             description,
@@ -528,19 +528,19 @@ pub(super) async fn issue(client: &Client, json: bool, command: IssueCommand) ->
         } => {
             let body = json!({ "title": title, "description": description, "labels": labels, "parent": parent,
                 "rig": rig, "session": session() });
-            let reply = (client.request("POST", &issues(&project), Some(&body), idempotency.as_deref())).await?;
+            let reply = (client.request("POST", &beads(&project), Some(&body), idempotency.as_deref())).await?;
             match reply["id"].as_str() {
                 Some(id) if !json => println!("{id}"),
                 _ => print(json, &reply),
             }
         }
-        IssueCommand::Close {
-            issue,
+        BeadCommand::Close {
+            bead,
             project,
             reason,
             idempotency,
         } => {
-            let path = format!("{}/{}/close", issues(&project), encode(&issue));
+            let path = format!("{}/{}/close", beads(&project), encode(&bead));
             let body = json!({ "reason": reason, "session": session() });
             print(
                 json,

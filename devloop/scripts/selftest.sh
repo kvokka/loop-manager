@@ -9,7 +9,7 @@ sh "$here/close-selftest.sh"
 tmp=$(mktemp -d)
 trap 'find "$tmp" -delete' EXIT
 unset BEADS_DIR BD_ACTOR LOOP_MANAGER_STEP_REVIEW_DATA LOOP_MANAGER_STEP_CI_REPORT_DATA
-export LOOP_MANAGER_RUN=run_1 LOOP_MANAGER_ISSUE=dev-1
+export LOOP_MANAGER_RUN=run_1 LOOP_MANAGER_BEAD=dev-1
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # no hooks, signing or identity of the host
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.org GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.org
 

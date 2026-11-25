@@ -4,7 +4,7 @@ use crate::toon::encode;
 use serde_json::json;
 
 #[test]
-fn comments_are_a_table_and_an_issue_with_parents_a_list() {
+fn comments_are_a_table_and_a_bead_with_parents_a_list() {
     let comments = json!([
         { "author": "alice", "created_at": "2026-11-19T03:59:18Z", "text": "go left" },
         { "author": "loop-manager:run_1:2", "created_at": "2026-11-19T04:10:00Z", "text": "Tests: 2 red, see below\n- a::b" }
@@ -14,7 +14,7 @@ fn comments_are_a_table_and_an_issue_with_parents_a_list() {
         "[2]{author,created_at,text}:\n  alice,\"2026-11-19T03:59:18Z\",go left\n  \
          \"loop-manager:run_1:2\",\"2026-11-19T04:10:00Z\",\"Tests: 2 red, see below\\n- a::b\""
     );
-    let issue = json!({
+    let bead = json!({
         "comments": [],
         "id": "t-1",
         "labels": ["auto", "ui"],
@@ -22,7 +22,7 @@ fn comments_are_a_table_and_an_issue_with_parents_a_list() {
         "priority": 2
     });
     assert_eq!(
-        encode(&issue),
+        encode(&bead),
         "comments: []\nid: t-1\nlabels[2]: auto,ui\nparents[1]:\n  - comments[1]{author,text}:\n      bob,why\n    \
          id: t-0\n    labels: []\n    title: \"Epic: all of it\"\npriority: 2"
     );

@@ -67,7 +67,7 @@ fn the_paths_of_an_if_are_checked_at_load() {
         ("\"steps.pre.nope\" = 1", no("steps.pre.nope")),
         ("remarks = \"x\"", no("remarks")),
         ("\"agent.x\" = \"y\"", no("agent.x")),
-        ("\"issue.title\" = \"x\"", no("issue.title")),
+        ("\"bead.title\" = \"x\"", no("bead.title")),
         ("run = \"x\"", no("run")),
         ("\"nowhere.x\" = 1", no("nowhere.x")),
         ("\"back_from.x\" = \"t\"", no("back_from.x")),
@@ -95,15 +95,15 @@ fn the_paths_of_an_if_are_checked_at_load() {
         let loaded = load_with(&[(FLOW, &flow(when))]);
         assert!(loaded.is_ok(), "{when}: {loaded:?}");
     }
-    // The comments and the parents of the issue are for a prompt only.
+    // The comments and the parents of the bead are for a prompt only.
     let tasked = |when: &str| {
-        let head = "name = \"flow\"\n[inputs]\nissue = { type = \"task\" }\n".to_string();
+        let head = "name = \"flow\"\n[inputs]\nbead = { type = \"task\" }\n".to_string();
         head + &step("s", "exec", &format!("command = [\"true\"]\nif = {{ {when} }}"))
     };
-    assert!(load_with(&[(FLOW, &tasked("\"issue.title\" = \"x\""))]).is_ok());
+    assert!(load_with(&[(FLOW, &tasked("\"bead.title\" = \"x\""))]).is_ok());
     fails(
-        &[(FLOW, &tasked("\"issue.comments\" = \"x\""))],
-        "`if`: a run has no `issue.comments`",
+        &[(FLOW, &tasked("\"bead.comments\" = \"x\""))],
+        "`if`: a run has no `bead.comments`",
     );
 }
 

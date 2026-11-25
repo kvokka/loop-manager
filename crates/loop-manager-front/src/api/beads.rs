@@ -1,9 +1,9 @@
-//! The issues of a project, through its tracker (docs/api/frontends.md): read, listed under a root, filed and closed
+//! The beads of a project, through its tracker (docs/api/frontends.md): read, listed under a root, filed and closed
 //! by the daemon, as the attempt of a session that asks or as `loop-manager`.
 
 use super::{
     Api, ApiError, Body, ErrorReply, Param, Reply, State, key,
-    replies::{Issue, IssueReply},
+    replies::{Bead, BeadReply},
     runs::ParentAttempt,
 };
 use axum::{
@@ -13,7 +13,7 @@ use axum::{
 };
 use loop_manager_core::{
     run::Msg,
-    tracker::{NewIssue, Tracker, TrackerError},
+    tracker::{NewBead, Tracker, TrackerError},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -22,44 +22,44 @@ use utoipa::{IntoParams, ToSchema};
 
 type Trackers = BTreeMap<String, Arc<dyn Tracker>>;
 
-const NOT_FOUND: &str = "`not_found`: no such project, or no such issue in its tracker";
+const NOT_FOUND: &str = "`not_found`: no such project, or no such bead in its tracker";
 const REJECTED: &str = "`rejected`: the project has no tracker";
 const REFUSED: &str = "`tracker`: the tracker refused the call";
 const UNAVAILABLE: &str = "`tracker_unavailable`: the tracker cannot be reached now";
 
-/// An issue of a project with its comments, oldest first, read from the project's tracker as the daemon.
-#[utoipa::path(get, path = "/v1/projects/{project}/issues/{issue}",
-    params(("project" = String, Path), ("issue" = String, Path)),
-    responses((status = OK, body = IssueReply),
+/// A bead of a project with its comments, oldest first, read from the project's tracker as the daemon.
+#[utoipa::path(get, path = "/v1/projects/{project}/beads/{bead}",
+    params(("project" = String, Path), ("bead" = String, Path)),
+    responses((status = OK, body = BeadReply),
         (status = BAD_REQUEST, description = "`bad_request`: the path is malformed", body = ErrorReply),
         (status = NOT_FOUND, description = NOT_FOUND, body = ErrorReply),
         (status = CONFLICT, description = REJECTED, body = ErrorReply),
         (status = BAD_GATEWAY, description = REFUSED, body = ErrorReply),
         (status = SERVICE_UNAVAILABLE, description = UNAVAILABLE, body = ErrorReply)))]
-pub(crate) async fn show(state: State, Param(Path((project, issue))): Param<Path<(String, String)>>) -> Reply {
+pub(crate) async fn show(state: State, Param(Path((project, bead))): Param<Path<(String, String)>>) -> Reply {
     let known = state.config().projects.iter().any(|p| p.name == project);
-    read(&state.trackers, known, &project, &issue).await
+    read(&state.trackers, known, &project, &bead).await
 }
 
 /// The read of `show`: `known` tells a project without a tracker from one the config does not have.
-pub(super) async fn read(trackers: &Trackers, known: bool, project: &str, issue: &str) -> Reply {
-    match tracker(trackers, known, project)?.lineage(issue).await {
-        Ok(lineage) => Ok(Json(json!(lineage.issue))),
-        Err(e) => Err(failed(e, format!("no issue `{issue}` in project `{project}`"))),
+pub(super) async fn read(trackers: &Trackers, known: bool, project: &str, bead: &str) -> Reply {
+    match tracker(trackers, known, project)?.lineage(bead).await {
+        Ok(lineage) => Ok(Json(json!(lineage.bead))),
+        Err(e) => Err(failed(e, format!("no bead `{bead}` in project `{project}`"))),
     }
 }
 
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct ListQuery {
-    /// The root issue: the issues under it at any depth are listed.
+    /// The root bead: the beads under it at any depth are listed.
     under: String,
 }
 
-/// The issues under a root at any depth, the root left out, closed ones too, oldest first, read from the project's
+/// The beads under a root at any depth, the root left out, closed ones too, oldest first, read from the project's
 /// tracker as the daemon.
-#[utoipa::path(get, path = "/v1/projects/{project}/issues", params(("project" = String, Path), ListQuery),
-    responses((status = OK, body = [Issue]),
+#[utoipa::path(get, path = "/v1/projects/{project}/beads", params(("project" = String, Path), ListQuery),
+    responses((status = OK, body = [Bead]),
         (status = BAD_REQUEST, description = "`bad_request`: the path or the query is malformed", body = ErrorReply),
         (status = NOT_FOUND, description = "`not_found`: no such project, or no such root in its tracker",
             body = ErrorReply),
@@ -78,21 +78,21 @@ pub(crate) async fn list(
 /// The read of `list`.
 pub(super) async fn under(trackers: &Trackers, known: bool, project: &str, root: &str) -> Reply {
     match tracker(trackers, known, project)?.subtree(root).await {
-        Ok(issues) => Ok(Json(json!(issues))),
-        Err(e) => Err(failed(e, format!("no issue `{root}` in project `{project}`"))),
+        Ok(beads) => Ok(Json(json!(beads))),
+        Err(e) => Err(failed(e, format!("no bead `{root}` in project `{project}`"))),
     }
 }
 
 #[derive(Deserialize, ToSchema)]
-pub(crate) struct CreateIssue {
+pub(crate) struct CreateBead {
     title: String,
     #[serde(default)]
     description: String,
     #[serde(default)]
     labels: Vec<String>,
-    /// The issue it lies under.
+    /// The bead it lies under.
     parent: Option<String>,
-    /// The rig it is filed for: its id takes the rig's prefix (docs/design/config.md). Absent: an issue of the root,
+    /// The rig it is filed for: its id takes the rig's prefix (docs/design/config.md). Absent: a bead of the root,
     /// with the tracker's own prefix.
     rig: Option<String>,
     /// The agent session that files it (`LOOP_MANAGER_RUN`, `LOOP_MANAGER_ATTEMPT_TOKEN`): the tracker records the
@@ -100,11 +100,11 @@ pub(crate) struct CreateIssue {
     session: Option<ParentAttempt>,
 }
 
-/// Files an issue in the project's tracker; the reply is the issue as filed. A repeated idempotency key files nothing
+/// Files a bead in the project's tracker; the reply is the bead as filed. A repeated idempotency key files nothing
 /// more and returns the first reply.
-#[utoipa::path(post, path = "/v1/projects/{project}/issues", request_body = CreateIssue,
+#[utoipa::path(post, path = "/v1/projects/{project}/beads", request_body = CreateBead,
     params(("project" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
-    responses((status = OK, body = Issue),
+    responses((status = OK, body = Bead),
         (status = NOT_FOUND, description = "`not_found`: no such project, rig or parent", body = ErrorReply),
         (status = CONFLICT, description = "`rejected`: the project has no tracker, or the session's attempt is not \
             the current one of a live run", body = ErrorReply),
@@ -115,7 +115,7 @@ pub(crate) async fn create(
     state: State,
     headers: HeaderMap,
     Param(Path(project)): Param<Path<String>>,
-    Body(body): Body<CreateIssue>,
+    Body(body): Body<CreateBead>,
 ) -> Reply {
     let config = state.config();
     let place = config.projects.iter().find(|p| p.name == project);
@@ -127,7 +127,7 @@ pub(crate) async fn create(
             None => None,
         },
     };
-    let new = NewIssue {
+    let new = NewBead {
         title: body.title,
         description: body.description,
         labels: body.labels,
@@ -149,14 +149,14 @@ pub(super) async fn file(
     project: &str,
     actor: &str,
     key: Option<&str>,
-    new: &NewIssue,
+    new: &NewBead,
 ) -> Result<Value, ApiError> {
     match tracker(trackers, known, project)?.file(actor, key, new).await {
-        Ok(issue) => Ok(json!(issue)),
+        Ok(bead) => Ok(json!(bead)),
         Err(e) => Err(failed(
             e,
             format!(
-                "no issue `{}` in project `{project}`",
+                "no bead `{}` in project `{project}`",
                 new.parent.as_deref().unwrap_or_default()
             ),
         )),
@@ -164,16 +164,16 @@ pub(super) async fn file(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub(crate) struct CloseIssue {
+pub(crate) struct CloseBead {
     reason: String,
-    /// The agent session that closes it, as for a filed issue. Absent: `loop-manager`.
+    /// The agent session that closes it, as for a filed bead. Absent: `loop-manager`.
     session: Option<ParentAttempt>,
 }
 
-/// Closes an issue in the project's tracker, whoever holds it; a closed issue stays closed and answers alike. A
+/// Closes a bead in the project's tracker, whoever holds it; a closed bead stays closed and answers alike. A
 /// live run that holds it is cancelled, unless the session that closes it is that run's.
-#[utoipa::path(post, path = "/v1/projects/{project}/issues/{issue}/close", request_body = CloseIssue,
-    params(("project" = String, Path), ("issue" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
+#[utoipa::path(post, path = "/v1/projects/{project}/beads/{bead}/close", request_body = CloseBead,
+    params(("project" = String, Path), ("bead" = String, Path), ("Idempotency-Key" = Option<String>, Header)),
     responses((status = OK, description = super::runs::NULL),
         (status = NOT_FOUND, description = NOT_FOUND, body = ErrorReply),
         (status = CONFLICT, description = "`rejected`: the project has no tracker, or the session's attempt is not \
@@ -185,13 +185,13 @@ pub(crate) struct CloseIssue {
 pub(crate) async fn close(
     state: State,
     headers: HeaderMap,
-    Param(Path((project, issue))): Param<Path<(String, String)>>,
-    Body(body): Body<CloseIssue>,
+    Param(Path((project, bead))): Param<Path<(String, String)>>,
+    Body(body): Body<CloseBead>,
 ) -> Reply {
     let known = state.config().projects.iter().any(|p| p.name == project);
     keyed(&state, &headers, async |_| {
         let actor = actor(&state, body.session)?;
-        shut(&state.trackers, known, &project, &actor, &issue, &body.reason).await
+        shut(&state.trackers, known, &project, &actor, &bead, &body.reason).await
     })
     .await
 }
@@ -202,12 +202,12 @@ pub(super) async fn shut(
     known: bool,
     project: &str,
     actor: &str,
-    issue: &str,
+    bead: &str,
     reason: &str,
 ) -> Result<Value, ApiError> {
-    match tracker(trackers, known, project)?.close_by(actor, issue, reason).await {
+    match tracker(trackers, known, project)?.close_by(actor, bead, reason).await {
         Ok(()) => Ok(Value::Null),
-        Err(e) => Err(failed(e, format!("no issue `{issue}` in project `{project}`"))),
+        Err(e) => Err(failed(e, format!("no bead `{bead}` in project `{project}`"))),
     }
 }
 

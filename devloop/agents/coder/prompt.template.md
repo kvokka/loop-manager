@@ -1,13 +1,13 @@
-Your task is the epic `{{ issue.id }}`: {{ issue.title }}
+Your task is the epic `{{ bead.id }}`: {{ bead.title }}
 
 <epic>
-{{ issue.description }}
+{{ bead.description }}
 </epic>
 
-The last comments on the epic, oldest first; `br comments {{ issue.id }}` gives all of them:
+The last comments on the epic, oldest first; `br comments {{ bead.id }}` gives all of them:
 
 <comments>
-{{ issue.comments }}
+{{ bead.comments }}
 </comments>
 
 Why the workflow returned to you, including any failed CI checks and log path (empty in the first round):

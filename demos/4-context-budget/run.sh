@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the demo from its two requests to its report on a daemon of the demo's own. What the run creates stays in this
-# directory and in .gitignore: the documents and what the agents wrote in library/, the issues in root/.beads, the
+# directory and in .gitignore: the documents and what the agents wrote in library/, the beads in root/.beads, the
 # daemon's state in .loop-manager/ and RESULT.md. EXAMPLE=1 also keeps the result as the author's library-example/ and
 # RESULT-example.md. LOOP_MANAGER names the loop-manager binary.
 set -eu
@@ -21,7 +21,7 @@ export XDG_STATE_HOME="$here/.loop-manager/state" XDG_CONFIG_HOME="$here/.loop-m
 LOOP_MANAGER_SOCKET="$(mktemp -d)/loop-manager.sock"
 export LOOP_MANAGER_SOCKET
 # The project's tracker, br's, in root/.beads; the runs reach it through loop-manager, and a look into it after the run
-# goes as docs/guide/issue-trackers.md#inspect-and-repair-a-br-tracker says.
+# goes as docs/guide/trackers.md#inspect-and-repair-a-br-tracker says.
 (cd root && br init -q >/dev/null)
 # What the agents read: the documentation of loop-manager as this checkout has it, about 100000 tokens.
 cp -R ../../docs library/docs
@@ -35,7 +35,7 @@ until "$loop_manager" status >/dev/null 2>&1; do
   sleep 0.2
 done
 
-# The two runs side by side, each with its own request and so its own issue.
+# The two runs side by side, each with its own request and so its own bead.
 started=$(date +%s)
 "$loop_manager" run start library study.glossary --input "task=$glossary" >.loop-manager/glossarist.run
 "$loop_manager" run start library study.index --input "task=$index" >.loop-manager/indexer.run
@@ -45,10 +45,10 @@ for agent in glossarist indexer; do
 done
 seconds=$(($(date +%s) - started))
 for agent in glossarist indexer; do
-  "$loop_manager" --json run show "$(cat .loop-manager/$agent.run)" | jq -r .issue >".loop-manager/$agent.issue"
+  "$loop_manager" --json run show "$(cat .loop-manager/$agent.run)" | jq -r .bead >".loop-manager/$agent.bead"
 done
-# The demo shows the wrap-up of the glossarist at the addon's soft limit: an issue without its summary comment fails it.
-"$loop_manager" --json issue show --project library "$(cat .loop-manager/glossarist.issue)" | jq .comments \
+# The demo shows the wrap-up of the glossarist at the addon's soft limit: a bead without its summary comment fails it.
+"$loop_manager" --json bead show --project library "$(cat .loop-manager/glossarist.bead)" | jq .comments \
   >.loop-manager/glossarist.comments
 jq -e 'length > 0' .loop-manager/glossarist.comments >/dev/null || result=failed
 
@@ -74,7 +74,7 @@ done
     echo "The request: \"$(if [ $agent = glossarist ]; then echo "$glossary"; else echo "$index"; fi)\"."
     echo
     if [ $agent = glossarist ]; then
-      echo "The comments on its issue \`$(cat .loop-manager/$agent.issue)\` (\`loop-manager issue show\`):"
+      echo "The comments on its bead \`$(cat .loop-manager/$agent.bead)\` (\`loop-manager bead show\`):"
       echo
       echo '```'
       jq -r '.[] | "[\(.author)] at \(.created_at)\n\(.text)\n"' .loop-manager/glossarist.comments

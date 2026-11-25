@@ -1,6 +1,6 @@
 # Developing loop-manager with devloop
 
-The owner files an epic in the project's tracker ([br](../guide/issue-trackers.md#the-br-tracker)). The `epic` formula
+The owner files an epic in the project's tracker ([br](../guide/trackers.md#the-br-tracker)). The `epic` formula
 runs a coder, the repository test suite and a reviewer. Red CI returns directly to the coder up to three times before
 reaching review. Each round takes its context from the epic's comments. Blocking questions wait for the owner. The
 report step closes the epic and publishes the handoff.

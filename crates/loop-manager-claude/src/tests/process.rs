@@ -69,7 +69,7 @@ fn hooks_join_the_native_settings_and_mcp_servers_take_claude_form() {
         attempt: 1,
         token: "t".into(),
         actor: Some(actor()),
-        issue: Some("bd-1".into()),
+        bead: Some("bd-1".into()),
     };
     let p = part::process(&config, &plan, Path::new("/state")).unwrap();
     let env = part::env(&p, "i1", None, Path::new("/state")).unwrap();
@@ -78,8 +78,8 @@ fn hooks_join_the_native_settings_and_mcp_servers_take_claude_form() {
         "the attempt's tracker actor, as the core planned it"
     );
     assert!(
-        env.contains(&("LOOP_MANAGER_ISSUE".to_owned(), "bd-1".to_owned())),
-        "the run's issue"
+        env.contains(&("LOOP_MANAGER_BEAD".to_owned(), "bd-1".to_owned())),
+        "the run's bead"
     );
     assert!(
         env.contains(&("CLAUDE_CODE_STARTUP_FAILURE_RESULTS".to_owned(), "1".to_owned())),
@@ -118,14 +118,14 @@ fn hooks_join_the_native_settings_and_mcp_servers_take_claude_form() {
         attempt: 2,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let next = part::process(&config, &next, Path::new("/state")).unwrap();
     assert_ne!(next["session_id"], p["session_id"]);
     let env = part::env(&next, "i2", None, Path::new("/state")).unwrap();
     assert!(
-        !env.iter().any(|(k, _)| k == "LOOP_MANAGER_ISSUE"),
-        "a run without an issue has no LOOP_MANAGER_ISSUE"
+        !env.iter().any(|(k, _)| k == "LOOP_MANAGER_BEAD"),
+        "a run without a bead has no LOOP_MANAGER_BEAD"
     );
     // A native `hooks` of a foreign shape is refused, neither a panic in the core's writer nor a silent overwrite.
     for native in [json!({ "hooks": "x" }), json!({ "hooks": { "Stop": {} } })] {
@@ -292,7 +292,7 @@ fn the_process_part_keeps_the_reference_and_the_process_gets_the_value() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let key = |config: &mut EffectiveConfig, value: &str| {
         config.env.insert("ANTHROPIC_API_KEY".into(), agent(value.into()));
@@ -321,7 +321,7 @@ fn a_session_gets_the_tracker_variables_and_the_model_only_when_its_config_sets_
         attempt: 1,
         token: "t".into(),
         actor: Some(actor()),
-        issue: None,
+        bead: None,
     };
     let env_of = |config: &EffectiveConfig| {
         let p = part::process(config, &plan, Path::new("/state")).unwrap();

@@ -12,7 +12,7 @@ use loop_manager_contract::{
     BoxFuture,
     config::{Project, TrackerLink},
     driver::Check,
-    tracker::{Adapter, Change, Commented, Issue, Lineage, NewIssue, OnChange, Tracker, TrackerError, Wait, Watch},
+    tracker::{Adapter, Bead, Change, Commented, Lineage, NewBead, OnChange, Tracker, TrackerError, Wait, Watch},
 };
 use parse::{bead, commented, field};
 use serde_json::{Value, json};
@@ -55,7 +55,7 @@ fn link(project: &Path) -> TrackerLink {
     }
 }
 
-/// The checks of `loop-manager doctor` beyond br's version: its license, and a rig with the prefix of the root's issues.
+/// The checks of `loop-manager doctor` beyond br's version: its license, and a rig with the prefix of the root's beads.
 fn doctor(binary: &Path, projects: &[&Project]) -> Vec<Check> {
     let mut found = vec![Check::new(
         "br license",
@@ -63,7 +63,7 @@ fn doctor(binary: &Path, projects: &[&Project]) -> Vec<Check> {
         "br is MIT with an OpenAI/Anthropic rider, not an OSI license; loop-manager only runs the installed binary — \
          check that the rider fits your use",
     )];
-    // A rig's issues must not share the prefix of the root's (docs/design/tracker-br.md).
+    // A rig's beads must not share the prefix of the root's (docs/design/tracker-br.md).
     for p in projects {
         let Some(db) = issue_prefix(binary, &p.dir.join(".beads")) else {
             continue;
@@ -73,7 +73,7 @@ fn doctor(binary: &Path, projects: &[&Project]) -> Vec<Check> {
                 "br prefix",
                 "warning",
                 format!(
-                    "rig `{rig}` of project `{}` has the prefix `{db}` of the br database, so the root's issues read \
+                    "rig `{rig}` of project `{}` has the prefix `{db}` of the br database, so the root's beads read \
                      as its own; set `prefix` in `[rigs.{rig}]`",
                     p.name
                 ),
@@ -84,7 +84,7 @@ fn doctor(binary: &Path, projects: &[&Project]) -> Vec<Check> {
 }
 
 /// Writes `.bv/workspace.yaml` next to the orchestrator config `config`: one repository per project with br, so `bv`
-/// run there (or with `--workspace`) shows every project's issues (docs/design/tracker-br.md). The trackers are fixed
+/// run there (or with `--workspace`) shows every project's beads (docs/design/tracker-br.md). The trackers are fixed
 /// for the daemon's life (a reload changing them is refused), so the file is written at start only.
 fn bv_workspace(binary: &Path, config: &Path, projects: &[&Project]) -> Vec<String> {
     let mut warnings = Vec::new();
@@ -190,7 +190,7 @@ impl Br {
     }
 
     /// The beads `ids` as `br show` has them, in that order.
-    async fn show(&self, ids: &[&str]) -> Result<Vec<Issue>, TrackerError> {
+    async fn show(&self, ids: &[&str]) -> Result<Vec<Bead>, TrackerError> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -207,7 +207,7 @@ impl Br {
     }
 
     /// The bead filed with the key `key`.
-    async fn keyed(&self, key: &str) -> Result<Option<Issue>, TrackerError> {
+    async fn keyed(&self, key: &str) -> Result<Option<Bead>, TrackerError> {
         match self
             .list()
             .await?
@@ -220,12 +220,12 @@ impl Br {
         }
     }
 
-    async fn one(&self, id: &str) -> Result<Issue, TrackerError> {
+    async fn one(&self, id: &str) -> Result<Bead, TrackerError> {
         self.show(&[id]).await?.pop().ok_or(TrackerError::NotFound)
     }
 
     /// The bead `id` if `owner` holds it.
-    async fn held(&self, owner: &str, id: &str) -> Result<Issue, TrackerError> {
+    async fn held(&self, owner: &str, id: &str) -> Result<Bead, TrackerError> {
         let bead = self.one(id).await?;
         if bead.assignee.as_deref() == Some(owner) {
             Ok(bead)
@@ -341,7 +341,7 @@ struct Row {
 }
 
 impl Tracker for Br {
-    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         Box::pin(async move {
             match self.br(owner, &["update", id, "--claim"]).await {
                 Ok(_) => self.one(id).await,
@@ -407,7 +407,7 @@ impl Tracker for Br {
         })
     }
 
-    fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
+    fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>> {
         Box::pin(async move {
             let ready = self.br(READER, &["ready", "--unassigned", "--limit", "0"]).await?;
             // `ready` leaves out the description and the parent; `show` has both.
@@ -438,7 +438,7 @@ impl Tracker for Br {
         })
     }
 
-    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Bead>, TrackerError>> {
         Box::pin(async move {
             let ids = self
                 .read(|db| {
@@ -471,7 +471,7 @@ impl Tracker for Br {
                 let mut stmt = db.prepare(WAITING)?;
                 let rows = stmt.query_map([root], |r| {
                     Ok(Wait {
-                        issue: r.get(0)?,
+                        bead: r.get(0)?,
                         blocker: r.get(1)?,
                         kind: r.get(2)?,
                         status: r.get(3)?,
@@ -521,7 +521,7 @@ impl Tracker for Br {
                     kind: kind.to_owned(),
                     actor: group[0].actor.clone(),
                     changed: if kind == "updated" { changed } else { Vec::new() },
-                    issue: bead,
+                    bead,
                 });
             }
             Ok(out)
@@ -534,7 +534,7 @@ impl Tracker for Br {
         key: &'a str,
         title: &'a str,
         description: &'a str,
-    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         Box::pin(async move {
             let listed = self.list().await?;
             let made = listed.iter().find(|b| b["external_ref"] == key);
@@ -563,8 +563,8 @@ impl Tracker for Br {
         &'a self,
         actor: &'a str,
         key: Option<&'a str>,
-        new: &'a NewIssue,
-    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        new: &'a NewBead,
+    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         Box::pin(async move {
             // br splits `--labels` at commas.
             if let Some(label) = new.labels.iter().find(|l| l.contains(',')) {
@@ -599,19 +599,19 @@ impl Tracker for Br {
             let mut line: Vec<Commented> = Vec::new();
             let mut next = Some(id.to_owned());
             // One `show` per bead, up the parents; a parent met twice would never end, one deleted meanwhile ends it.
-            while let Some(id) = next.filter(|id| line.iter().all(|c| c.issue.id != *id)) {
+            while let Some(id) = next.filter(|id| line.iter().all(|c| c.bead.id != *id)) {
                 let shown = match self.br(READER, &["show", &id]).await {
                     Err(Fail(_, TrackerError::NotFound, _)) if !line.is_empty() => break,
                     shown => shown?,
                 };
                 let found = commented(shown.get(0).ok_or(TrackerError::NotFound)?)?;
-                next = found.issue.epic.clone();
+                next = found.bead.epic.clone();
                 line.push(found);
             }
             let mut line = line.into_iter();
             let bead = line.next().ok_or(TrackerError::NotFound)?;
             Ok(Lineage {
-                issue: bead,
+                bead,
                 parents: line.rev().collect(),
             })
         })

@@ -1,5 +1,11 @@
 # context-budget changelog
 
+## 0.7.0
+
+- Read the run's bead from `LOOP_MANAGER_BEAD` again, instead of `LOOP_MANAGER_ISSUE`, and say bead in the texts to the
+  agent. Needs a loop-manager build that exports `LOOP_MANAGER_BEAD`; on a build that exports `LOOP_MANAGER_ISSUE`, stay
+  on 0.6.0.
+
 ## 0.6.0
 
 - Declare the required host tools for `loop-manager doctor`. Upgrade to a loop-manager build with addon dependency checks
@@ -12,7 +18,7 @@
 
 ## 0.4.0
 
-- Leave the dump past `hard` on the run's issue with `loop-manager comment` instead of `br`, and tell the agent past
+- Leave the dump past `hard` on the run's bead with `loop-manager comment` instead of `br`, and tell the agent past
   `soft` to leave its summary the same way. The addon no longer needs `br` on the host; it needs a loop-manager
   build with `loop-manager comment`.
 

@@ -44,8 +44,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, time::Duration};
 pub struct Config {
     /// Runs started at once across every project (docs/design/contracts.md 6).
     pub max_runs: u32,
-    /// Runs of one issue that may end `failed` before the core closes its gate (docs/design/config.md).
-    pub issue_failed_runs: u32,
+    /// Runs of one bead that may end `failed` before the core closes its gate (docs/design/config.md).
+    pub bead_failed_runs: u32,
     /// The loopback address the API also listens on with a token (docs/api/frontends.md); off when absent.
     pub api_tcp: Option<std::net::SocketAddr>,
     /// The token of `api_tcp` for this daemon start: not from a file, the daemon sets it.
@@ -146,7 +146,7 @@ pub struct Place {
     /// The directories of the other places where the run had children, when its formula has `worktree = true`:
     /// its lazy worktrees are there.
     pub rigs: Vec<PathBuf>,
-    /// The title of the run's issue when it is a child of a `drain` step with `worktree = true`: its branch merges
+    /// The title of the run's bead when it is a child of a `drain` step with `worktree = true`: its branch merges
     /// into its base on its final `pass`, under this title.
     pub merge: Option<String>,
 }
@@ -188,7 +188,7 @@ pub struct TrackerLink {
     /// The variable that carries the attempt's tracker actor, `loop-manager:<run>:<attempt>` (contracts 5.1), into a session
     /// or a command.
     pub actor: Option<String>,
-    /// The variable that gives the issues a session or command files on a rig that rig's prefix
+    /// The variable that gives the beads a session or command files on a rig that rig's prefix
     /// (docs/design/config.md).
     pub prefix: Option<String>,
     /// The variables that tell the tracker the agent of the step, the harness and the model of a session.
@@ -200,7 +200,7 @@ pub struct TrackerLink {
 #[derive(Clone, Debug)]
 pub struct Rig {
     pub path: PathBuf,
-    /// The prefix of the ids of its issues (docs/design/config.md); none for the root, whose issues carry the
+    /// The prefix of the ids of its beads (docs/design/config.md); none for the root, whose beads carry the
     /// tracker's own.
     pub prefix: Option<String>,
     pub vars: BTreeMap<String, String>,

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 pub(super) const AI_STEP_TIMEOUT_MS: i64 = 4 * 3_600_000;
 /// The time an `exec` step has by default.
 pub(super) const EXEC_STEP_TIMEOUT_MS: i64 = 45 * 60_000;
-/// The time a drain step has for every issue under the run's issue, and a formula step for its run
+/// The time a drain step has for every bead under the run's bead, and a formula step for its run
 /// (docs/design/config.md).
 pub(super) const DRAIN_TIMEOUT_MS: i64 = 24 * 3_600_000;
 /// The time an await step waits for its outcome (docs/design/config.md).
@@ -42,7 +42,7 @@ impl RunHandler {
         let context = json!({
             "inputs": serde_json::from_str::<Value>(&row.inputs).unwrap_or_default(),
             "rig": rig_view, "run": row.view(),
-            "issue": row.issue_data.as_deref().map(serde_json::from_str::<Value>).transpose().ok().flatten(),
+            "bead": row.bead_data.as_deref().map(serde_json::from_str::<Value>).transpose().ok().flatten(),
             "project": { "name": project.name, "path": project.dir },
             "steps": step_results(tx.sql(), &row.id, &row.step).map_err(|e| e.to_string())?,
             "back_from": back_from(tx.sql(), &row.id).map_err(|e| e.to_string())?,
@@ -73,7 +73,7 @@ impl RunHandler {
                 return Ok(Some((None, timeout_ms(timeout, DRAIN_TIMEOUT_MS), config)));
             }
             // The inputs of the formula's run: the parent's that it declares, its task among them (the child works on
-            // the issue the parent holds), then the step's own over them (docs/design/config.md).
+            // the bead the parent holds), then the step's own over them (docs/design/config.md).
             (
                 StepKind::Formula {
                     formula: run,
@@ -148,13 +148,13 @@ impl RunHandler {
         mut context: Value,
         last_comments: Option<std::num::NonZeroUsize>,
     ) -> Result<String, String> {
-        // The run's agent brings its template: the step's, or the one an issue's `agent:` label names
+        // The run's agent brings its template: the step's, or the one a bead's `agent:` label names
         // (docs/design/config.md).
         let prompt = self.config.prompt(&row.project, agent)?;
         context["remarks"] = json!(remarks(tx.sql(), &row.id).map_err(|e| e.to_string())?);
         context["agent"] = json!(prompt.files);
         if let Some(last) = last_comments {
-            keep_last(&mut context["issue"], last.get());
+            keep_last(&mut context["bead"], last.get());
         }
         let mut text = prompt.template.render(&context).map_err(|e| format!("prompt: {e}"))?;
         // The remark of a repeat reaches the agent even when its template has no place for remarks
@@ -194,12 +194,12 @@ pub(super) fn step_results(conn: &Connection, run: &str, except: &str) -> rusqli
     rows.collect()
 }
 
-/// Keeps the last `n` comments of `issue` and of each of its parents (docs/design/config.md).
-fn keep_last(issue: &mut Value, n: usize) {
-    if let Some(comments) = issue.get_mut("comments").and_then(Value::as_array_mut) {
+/// Keeps the last `n` comments of `bead` and of each of its parents (docs/design/config.md).
+fn keep_last(bead: &mut Value, n: usize) {
+    if let Some(comments) = bead.get_mut("comments").and_then(Value::as_array_mut) {
         comments.drain(..comments.len().saturating_sub(n));
     }
-    for parent in issue
+    for parent in bead
         .get_mut("parents")
         .and_then(Value::as_array_mut)
         .into_iter()

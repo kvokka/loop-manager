@@ -84,10 +84,10 @@ fn a_formula_on_a_rig_is_explained_with_its_max_writers() {
     assert!(!root.as_str().unwrap().contains("max_writers"), "{root}");
 }
 
-/// `issue show` reads an issue with its comments from the project's tracker; a project the config does not have, one
-/// without a tracker, an issue the tracker does not have and a tracker that is down each have their error reply.
+/// `bead show` reads a bead with its comments from the project's tracker; a project the config does not have, one
+/// without a tracker, a bead the tracker does not have and a tracker that is down each have their error reply.
 #[tokio::test]
-async fn an_issue_is_read_from_the_tracker_of_its_project() {
+async fn a_bead_is_read_from_the_tracker_of_its_project() {
     use loop_manager_core::tracker::Tracker;
     use std::{collections::BTreeMap, sync::Arc};
     let tracker = Arc::new(loop_manager_testkit::MemoryTracker::new());
@@ -95,14 +95,14 @@ async fn an_issue_is_read_from_the_tracker_of_its_project() {
     tracker.comment(&id, "alice", "first");
     tracker.comment(&id, "bob", "second");
     let trackers = BTreeMap::from([("shop".to_owned(), tracker.clone() as Arc<dyn Tracker>)]);
-    let Ok(axum::Json(issue)) = super::issues::read(&trackers, true, "shop", &id).await else {
+    let Ok(axum::Json(bead)) = super::beads::read(&trackers, true, "shop", &id).await else {
         panic!("`{id}` is not read");
     };
     assert_eq!(
-        (&issue["id"], &issue["status"], &issue["labels"]),
+        (&bead["id"], &bead["status"], &bead["labels"]),
         (&id.clone().into(), &"open".into(), &serde_json::json!(["review"]))
     );
-    let comments: Vec<_> = issue["comments"]
+    let comments: Vec<_> = bead["comments"]
         .as_array()
         .unwrap()
         .iter()
@@ -111,11 +111,11 @@ async fn an_issue_is_read_from_the_tracker_of_its_project() {
     assert_eq!(
         comments,
         [("alice".into(), "first".into()), ("bob".into(), "second".into())],
-        "{issue}"
+        "{bead}"
     );
-    let status = async |project: &str, issue: &str, known: bool| {
-        let Err(e) = super::issues::read(&trackers, known, project, issue).await else {
-            panic!("`{project}` `{issue}` is read");
+    let status = async |project: &str, bead: &str, known: bool| {
+        let Err(e) = super::beads::read(&trackers, known, project, bead).await else {
+            panic!("`{project}` `{bead}` is read");
         };
         let reply = e.into_response();
         let status = reply.status().as_u16();
@@ -130,17 +130,17 @@ async fn an_issue_is_read_from_the_tracker_of_its_project() {
     assert_eq!(status("shop", &id, true).await, (503, "tracker_unavailable".into()));
 }
 
-/// `issue create`, `issue list` and `issue close` call the project's tracker as the actor they are given: a filed issue
-/// takes its labels, parent and rig prefix, the list holds what is under the root, a close takes any holder's issue;
-/// a parent or an issue the tracker does not have is `not_found`, a refused close `tracker`.
+/// `bead create`, `bead list` and `bead close` call the project's tracker as the actor they are given: a filed bead
+/// takes its labels, parent and rig prefix, the list holds what is under the root, a close takes any holder's bead;
+/// a parent or a bead the tracker does not have is `not_found`, a refused close `tracker`.
 #[tokio::test]
-async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project() {
-    use loop_manager_core::tracker::{NewIssue, Tracker};
+async fn beads_are_filed_listed_and_closed_through_the_tracker_of_their_project() {
+    use loop_manager_core::tracker::{NewBead, Tracker};
     use std::{collections::BTreeMap, sync::Arc};
     let tracker = Arc::new(loop_manager_testkit::MemoryTracker::new());
     let root = tracker.add(&[], None);
     let trackers = BTreeMap::from([("shop".to_owned(), tracker.clone() as Arc<dyn Tracker>)]);
-    let new = |parent: &str| NewIssue {
+    let new = |parent: &str| NewBead {
         title: "Fix the cart".to_owned(),
         description: "The total is wrong".to_owned(),
         labels: vec!["agent:coder".to_owned()],
@@ -148,7 +148,7 @@ async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project
         prefix: Some("w".to_owned()),
     };
     let actor = "loop-manager:run_1:1";
-    let Ok(filed) = super::issues::file(&trackers, true, "shop", actor, None, &new(&root)).await else {
+    let Ok(filed) = super::beads::file(&trackers, true, "shop", actor, None, &new(&root)).await else {
         panic!("not filed");
     };
     let id = filed["id"].as_str().unwrap().to_owned();
@@ -158,9 +158,9 @@ async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project
         (&root.clone().into(), &serde_json::json!(["agent:coder"]))
     );
     let code = |e: super::ApiError| e.into_response().status().as_u16();
-    let lost = super::issues::file(&trackers, true, "shop", actor, None, &new("b-none")).await;
+    let lost = super::beads::file(&trackers, true, "shop", actor, None, &new("b-none")).await;
     assert_eq!(lost.map_err(code), Err(404));
-    let Ok(axum::Json(listed)) = super::issues::under(&trackers, true, "shop", &root).await else {
+    let Ok(axum::Json(listed)) = super::beads::under(&trackers, true, "shop", &root).await else {
         panic!("`{root}` is not listed");
     };
     assert_eq!(
@@ -169,7 +169,7 @@ async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project
         "{listed}"
     );
     assert_eq!(
-        super::issues::under(&trackers, true, "shop", "b-none")
+        super::beads::under(&trackers, true, "shop", "b-none")
             .await
             .map_err(code)
             .err(),
@@ -177,10 +177,10 @@ async fn issues_are_filed_listed_and_closed_through_the_tracker_of_their_project
     );
     tracker.assign(&id, "loop-manager:run_9");
     // A parent with open children is refused and stays open; its child closes whoever holds it.
-    let shut = async |issue: &str| super::issues::shut(&trackers, true, "shop", "loop-manager", issue, "dropped").await;
+    let shut = async |bead: &str| super::beads::shut(&trackers, true, "shop", "loop-manager", bead, "dropped").await;
     assert_eq!(shut(&root).await.map_err(code), Err(502));
     assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
-    assert_eq!(tracker.issue(&id).unwrap().status, "closed");
+    assert_eq!(tracker.bead(&id).unwrap().status, "closed");
     assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
     assert_eq!(shut("b-none").await.map_err(code), Err(404));
 }

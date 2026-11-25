@@ -138,7 +138,7 @@ fn past_soft_the_agent_is_told_to_wrap_up_again_every_warn_step_and_may_call_no_
 }
 
 #[test]
-fn past_hard_the_session_leaves_its_state_on_the_issue_declares_the_cut_and_stops() {
+fn past_hard_the_session_leaves_its_state_on_the_bead_declares_the_cut_and_stops() {
     // The new usage of a session is seen first by the next call's `PreToolUse`, else by `PostToolUse`.
     for (cut, event) in [("fail", "PreToolUse"), ("pass", "PostToolUse")] {
         let bed = Bed::new(cut);
@@ -152,7 +152,7 @@ fn past_hard_the_session_leaves_its_state_on_the_issue_declares_the_cut_and_stop
         if event == "PreToolUse" {
             assert_eq!(stop["hookSpecificOutput"]["permissionDecision"], "deny");
         }
-        let summary = "context budget: the session was stopped; its state is on the issue";
+        let summary = "context budget: the session was stopped; its state is on the bead";
         assert_eq!(bed.finished(), format!("finish {cut} --summary {summary}\n"));
         let comments = bed.comments();
         assert_eq!(comments.len(), 1, "{comments:?}");
@@ -218,9 +218,9 @@ fn a_subagent_is_measured_on_its_own_transcript_and_stops_alone_without_an_outco
 }
 
 #[test]
-fn a_run_without_an_issue_is_told_to_put_its_summary_in_finish() {
+fn a_run_without_a_bead_is_told_to_put_its_summary_in_finish() {
     let bed = Bed::new("fail");
-    bed.with_issue.set(false);
+    bed.with_bead.set(false);
     bed.transcript("s1.jsonl", 1200);
     let text = note(&bed.tool("PostToolUse", "Bash")).to_owned();
     assert!(text.contains("your summary in `--summary`"), "{text}");

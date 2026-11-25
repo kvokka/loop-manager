@@ -84,7 +84,7 @@ async fn turn(
         attempt: 1,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let mut config = config(&provider);
     edit(&mut config);
@@ -318,7 +318,7 @@ async fn a_command_left_in_the_background_is_stopped_and_the_session_takes_the_n
         attempt: 1,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let mut config = config(&provider);
     config.native = Some(sourced(serde_json::json!({ "permission_mode": "bypassPermissions" })));
@@ -441,7 +441,7 @@ async fn a_resume_after_a_kill_reports_the_totals_saved_at_the_last_exit() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let tokens = |input, cache_read, cache_write_5m, output| Tokens {
         input,
@@ -469,7 +469,7 @@ async fn a_resume_after_a_kill_reports_the_totals_saved_at_the_last_exit() {
         attempt,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let (instance, second, mut events, mut live) = open(&driver, &config, &resume(2), "i2").await;
     let key = PromptKey::new("r1", 2, 1);

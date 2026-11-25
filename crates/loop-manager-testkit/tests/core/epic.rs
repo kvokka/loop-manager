@@ -1,25 +1,25 @@
-//! A long epic (docs/design/config.md, decision 18): each issue is blocked by the one before it, a trigger on
-//! `issue.ready` takes the next, and the chain runs to the end however long it is. Exec steps, so real time.
+//! A long epic (docs/design/config.md, decision 18): each bead is blocked by the one before it, a trigger on
+//! `bead.ready` takes the next, and the chain runs to the end however long it is. Exec steps, so real time.
 
 use crate::common;
 
 use loop_manager_core::{
     BoxFuture, Clock, Journal, config, open,
     run::{self, ExecHooks, Msg},
-    tracker::{Change, Issue, Lineage, NewIssue, Tracker, TrackerError, Wait},
+    tracker::{Bead, Change, Lineage, NewBead, Tracker, TrackerError, Wait},
 };
 use loop_manager_testkit::MemoryTracker;
 use serde_json::Value;
 use std::{fs, sync::Arc, time::Duration};
 
-const ISSUES: usize = 15;
+const BEADS: usize = 15;
 
 /// The memory tracker with a chain of blockers: `b-<n>` is ready only once `b-<n-1>` is closed.
 #[derive(Clone)]
 struct Chain(MemoryTracker);
 
 impl Tracker for Chain {
-    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+    fn claim<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         self.0.claim(owner, id)
     }
     fn release<'a>(&'a self, owner: &'a str, id: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
@@ -31,14 +31,14 @@ impl Tracker for Chain {
     fn close_by<'a>(&'a self, actor: &'a str, id: &'a str, reason: &'a str) -> BoxFuture<'a, Result<(), TrackerError>> {
         self.0.close_by(actor, id, reason)
     }
-    fn ready(&self) -> BoxFuture<'_, Result<Vec<Issue>, TrackerError>> {
+    fn ready(&self) -> BoxFuture<'_, Result<Vec<Bead>, TrackerError>> {
         Box::pin(async move {
-            let unblocked = |b: &Issue| {
+            let unblocked = |b: &Bead| {
                 let n: usize = b.id.trim_start_matches("b-").parse().unwrap();
                 n == 1
                     || self
                         .0
-                        .issue(&format!("b-{}", n - 1))
+                        .bead(&format!("b-{}", n - 1))
                         .is_some_and(|p| p.status == "closed")
             };
             Ok(self.0.ready().await?.into_iter().filter(unblocked).collect())
@@ -47,7 +47,7 @@ impl Tracker for Chain {
     fn under<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<String>, TrackerError>> {
         self.0.under(root)
     }
-    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Issue>, TrackerError>> {
+    fn subtree<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Bead>, TrackerError>> {
         self.0.subtree(root)
     }
     fn waiting<'a>(&'a self, root: &'a str) -> BoxFuture<'a, Result<Vec<Wait>, TrackerError>> {
@@ -62,15 +62,15 @@ impl Tracker for Chain {
         key: &'a str,
         title: &'a str,
         text: &'a str,
-    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         self.0.create(actor, key, title, text)
     }
     fn file<'a>(
         &'a self,
         actor: &'a str,
         key: Option<&'a str>,
-        new: &'a NewIssue,
-    ) -> BoxFuture<'a, Result<Issue, TrackerError>> {
+        new: &'a NewBead,
+    ) -> BoxFuture<'a, Result<Bead, TrackerError>> {
         self.0.file(actor, key, new)
     }
     fn lineage<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Lineage, TrackerError>> {
@@ -92,11 +92,11 @@ impl Tracker for Chain {
 }
 
 #[tokio::test]
-async fn an_epic_of_fifteen_issues_each_blocked_by_the_last_runs_to_its_end() {
+async fn an_epic_of_fifteen_beads_each_blocked_by_the_last_runs_to_its_end() {
     let dir = tempfile::tempdir().unwrap();
-    let take = "[rigs.web]\npath = \"web\"\n[[trigger]]\nname = \"take\"\non = \"issue.ready\"\nrun = \"close\"\n\
-                rig = \"web\"\ninputs = { issue = \"{{ event.issue.id }}\" }\n";
-    let close = "name = \"close\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+    let take = "[rigs.web]\npath = \"web\"\n[[trigger]]\nname = \"take\"\non = \"bead.ready\"\nrun = \"close\"\n\
+                rig = \"web\"\ninputs = { bead = \"{{ event.bead.id }}\" }\n";
+    let close = "name = \"close\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
                  [[step]]\nkind = \"exec\"\ncommand = [\"true\"]\ntimeout = \"5s\"\n";
     let files = common::FILES
         .iter()
@@ -108,7 +108,7 @@ async fn an_epic_of_fifteen_issues_each_blocked_by_the_last_runs_to_its_end() {
         fs::write(path, text).unwrap();
     }
     let tracker = Chain(MemoryTracker::new());
-    for _ in 0..ISSUES {
+    for _ in 0..BEADS {
         tracker.0.add(&[], None);
     }
     let mut config = config::load(&dir.path().join("config.toml")).unwrap();
@@ -132,7 +132,7 @@ async fn an_epic_of_fifteen_issues_each_blocked_by_the_last_runs_to_its_end() {
         // No watcher on a tracker in memory: the test says it changed.
         core.send(None, Msg::TrackerChanged("shop".into())).await.unwrap();
         let all = Journal::new(&journal).read_from(1, 100_000).unwrap_or_default();
-        let over = of(&all, "run.passed").len() == ISSUES || !of(&all, "trigger.skipped").is_empty();
+        let over = of(&all, "run.passed").len() == BEADS || !of(&all, "trigger.skipped").is_empty();
         if over || started.elapsed() > Duration::from_secs(30) {
             break all;
         }
@@ -140,9 +140,9 @@ async fn an_epic_of_fifteen_issues_each_blocked_by_the_last_runs_to_its_end() {
     };
     let skipped = of(&all, "trigger.skipped");
     assert!(skipped.is_empty(), "{skipped:?}");
-    assert_eq!(of(&all, "run.passed").len(), ISSUES);
-    assert!((1..=ISSUES).all(|n| tracker.0.issue(&format!("b-{n}")).unwrap().status == "closed"));
-    // One chain: every issue after the first was freed by the run before it.
+    assert_eq!(of(&all, "run.passed").len(), BEADS);
+    assert!((1..=BEADS).all(|n| tracker.0.bead(&format!("b-{n}")).unwrap().status == "closed"));
+    // One chain: every bead after the first was freed by the run before it.
     let queued = of(&all, "run.queued");
     assert!(queued.iter().all(|e| e["correlation"] == queued[0]["correlation"]));
     assert!(queued.iter().all(|e| e["data"]["run"]["depth"] == 1), "{queued:?}");

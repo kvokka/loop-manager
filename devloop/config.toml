@@ -4,4 +4,4 @@
 projects = ["."]
 # A run that failed is not started again by itself: the gate of its epic closes and waits for the owner
 # (README.md, "When a run fails").
-issue_failed_runs = 1
+bead_failed_runs = 1

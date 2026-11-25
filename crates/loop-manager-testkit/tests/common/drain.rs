@@ -1,7 +1,7 @@
-//! Helpers of the drain tests: a formula whose first step drains the run's issue into runs of `work`, the children of
+//! Helpers of the drain tests: a formula whose first step drains the run's bead into runs of `work`, the children of
 //! a run, and their ends.
 
-use super::{World, issues::slow_turn};
+use super::{World, beads::slow_turn};
 use loop_manager_core::run::{Msg, Outcome, Verdict};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, time::Duration};
@@ -17,7 +17,7 @@ pub(crate) const SWEEP: &[(&str, &str)] = &[
     ),
     ("shop/api/.keep", ""),
     ("shop/agents/qa/agent.toml", "harness = \"scripted\"\n"),
-    ("shop/agents/qa/prompt.template.md", "Work on {{ issue.title }}."),
+    ("shop/agents/qa/prompt.template.md", "Work on {{ bead.title }}."),
     ("shop/agents/scribe/agent.toml", "harness = \"scripted\"\n"),
     (
         "shop/agents/scribe/prompt.template.md",
@@ -25,27 +25,27 @@ pub(crate) const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "shop/formulas/work.toml",
-        "name = \"work\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
     ),
     (
         "shop/formulas/sweep.toml",
-        "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nname = \"all\"\nkind = \"drain\"\nformula = \"work\"\npool = 8\n\
          [[step]]\nname = \"wrap\"\nkind = \"ai\"\nagent = \"scribe\"\n",
     ),
 ];
 
-/// A child run: `(id, issue, state, rig, agent, correlation, depth)`.
+/// A child run: `(id, bead, state, rig, agent, correlation, depth)`.
 pub(crate) type Kid = (String, String, String, String, String, String, i64);
 
 impl World {
-    /// Starts `sweep` on `root` on the root, which gives the issues of every rig; returns its run.
+    /// Starts `sweep` on `root` on the root, which gives the beads of every rig; returns its run.
     pub(crate) async fn sweep(&self, root: &str) -> String {
         for _ in 0..8 {
             self.driver.script(slow_turn());
         }
-        let reply = self.start_issue("sweep", None, json!(root)).await.unwrap();
+        let reply = self.start_bead("sweep", None, json!(root)).await.unwrap();
         reply["run"].as_str().unwrap().to_owned()
     }
 
@@ -53,7 +53,7 @@ impl World {
         let db = rusqlite::Connection::open(self.dir.path().join("state.db")).unwrap();
         let mut stmt = db
             .prepare(
-                "SELECT id, issue, state, rig, agent, correlation, depth FROM runs WHERE parent_run = ?1 ORDER BY n",
+                "SELECT id, bead, state, rig, agent, correlation, depth FROM runs WHERE parent_run = ?1 ORDER BY n",
             )
             .unwrap();
         let rows = stmt.query_map([parent], |r| {
@@ -85,8 +85,8 @@ impl World {
         self.core.send(None, msg).await.unwrap();
     }
 
-    /// Finishes each child of `root` once its session has started — `fail` on the issues in `failing` — until the
-    /// drain step of `root` has finished (`stop` issues: until a child on each of them is alive, unfinished); returns
+    /// Finishes each child of `root` once its session has started — `fail` on the beads in `failing` — until the
+    /// drain step of `root` has finished (`stop` beads: until a child on each of them is alive, unfinished); returns
     /// the outcome of the step.
     pub(crate) async fn settle(
         &self,
@@ -121,10 +121,10 @@ impl World {
             if !stop.is_empty() && stop.iter().all(alive) {
                 return Value::Null;
             }
-            for (id, issue, ..) in kids {
-                let skip = stop.contains(&issue.as_str()) || done.contains(&id);
+            for (id, bead, ..) in kids {
+                let skip = stop.contains(&bead.as_str()) || done.contains(&id);
                 if !skip && self.driver.token(&id, 1).is_some() {
-                    let verdict = if failing.contains(&issue.as_str()) {
+                    let verdict = if failing.contains(&bead.as_str()) {
                         Verdict::Fail
                     } else {
                         Verdict::Pass

@@ -1253,9 +1253,9 @@
         }
       }
     },
-    "/v1/projects/{project}/issues": {
+    "/v1/projects/{project}/beads": {
       "get": {
-        "summary": "The issues under a root at any depth, the root left out, closed ones too, oldest first, read from the project's\ntracker as the daemon.",
+        "summary": "The beads under a root at any depth, the root left out, closed ones too, oldest first, read from the project's\ntracker as the daemon.",
         "operationId": "list",
         "parameters": [
           {
@@ -1269,7 +1269,7 @@
           {
             "name": "under",
             "in": "query",
-            "description": "The root issue: the issues under it at any depth are listed.",
+            "description": "The root bead: the beads under it at any depth are listed.",
             "required": true,
             "schema": {
               "type": "string"
@@ -1283,7 +1283,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Issue"
+                    "$ref": "#/components/schemas/Bead"
                   }
                 }
               }
@@ -1352,7 +1352,7 @@
         }
       },
       "post": {
-        "summary": "Files an issue in the project's tracker; the reply is the issue as filed. A repeated idempotency key files nothing\nmore and returns the first reply.",
+        "summary": "Files a bead in the project's tracker; the reply is the bead as filed. A repeated idempotency key files nothing\nmore and returns the first reply.",
         "operationId": "create",
         "parameters": [
           {
@@ -1379,7 +1379,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateIssue"
+                "$ref": "#/components/schemas/CreateBead"
               }
             }
           },
@@ -1390,7 +1390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Issue"
+                  "$ref": "#/components/schemas/Bead"
                 }
               }
             }
@@ -1478,9 +1478,9 @@
         }
       }
     },
-    "/v1/projects/{project}/issues/{issue}": {
+    "/v1/projects/{project}/beads/{bead}": {
       "get": {
-        "summary": "An issue of a project with its comments, oldest first, read from the project's tracker as the daemon.",
+        "summary": "A bead of a project with its comments, oldest first, read from the project's tracker as the daemon.",
         "operationId": "show",
         "parameters": [
           {
@@ -1492,7 +1492,7 @@
             }
           },
           {
-            "name": "issue",
+            "name": "bead",
             "in": "path",
             "required": true,
             "schema": {
@@ -1505,7 +1505,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IssueReply"
+                  "$ref": "#/components/schemas/BeadReply"
                 }
               }
             }
@@ -1531,7 +1531,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or no such issue in its tracker",
+            "description": "`not_found`: no such project, or no such bead in its tracker",
             "content": {
               "application/json": {
                 "schema": {
@@ -1573,9 +1573,9 @@
         }
       }
     },
-    "/v1/projects/{project}/issues/{issue}/close": {
+    "/v1/projects/{project}/beads/{bead}/close": {
       "post": {
-        "summary": "Closes an issue in the project's tracker, whoever holds it; a closed issue stays closed and answers alike. A\nlive run that holds it is cancelled, unless the session that closes it is that run's.",
+        "summary": "Closes a bead in the project's tracker, whoever holds it; a closed bead stays closed and answers alike. A\nlive run that holds it is cancelled, unless the session that closes it is that run's.",
         "operationId": "close",
         "parameters": [
           {
@@ -1587,7 +1587,7 @@
             }
           },
           {
-            "name": "issue",
+            "name": "bead",
             "in": "path",
             "required": true,
             "schema": {
@@ -1610,7 +1610,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CloseIssue"
+                "$ref": "#/components/schemas/CloseBead"
               }
             }
           },
@@ -1641,7 +1641,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or no such issue in its tracker",
+            "description": "`not_found`: no such project, or no such bead in its tracker",
             "content": {
               "application/json": {
                 "schema": {
@@ -1802,7 +1802,7 @@
         }
       },
       "post": {
-        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready issue to take (docs/design/contracts.md 2.3). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
+        "summary": "Starts a run of a formula; the reply is `{\"run\": \"<id>\"}`, or `{\"nothing_ready\": true}` when a task input\n`{ next_ready = true }` finds no ready bead to take (docs/design/contracts.md 2.3). With `parent`, a stale token or a\nchain deeper than 10 is `rejected`.",
         "operationId": "create",
         "parameters": [
           {
@@ -2109,7 +2109,7 @@
     },
     "/v1/runs/{id}/comment": {
       "post": {
-        "summary": "A comment of the attempt on the issue of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_issue\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
+        "summary": "A comment of the attempt on the bead of its run, queued for the tracker as the attempt's actor (contracts 6.3); the\nreply is `{\"answer\": \"accepted\"|\"no_bead\"|\"stale_attempt\"|\"run_terminal\"|\"invalid\"}`.",
         "operationId": "comment",
         "parameters": [
           {
@@ -3285,6 +3285,111 @@
           }
         }
       },
+      "Bead": {
+        "type": "object",
+        "description": "A bead of a project as its tracker gives it (docs/design/contracts.md 5.2).",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "priority",
+          "labels",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "assignee": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "epic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent of the bead."
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's\ntracker policy adds."
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "BeadComment": {
+        "type": "object",
+        "required": [
+          "author",
+          "created_at",
+          "text"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BeadReply": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Bead"
+          },
+          {
+            "type": "object",
+            "required": [
+              "comments"
+            ],
+            "properties": {
+              "comments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BeadComment"
+                }
+              }
+            }
+          }
+        ],
+        "description": "A bead of a project with its comments, oldest first."
+      },
       "CancelRun": {
         "type": "object",
         "properties": {
@@ -3339,29 +3444,7 @@
           }
         }
       },
-      "CloseGate": {
-        "type": "object",
-        "required": [
-          "key"
-        ],
-        "properties": {
-          "key": {
-            "type": "string",
-            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `issue:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
-          },
-          "reason": {
-            "type": "string"
-          },
-          "until": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`YYYY-MM-DDTHH:MM:SS[.fff]Z`; absent: until opened by hand."
-          }
-        }
-      },
-      "CloseIssue": {
+      "CloseBead": {
         "type": "object",
         "required": [
           "reason"
@@ -3374,12 +3457,34 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ParentAttempt",
-                "description": "The agent session that closes it, as for a filed issue. Absent: `loop-manager`."
+                "description": "The agent session that closes it, as for a filed bead. Absent: `loop-manager`."
               },
               {
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "CloseGate": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "`orchestrator`, `project:<p>`, `rig:<p>/<r>`, `agent:<a>`, `bead:<p>/<id>`, `account:<h>/<id>`,\n`model:<harness>/<model>`."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`YYYY-MM-DDTHH:MM:SS[.fff]Z`; absent: until opened by hand."
           }
         }
       },
@@ -3408,11 +3513,11 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "`accepted`, `no_issue`, `stale_attempt`, `run_terminal` or `invalid`."
+            "description": "`accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`."
           }
         }
       },
-      "CreateIssue": {
+      "CreateBead": {
         "type": "object",
         "required": [
           "title"
@@ -3432,14 +3537,14 @@
               "string",
               "null"
             ],
-            "description": "The issue it lies under."
+            "description": "The bead it lies under."
           },
           "rig": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The rig it is filed for: its id takes the rig's prefix (docs/design/config.md). Absent: an issue of the root,\nwith the tracker's own prefix."
+            "description": "The rig it is filed for: its id takes the rig's prefix (docs/design/config.md). Absent: a bead of the root,\nwith the tracker's own prefix."
           },
           "session": {
             "oneOf": [
@@ -3508,7 +3613,7 @@
               "string",
               "null"
             ],
-            "description": "Absent: the rig of the id prefix of the issue its task names; else the run\nworks in the project root."
+            "description": "Absent: the rig of the id prefix of the bead its task names; else the run\nworks in the project root."
           }
         }
       },
@@ -3918,111 +4023,6 @@
           }
         }
       },
-      "Issue": {
-        "type": "object",
-        "description": "An issue of a project as its tracker gives it (docs/design/contracts.md 5.2).",
-        "required": [
-          "id",
-          "title",
-          "description",
-          "status",
-          "priority",
-          "labels",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "assignee": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "closed_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "epic": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The parent of the issue."
-          },
-          "id": {
-            "type": "string"
-          },
-          "labels": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "priority": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "status": {
-            "type": "string",
-            "description": "The tracker's status as text: `open`, `in_progress`, `blocked`, `deferred`, `closed`, or one the project's\ntracker policy adds."
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "IssueComment": {
-        "type": "object",
-        "required": [
-          "author",
-          "created_at",
-          "text"
-        ],
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          }
-        }
-      },
-      "IssueReply": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Issue"
-          },
-          {
-            "type": "object",
-            "required": [
-              "comments"
-            ],
-            "properties": {
-              "comments": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/IssueComment"
-                }
-              }
-            }
-          }
-        ],
-        "description": "An issue of a project with its comments, oldest first."
-      },
       "JournalHealth": {
         "type": "object",
         "description": "Failed journal writes in a row and the last error.",
@@ -4228,7 +4228,7 @@
               "string",
               "null"
             ],
-            "description": "The prefix of the ids of the rig's issues; null for the root, whose issues carry the tracker's own."
+            "description": "The prefix of the ids of the rig's beads; null for the root, whose beads carry the tracker's own."
           },
           "vars": {
             "type": "object",
@@ -4306,6 +4306,12 @@
               "type": "string"
             }
           },
+          "bead": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "budget_usd": {
             "type": [
               "string",
@@ -4354,12 +4360,6 @@
           },
           "inputs": {
             "type": "object"
-          },
-          "issue": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "outcome": {
             "oneOf": [
@@ -4637,7 +4637,7 @@
       },
       "Started": {
         "type": "object",
-        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready issue the run can take; `passed_over`: the ready issues it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
+        "description": "A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found\nno ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the\nconfig does not give, an `agent:` label that does not resolve).",
         "properties": {
           "nothing_ready": {
             "type": [

@@ -71,7 +71,7 @@ marked `[experimental]`, and codex released every 2–8 days (observed on 2026-1
 | 15 | second writer in the session | claude does not refuse it: one writer per session is the core's to keep |
 
 `crates/loop-manager/tests/e2e/claude.rs` adds the daemon side: the finisher passes a prompt run, `kill -9` in a command
-is typed within a second and resumed with the issue's claim held (criteria 9 and 16), and a finisher called with a
+is typed within a second and resumed with the bead's claim held (criteria 9 and 16), and a finisher called with a
 background command running passes the run only after the command (criterion 4a on the fake).
 
 ## What the codex suite covers

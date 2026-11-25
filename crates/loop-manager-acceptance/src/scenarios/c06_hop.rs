@@ -1,5 +1,5 @@
 //! Criterion 6: the hop from the commit of `run.passed` of run A to the launch of the harness of run B, started by a
-//! subscription on that event; no issue, no worktree, no veto hooks. 30 hops: three chains of a prompt formula on the
+//! subscription on that event; no bead, no worktree, no veto hooks. 30 hops: three chains of a prompt formula on the
 //! real `claude` against a fake Anthropic API, each run passing by the finisher; a chain ends at the depth limit
 //! (ten hops from a run started by hand).
 //!

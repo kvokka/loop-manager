@@ -41,9 +41,9 @@ loop-manager starts agents through their own command-line harnesses and never do
   normally do, or give the agents an API key in `env` (see [the first formula](first-formula.md)). A codex whose
   host config selects a model provider with an `env_key` needs no login: `codex login status` then says "Not logged
   in", and `loop-manager doctor` checks that variable instead.
-- `br` (beads_rust): only for projects that keep their issues in a br tracker ([issue
-  trackers](issue-trackers.md#the-br-tracker)). Read [its license](../../README.md#the-br-tracker-and-its-license)
-  before you install it.
+- `br` (beads_rust): only for projects that keep their beads in a br tracker
+  ([trackers](trackers.md#the-br-tracker)). Read [its license](../../README.md#the-br-tracker-and-its-license) before
+  you install it.
 
 Running a harness headless spends the limits of your subscription, and a vendor's terms may restrict how a
 subscription is used through its automation interfaces (OpenAI's terms for the codex app-server limit commercial and
@@ -105,7 +105,7 @@ loop-manager doctor                                      # with the daemon runni
 ```
 
 `loop-manager doctor` checks the config, each harness binary (where it was found, its version, the login), the tracker's
-binary and its checks ([br](issue-trackers.md#how-it-is-wired)), addon dependency versions, the modes of the state
+binary and its checks ([br](trackers.md#how-it-is-wired)), addon dependency versions, the modes of the state
 and socket directories, and the state with its outbox. Without `--config` it asks the running daemon (`GET /v1/doctor`), which makes the checks from
 inside its process, with its environment, `PATH` and config file; with no daemon it fails and says so. With `--config
 <file>` it needs no daemon and checks that file from the shell it runs in. Both modes print the findings in TOON by

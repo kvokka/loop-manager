@@ -144,7 +144,7 @@ fn past_soft_a_codex_session_is_told_to_wrap_up_by_the_last_count_and_may_spawn_
 }
 
 #[test]
-fn the_compaction_of_codex_or_a_count_past_hard_leaves_the_state_on_the_issue_and_stops_the_session() {
+fn the_compaction_of_codex_or_a_count_past_hard_leaves_the_state_on_the_bead_and_stops_the_session() {
     // codex compacts at `hard` by its own count, which the rollout may not show yet: `PreCompact` stops the session.
     for (cut, name, tokens) in [
         ("fail", "PreCompact", 6900),
@@ -166,7 +166,7 @@ fn the_compaction_of_codex_or_a_count_past_hard_leaves_the_state_on_the_issue_an
         } else {
             assert_eq!(stop, json!({ "continue": false, "stopReason": STOPPED }), "{name}");
         }
-        let summary = "context budget: the session was stopped; its state is on the issue";
+        let summary = "context budget: the session was stopped; its state is on the bead";
         assert_eq!(bed.finished(), format!("finish {cut} --summary {summary}\n"), "{name}");
         let comments = bed.comments();
         assert_eq!(comments.len(), 1, "{comments:?}");

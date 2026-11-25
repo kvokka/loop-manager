@@ -12,35 +12,35 @@ fn project_trigger(trigger: &str) -> String {
 fn triggers_are_checked_against_events_and_formulas() {
     let cases = [
         (
-            "name = \"t\"\non = \"issue.ready\"\nwhere = { \"issue.nope\" = 1 }\nrun = \"audit\"",
-            "has no `issue.nope`",
+            "name = \"t\"\non = \"bead.ready\"\nwhere = { \"bead.nope\" = 1 }\nrun = \"audit\"",
+            "has no `bead.nope`",
         ),
         (
             "name = \"t\"\non = \"run.passed\"\nwhere = { run = \"r1\" }\nrun = \"audit\"",
             "has no `run`",
         ),
         (
-            "name = \"t\"\non = \"issue.gone\"\nrun = \"audit\"",
-            "unknown event type `issue.gone`",
+            "name = \"t\"\non = \"bead.gone\"\nrun = \"audit\"",
+            "unknown event type `bead.gone`",
         ),
         (
-            "name = \"t\"\nevery = \"1h\"\nrun = \"implement\"\ninputs = { issue = \"{{ event.issue.id }}\" }",
+            "name = \"t\"\nevery = \"1h\"\nrun = \"implement\"\ninputs = { bead = \"{{ event.bead.id }}\" }",
             "no event",
         ),
         (
-            "name = \"t\"\non = \"issue.ready\"\nrun = \"implement\"\ninputs = { issue = \"{{ event.issue.nope }}\" }",
-            "no `issue.nope`",
+            "name = \"t\"\non = \"bead.ready\"\nrun = \"implement\"\ninputs = { bead = \"{{ event.bead.nope }}\" }",
+            "no `bead.nope`",
         ),
         (
-            "name = \"t\"\non = \"issue.ready\"\nrun = \"implement\"\ninputs = { issue = \"x\", extra = 1 }",
+            "name = \"t\"\non = \"bead.ready\"\nrun = \"implement\"\ninputs = { bead = \"x\", extra = 1 }",
             "no input `extra`",
         ),
         (
-            "name = \"t\"\non = \"issue.ready\"\nrun = \"implement\"",
-            "required input `issue`",
+            "name = \"t\"\non = \"bead.ready\"\nrun = \"implement\"",
+            "required input `bead`",
         ),
         (
-            "name = \"t\"\non = \"issue.ready\"\ncron = \"0 3 * * *\"\nrun = \"audit\"",
+            "name = \"t\"\non = \"bead.ready\"\ncron = \"0 3 * * *\"\nrun = \"audit\"",
             "exactly one of",
         ),
         ("name = \"t\"\ncron = \"0 3 * *\"\nrun = \"audit\"", "five cron fields"),

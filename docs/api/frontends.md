@@ -64,11 +64,11 @@ The surface: projects with their root and rigs (`GET /v1/projects`: `name`, `dir
 (`GET /v1/agents` gives each agent's harness in the project outside any rig and formula, `null` when its layers do not
 set one, and the call graph there: `subagents`, the agents and variants its session may call, and `called_by`, the
 agents that may call it, the agent itself left out of both; `loop-manager agent list` includes both arrays),
-formulas, packs, addons (list), config check, explain and reload; the issues of a project: one with its comments
-(`GET /v1/projects/{project}/issues/{issue}`), those under a root (`GET /v1/projects/{project}/issues?under=<root>`),
-filing one (`POST /v1/projects/{project}/issues`) and closing one (`POST /v1/projects/{project}/issues/{issue}/close`); runs
+formulas, packs, addons (list), config check, explain and reload; the beads of a project: one with its comments
+(`GET /v1/projects/{project}/beads/{bead}`), those under a root (`GET /v1/projects/{project}/beads?under=<root>`),
+filing one (`POST /v1/projects/{project}/beads`) and closing one (`POST /v1/projects/{project}/beads/{bead}/close`); runs
 (start, list, state, spend, live view, cancel, finish, resolve) and their spend metrics; triggers (list, enable, disable, fire by hand);
-instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, issue,
+instances and services (list, stop an idle one); issue gates (list, close, open — orchestrator, project, agent, bead,
 account); events; daemon status, drain and planned restart.
 
 ## CLI
@@ -87,7 +87,7 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   `--budget <USD>` (`budget_usd` of `POST /v1/runs`, a decimal string) replaces the formula's `budget` as the run's
   spend limit ([config](../design/config.md), "Formula"); the run view gives it as `budget_usd`.
   With `--json`, read the id from the reply's `run` field. Without the rig the run takes the rig of the id prefix of
-  the issue its task names, else works in the project root. When a task input `{"next_ready": true}` finds nothing
+  the bead its task names, else works in the project root. When a task input `{"next_ready": true}` finds nothing
   ready it exits 3, with a message on stderr by default or `"nothing_ready": true` in the JSON reply. Inside an agent
   session (`LOOP_MANAGER_RUN` and `LOOP_MANAGER_ATTEMPT_TOKEN` set, as for `loop-manager finish`) it sends them as
   `parent` of `POST /v1/runs`: the run is a child of the session's run, with its
@@ -139,36 +139,36 @@ Code: `crates/loop-manager-front/src/cli/`. The CLI is a thin client of the HTTP
   (for example `accepted`), or the object with the `answer` field under `--json`. It retries for 60 s under one
   idempotency key and exits 75 when the daemon stays unreachable.
 - `loop-manager comment --file <file>` (`POST /v1/runs/{id}/comment`) puts the text of the file as a comment on the
-  issue of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
-  A run without an issue (`no_issue`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
-- `loop-manager issue show <issue> --project <project>` (`GET /v1/projects/{project}/issues/{issue}`) reads the
-  issue from the project's tracker through the daemon and prints its fields (`title`, `description`, `status`,
+  bead of the session's run, as its attempt ([contracts](../design/contracts.md#63-finisher)), and prints `accepted`.
+  A run without a bead (`no_bead`), a stale attempt, an ended run or an invalid token prints an error and exits 1.
+- `loop-manager bead show <bead> --project <project>` (`GET /v1/projects/{project}/beads/{bead}`) reads the
+  bead from the project's tracker through the daemon and prints its fields (`title`, `description`, `status`,
   `labels`, `assignee`, `epic`, ...) and its `comments` (`author`, `created_at`, `text`, oldest first): how a plugin, a
-  skill or an agent reads an issue whatever the project's tracker. A project or an issue there is none of is
+  skill or an agent reads a bead whatever the project's tracker. A project or a bead there is none of is
   `not_found`, a project without a tracker `rejected`, a tracker that cannot be read `tracker_unavailable` (503) or
   `tracker` (502); each exits 1.
-- `loop-manager issue list <root> --project <project>` (`GET /v1/projects/{project}/issues?under=<root>`) lists the
-  issues under the root issue at any depth, the root left out, closed ones included, oldest first, each with its
-  fields as `issue show` gives them but without comments: `status` tells what is left to do.
-- `loop-manager issue create --project <project> --title <title> [--description <text>] [--label <label>]...
-  [--parent <issue>] [--rig <rig>] [--key <key>]` (`POST /v1/projects/{project}/issues`) files an issue and prints
-  its bare id (the issue as filed with `--json`). With `--rig` the id takes the rig's prefix
-  ([config](../design/config.md#project-loop-managertoml), decision 96); without it the issue is of the project root,
-  with the tracker's own prefix. `--parent` files it under another issue, as a planner files the work under the root
-  issue of its run.
-- `loop-manager issue close <issue> --project <project> --reason <text> [--key <key>]`
-  (`POST /v1/projects/{project}/issues/{issue}/close`) closes the issue whoever holds it and prints `null`; a closed
-  issue stays closed and answers alike. A live run that holds the issue is cancelled with reason `issue_closed`, unless
+- `loop-manager bead list <root> --project <project>` (`GET /v1/projects/{project}/beads?under=<root>`) lists the
+  beads under the root bead at any depth, the root left out, closed ones included, oldest first, each with its
+  fields as `bead show` gives them but without comments: `status` tells what is left to do.
+- `loop-manager bead create --project <project> --title <title> [--description <text>] [--label <label>]...
+  [--parent <bead>] [--rig <rig>] [--key <key>]` (`POST /v1/projects/{project}/beads`) files a bead and prints
+  its bare id (the bead as filed with `--json`). With `--rig` the id takes the rig's prefix
+  ([config](../design/config.md#project-projectloop-managertoml), decision 96); without it the bead is of the project
+  root, with the tracker's own prefix. `--parent` files it under another bead, as a planner files the work under the
+  root bead of its run.
+- `loop-manager bead close <bead> --project <project> --reason <text> [--key <key>]`
+  (`POST /v1/projects/{project}/beads/{bead}/close`) closes the bead whoever holds it and prints `null`; a closed
+  bead stays closed and answers alike. A live run that holds the bead is cancelled with reason `bead_closed`, unless
   the close comes from that run's own session.
-- `issue create` and `issue close` write as the session's attempt (`loop-manager:<run>:<attempt>`) inside an agent
+- `bead create` and `bead close` write as the session's attempt (`loop-manager:<run>:<attempt>`) inside an agent
   session (`LOOP_MANAGER_RUN` and `LOOP_MANAGER_ATTEMPT_TOKEN` set, sent as `session`), as `loop-manager comment` does,
   and as `loop-manager` from a shell of its own ([contracts](../design/contracts.md#51-operations)). A token that is
-  not that of the current attempt of a live run is `rejected`. A rig, a parent or an issue there is none of is
+  not that of the current attempt of a live run is `rejected`. A rig, a parent or a bead there is none of is
   `not_found`; a project without a tracker `rejected`; a tracker that refuses the call (a parent with open children
   is not closed) `tracker` (502), one that cannot be reached `tracker_unavailable` (503); each exits 1. The daemon
   carries these two out itself, not the core, and keeps their reply under the idempotency key in the core's table, so
   a repeat answers as the first and the key of another request is `idempotency_key_reused`; the tracker gets the key
-  too, so a request cut before its reply was kept files one issue.
+  too, so a request cut before its reply was kept files one bead.
 - `loop-manager format` reads one JSON value from stdin and writes TOON to stdout. For example,
   `loop-manager format < report.json` formats a report assembled by a script. Invalid input exits 1.
 - `loop-manager version` prints the same version as `loop-manager --version`. Use `loop-manager version --git-sha`
@@ -208,7 +208,7 @@ tokens in every session, so an agent names it in its own config
   `{session_id, config_dir, workdir}`, codex `{thread_id, codex_home}`). After the run a human may open that conversation
   with the harness's own tools.
 - A run that failed for good is recovered by hand with these commands: continue its session, start a new one on its
-  issue with or without a note, or abandon the issue ([recovering a failed run](../guide/recovery.md)).
+  bead with or without a note, or abandon the bead ([recovering a failed run](../guide/recovery.md)).
 - Joining a live session and handing control over to a human are not in the first release: it has no operation, no
   state and no stub for them, and the driver interface has none either
   ([contracts](../design/contracts.md#41-shape)).

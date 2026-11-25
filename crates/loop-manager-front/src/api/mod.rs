@@ -2,12 +2,12 @@
 //! `Idempotency-Key` header: a repeated request with the same key returns the first reply and changes nothing; the
 //! key repeated with another method, path or body is refused with 422.
 
+mod beads;
 pub(crate) mod config;
 mod daemon;
 mod events;
 mod gates;
 mod instances;
-mod issues;
 mod live;
 pub mod mcp;
 mod replies;
@@ -66,7 +66,7 @@ pub struct Api {
     /// The worktree of a run in the repository of a place, for the `bases` of a run (`Reader::bases`): the bundled
     /// `worktree`'s, which the core does not link.
     pub tree: fn(&std::path::Path, &str) -> Option<std::path::PathBuf>,
-    /// The trackers of the projects that have one, by project name, as the core got them: the `issue` commands use them.
+    /// The trackers of the projects that have one, by project name, as the core got them: the `bead` commands use them.
     pub trackers: std::collections::BTreeMap<String, Arc<dyn loop_manager_core::tracker::Tracker>>,
 }
 
@@ -112,9 +112,9 @@ fn router() -> OpenApiRouter<Arc<Api>> {
         .routes(routes!(triggers::disable))
         .routes(routes!(triggers::list))
         .routes(routes!(config::list_projects))
-        .routes(routes!(issues::list, issues::create))
-        .routes(routes!(issues::show))
-        .routes(routes!(issues::close))
+        .routes(routes!(beads::list, beads::create))
+        .routes(routes!(beads::show))
+        .routes(routes!(beads::close))
         .routes(routes!(config::list_agents))
         .routes(routes!(config::list_formulas))
         .routes(routes!(config::list_packs))

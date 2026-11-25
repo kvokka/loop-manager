@@ -86,7 +86,7 @@ impl Config {
     }
 
     /// [`Self::for_run`] with the agent `as_agent` (a variant's name, else an agent's) in place of the step's: the
-    /// one the `agent:` label of a run's issue names (docs/design/config.md).
+    /// one the `agent:` label of a run's bead names (docs/design/config.md).
     pub fn for_run_as(
         &self,
         project: &str,

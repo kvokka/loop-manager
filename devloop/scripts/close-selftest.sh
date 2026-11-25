@@ -17,10 +17,10 @@ printf 'target/\ndevloop/artifacts/\n' >.gitignore
 echo 'full CI log' >target/devloop/runs/run_test/ci.log
 (cd devloop && br init --prefix dev -q)
 export BEADS_DIR="$PWD/devloop/.beads"
-issue=$(br create 'Close the epic' --json | jq -er .id)
-export LOOP_MANAGER_ISSUE="$issue"
-br update "$issue" --assignee loop-manager:run_test -q
-br comments add "$issue" 'CODER: done' -q
+bead=$(br create 'Close the epic' --json | jq -er .id)
+export LOOP_MANAGER_BEAD="$bead"
+br update "$bead" --assignee loop-manager:run_test -q
+br comments add "$bead" 'CODER: done' -q
 git add -A && git commit -qm init && git push -qu origin HEAD
 
 git remote set-url origin "$tmp/missing.git"

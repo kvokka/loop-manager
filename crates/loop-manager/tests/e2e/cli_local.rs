@@ -157,8 +157,8 @@ fn the_config_is_checked_and_explained_without_a_daemon() {
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    let issues = format!("env.BEADS_DIR = \"{}\"", files.join("shop/.beads").display());
-    assert!(text.contains(&issues), "{text}");
+    let beads = format!("env.BEADS_DIR = \"{}\"", files.join("shop/.beads").display());
+    assert!(text.contains(&beads), "{text}");
     assert!(text.contains("env.BR_OUTPUT_FORMAT = \"toon\""), "{text}");
 }
 

@@ -51,10 +51,10 @@ const POLICY: &[(&str, &str)] = &[
 
 const FIX: &[(&str, &str)] = &[
     ("shop/agents/fixer/agent.toml", "harness = \"scripted\"\n"),
-    ("shop/agents/fixer/prompt.template.md", "Fix {{ issue.title }}."),
+    ("shop/agents/fixer/prompt.template.md", "Fix {{ bead.title }}."),
     (
         "shop/formulas/fix.toml",
-        "name = \"fix\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"fix\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"ai\"\nagent = \"fixer\"\n",
     ),
 ];
@@ -74,16 +74,16 @@ const SHIP: &[(&str, &str)] = &[
     ("shop/agents/dev/prompt.template.md", "Ship {{ rig.name }}."),
 ];
 
-/// A drain step that gives every issue under the root a run of `fix`, then an ai step.
+/// A drain step that gives every bead under the root a run of `fix`, then an ai step.
 const SWEEP: &[(&str, &str)] = &[(
     "shop/formulas/sweep.toml",
-    "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+    "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
      [[step]]\nkind = \"drain\"\nformula = \"fix\"\npool = 2\n\
      [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
 )];
 
-/// The issues of the tracker: `b-1` and `b-2` for runs of `fix`, the root `b-3` of `sweep` and its children of `web`.
-const ISSUES: [&str; 5] = ["b-1", "b-2", "b-3", "w-4", "w-5"];
+/// The beads of the tracker: `b-1` and `b-2` for runs of `fix`, the root `b-3` of `sweep` and its children of `web`.
+const BEADS: [&str; 5] = ["b-1", "b-2", "b-3", "w-4", "w-5"];
 
 /// Seeds in all, unless `LOOP_MANAGER_CHAOS_SEEDS` says otherwise; the tests split them so that nextest runs them side by side.
 const SEEDS: u64 = 1_000;
@@ -212,19 +212,14 @@ async fn play(seed: u64) -> Result<Played, String> {
     if !stuck.is_empty() {
         return Err(report(&play, format!("no end after the faults stopped: {stuck:?}")));
     }
-    // Every run ended and the tracker is up: no open issue is left assigned to a run (invariants 4, 5).
+    // Every run ended and the tracker is up: no open bead is left assigned to a run (invariants 4, 5).
     tokio::time::sleep(Duration::from_secs(3_600)).await;
-    for id in ISSUES {
-        let issue = w.tracker.issue(id).unwrap();
-        if issue.status != "closed"
-            && issue
-                .assignee
-                .as_deref()
-                .is_some_and(|a| a.starts_with("loop-manager:"))
-        {
+    for id in BEADS {
+        let bead = w.tracker.bead(id).unwrap();
+        if bead.status != "closed" && bead.assignee.as_deref().is_some_and(|a| a.starts_with("loop-manager:")) {
             return Err(report(
                 &play,
-                format!("{id} is {} and still held by {:?}", issue.status, issue.assignee),
+                format!("{id} is {} and still held by {:?}", bead.status, bead.assignee),
             ));
         }
     }

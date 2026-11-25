@@ -15,14 +15,14 @@ model = "haiku"
 [agents.coder]
 model = "haiku"
 
-# `vars.harness` tells the planner what the coder of the rig runs on, for the `harness:` label of its issues; an issue
+# `vars.harness` tells the planner what the coder of the rig runs on, for the `harness:` label of its beads; a bead
 # whose label disagrees with the config gets no run.
 [rigs.frontend]
 path = "../frontend"
 vars = { harness = "claude" }         # the coder runs on claude here, as in the whole project
 [rigs.backend]
 path = "../backend"
-prefix = "api"                        # its issues are `api-…`, not the acronym `b-…`
+prefix = "api"                        # its beads are `api-…`, not the acronym `b-…`
 vars = { harness = "codex" }
 [rigs.backend.agents.coder]           # on this rig the same coder runs on codex
 harness = "codex"

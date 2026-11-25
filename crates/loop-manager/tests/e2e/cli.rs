@@ -445,10 +445,10 @@ async fn a_comment_outside_a_session_needs_the_session_environment() {
     assert_eq!((out.status.code(), &error["error"]["code"]), (Some(1), &"usage".into()));
 }
 
-/// `issue show` reads an issue of a project from its br tracker through the daemon: its fields and its comments, in
-/// TOON by default; an issue or a project there is none of exits 1 with `not_found` (docs/api/frontends.md).
+/// `bead show` reads a bead of a project from its br tracker through the daemon: its fields and its comments, in
+/// TOON by default; a bead or a project there is none of exits 1 with `not_found` (docs/api/frontends.md).
 #[tokio::test]
-async fn an_issue_is_shown_from_the_tracker_of_its_project() {
+async fn a_bead_is_shown_from_the_tracker_of_its_project() {
     let d = Daemon::start(|dir| {
         crate::tracker::br_in(
             &dir.join("config/loop-manager/shop"),
@@ -465,7 +465,7 @@ async fn an_issue_is_shown_from_the_tracker_of_its_project() {
     );
     crate::tracker::br_in(&project, None, &["label", "add", &id, "review"]);
     crate::tracker::br_in(&project, None, &["comments", "add", &id, "Seen on mobile"]);
-    let shown = d.json(&["issue", "show", &id, "--project", "shop"]);
+    let shown = d.json(&["bead", "show", &id, "--project", "shop"]);
     assert_eq!(
         (
             &shown["title"],
@@ -485,18 +485,18 @@ async fn an_issue_is_shown_from_the_tracker_of_its_project() {
         (&shown["comments"][0]["text"], &shown["comments"][0]["author"]),
         (&json!("Seen on mobile"), &json!("alice"))
     );
-    let out = d.cli(&["issue", "show", &id, "--project", "shop"], &[]);
+    let out = d.cli(&["bead", "show", &id, "--project", "shop"], &[]);
     let toon = String::from_utf8(out.stdout).unwrap();
     assert!(
         out.status.success() && toon.contains("status: open") && toon.contains("Seen on mobile"),
         "{toon}"
     );
-    for (issue, project) in [("t-none", "shop"), (id.as_str(), "mall")] {
-        let out = d.cli(&["issue", "show", issue, "--project", project], &[]);
+    for (bead, project) in [("t-none", "shop"), (id.as_str(), "mall")] {
+        let out = d.cli(&["bead", "show", bead, "--project", project], &[]);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             out.status.code() == Some(1) && stderr.contains("not_found"),
-            "{issue} {project}: {stderr}"
+            "{bead} {project}: {stderr}"
         );
     }
 }
@@ -521,19 +521,19 @@ fn code(d: &Daemon, args: &[&str], env: &[(&str, &str)]) -> String {
     error["error"]["code"].as_str().unwrap().to_owned()
 }
 
-/// `issue create`, `issue list` and `issue close` go through the daemon to the project's br tracker: an issue filed
-/// for a rig takes the rig's prefix and is written as `loop-manager` outside a session, the list holds the issues under
+/// `bead create`, `bead list` and `bead close` go through the daemon to the project's br tracker: a bead filed
+/// for a rig takes the rig's prefix and is written as `loop-manager` outside a session, the list holds the beads under
 /// a root with their status, and a parent with open children is not closed (docs/api/frontends.md).
 #[tokio::test]
-async fn issues_are_filed_listed_and_closed_from_the_cli() {
+async fn beads_are_filed_listed_and_closed_from_the_cli() {
     let d = with_br().await;
     let project = d.dir.path().join("config/loop-manager/shop");
-    let out = d.cli(&["issue", "create", "--project", "shop", "--title", "Dark mode"], &[]);
+    let out = d.cli(&["bead", "create", "--project", "shop", "--title", "Dark mode"], &[]);
     let root = String::from_utf8(out.stdout).unwrap().trim().to_owned();
     assert!(out.status.success() && root.starts_with("t-"), "{root}");
     let text = "A switch in the header";
     let filed = d.json(&[
-        "issue",
+        "bead",
         "create",
         "--project",
         "shop",
@@ -557,40 +557,36 @@ async fn issues_are_filed_listed_and_closed_from_the_cli() {
     let shown = crate::tracker::br_in(&project, None, &["show", &child, "--json"]);
     let shown: Value = serde_json::from_str(&shown).unwrap();
     assert_eq!(shown[0]["created_by"], "loop-manager");
-    let listed = d.json(&["issue", "list", &root, "--project", "shop"]);
+    let listed = d.json(&["bead", "list", &root, "--project", "shop"]);
     assert_eq!(
         (listed.as_array().map(Vec::len), &listed[0]["id"], &listed[0]["status"]),
         (Some(1), &json!(child), &json!("open")),
         "{listed}"
     );
-    let close = |issue: &str| ["issue", "close", issue, "--project", "shop", "--reason", "done"].map(str::to_owned);
+    let close = |bead: &str| ["bead", "close", bead, "--project", "shop", "--reason", "done"].map(str::to_owned);
     let args = close(&root);
     assert_eq!(
         code(&d, &args.each_ref().map(String::as_str), &[]),
         "tracker",
         "a parent with an open child"
     );
-    for issue in [&child, &child, &root] {
-        let out = d.cli(&close(issue).each_ref().map(String::as_str), &[]);
-        assert!(
-            out.status.success(),
-            "{issue}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+    for bead in [&child, &child, &root] {
+        let out = d.cli(&close(bead).each_ref().map(String::as_str), &[]);
+        assert!(out.status.success(), "{bead}: {}", String::from_utf8_lossy(&out.stderr));
     }
-    let listed = d.json(&["issue", "list", &root, "--project", "shop"]);
+    let listed = d.json(&["bead", "list", &root, "--project", "shop"]);
     assert_eq!(listed[0]["status"], "closed", "{listed}");
 }
 
 /// A repeated key files nothing more and another request with it is refused; a rig, a parent or a root there is none
 /// of is `not_found`, a session token that is no live attempt's `rejected` (docs/api/frontends.md).
 #[tokio::test]
-async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
+async fn bead_writes_keep_their_key_and_refuse_what_is_not_there() {
     let d = with_br().await;
     let keyed = |title: &str| {
         let args = [
             "--json",
-            "issue",
+            "bead",
             "create",
             "--project",
             "shop",
@@ -607,13 +603,13 @@ async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
     let error: Value = serde_json::from_slice(&keyed("Other").stderr).unwrap();
     assert_eq!(error["error"]["code"], "idempotency_key_reused");
     // The tracker keeps no key of a close: the daemon answers a reused key before it closes anything.
-    let other = d.json(&["issue", "create", "--project", "shop", "--title", "Kept open"]);
-    let close = |issue: &str| {
+    let other = d.json(&["bead", "create", "--project", "shop", "--title", "Kept open"]);
+    let close = |bead: &str| {
         let args = [
             "--json",
-            "issue",
+            "bead",
             "close",
-            issue,
+            bead,
             "--project",
             "shop",
             "--reason",
@@ -632,7 +628,7 @@ async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
     let shown = crate::tracker::br_in(&project, None, &["show", other["id"].as_str().unwrap(), "--json"]);
     let shown: Value = serde_json::from_str(&shown).unwrap();
     assert_eq!(shown[0]["status"], "open");
-    let create = ["issue", "create", "--project", "shop", "--title", "Lost"];
+    let create = ["bead", "create", "--project", "shop", "--title", "Lost"];
     assert_eq!(code(&d, &[&create[..], &["--rig", "api"]].concat(), &[]), "not_found");
     assert_eq!(
         code(&d, &[&create[..], &["--parent", "t-none"]].concat(), &[]),
@@ -641,7 +637,7 @@ async fn issue_writes_keep_their_key_and_refuse_what_is_not_there() {
     let stale = [("LOOP_MANAGER_RUN", "run_9"), ("LOOP_MANAGER_ATTEMPT_TOKEN", "nope")];
     assert_eq!(code(&d, &create, &stale), "rejected");
     assert_eq!(
-        code(&d, &["issue", "list", "t-none", "--project", "shop"], &[]),
+        code(&d, &["bead", "list", "t-none", "--project", "shop"], &[]),
         "not_found"
     );
 }

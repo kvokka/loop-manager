@@ -59,7 +59,7 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
         attempt: 1,
         token: "tok".into(),
         actor: Some(actor()),
-        issue: Some("bd-1".into()),
+        bead: Some("bd-1".into()),
     };
     let driver = Codex::new("codex".into(), "/state".into(), None, 8);
     let split = driver.split(&config, &plan).unwrap();
@@ -90,7 +90,7 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
     assert_eq!(
         s["config"]["shell_environment_policy"]["set"],
         json!({ "LOOP_MANAGER_RUN": "r", "LOOP_MANAGER_ATTEMPT_TOKEN": "tok", "BD_ACTOR": "loop-manager:r:1",
-            "BR_AGENT_NAME": "p.coder", "BR_HARNESS": "codex", "BR_MODEL": "gpt-fake", "LOOP_MANAGER_ISSUE": "bd-1" })
+            "BR_AGENT_NAME": "p.coder", "BR_HARNESS": "codex", "BR_MODEL": "gpt-fake", "LOOP_MANAGER_BEAD": "bd-1" })
     );
     let no_model = EffectiveConfig {
         model: None,
@@ -102,7 +102,7 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
         "no model, no model variable: {set}"
     );
     // A hook runs with the process environment: the attempt's goes on its command line.
-    let exports = "export BD_ACTOR='loop-manager:r:1' BR_AGENT_NAME='p.coder' BR_HARNESS='codex' BR_MODEL='gpt-fake' LOOP_MANAGER_ATTEMPT_TOKEN='tok' LOOP_MANAGER_ISSUE='bd-1' LOOP_MANAGER_RUN='r'; true";
+    let exports = "export BD_ACTOR='loop-manager:r:1' BR_AGENT_NAME='p.coder' BR_HARNESS='codex' BR_MODEL='gpt-fake' LOOP_MANAGER_ATTEMPT_TOKEN='tok' LOOP_MANAGER_BEAD='bd-1' LOOP_MANAGER_RUN='r'; true";
     assert_eq!(s["config"]["hooks"]["Stop"][0]["hooks"][0]["command"], exports);
     assert_eq!(s["config"]["bypass_hook_trust"], true);
     assert_eq!(s["config"]["model_reasoning_effort"], "low");
@@ -117,14 +117,14 @@ fn the_process_gets_the_native_block_and_the_thread_the_rest() {
         attempt: 2,
         token: "t2".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let other = driver.split(&config, &other).unwrap();
     assert_eq!(other.fingerprint, split.fingerprint);
     let set = &other.session.0["config"]["shell_environment_policy"]["set"];
     assert!(
-        set.get("LOOP_MANAGER_ISSUE").is_none(),
-        "a run without an issue has no LOOP_MANAGER_ISSUE: {set}"
+        set.get("LOOP_MANAGER_BEAD").is_none(),
+        "a run without a bead has no LOOP_MANAGER_BEAD: {set}"
     );
     // A config naming no policy gets the harness-decides default (decision 117); a named one is kept.
     let native = &mut config.native.as_mut().unwrap().value;
@@ -284,7 +284,7 @@ fn the_process_part_keeps_the_reference_and_the_process_gets_the_value() {
         attempt: 1,
         token: "tok".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let driver = Codex::new("codex".into(), "/state".into(), None, 8);
     let mut key = |value: &str| {
@@ -336,7 +336,7 @@ fn a_thread_gets_a_role_per_target_and_the_process_their_skills() {
         attempt: 1,
         token: "tok".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let split = driver.split(&config, &new).unwrap();
     assert_eq!(split.process.0["skills"], json!({ "own": "/s/own", "qa": "/s/qa" }));
@@ -378,7 +378,7 @@ fn a_thread_gets_a_role_per_target_and_the_process_their_skills() {
         attempt: 2,
         token: "t2".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let again = driver.split(&config, &resume).unwrap().session.0;
     assert_eq!((&again["config"]["agents"], &again["roles"]), (agents, &s["roles"]));

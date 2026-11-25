@@ -1,13 +1,13 @@
-Review the work on the epic `{{ issue.id }}`: {{ issue.title }}
+Review the work on the epic `{{ bead.id }}`: {{ bead.title }}
 
 <epic>
-{{ issue.description }}
+{{ bead.description }}
 </epic>
 
-The last comments on the epic, oldest first; `br comments {{ issue.id }}` gives all of them:
+The last comments on the epic, oldest first; `br comments {{ bead.id }}` gives all of them:
 
 <comments>
-{{ issue.comments }}
+{{ bead.comments }}
 </comments>
 
 The full test run that followed the coder (the step `ci_report`: `mise run ci` on the tree the coder left):

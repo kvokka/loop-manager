@@ -61,7 +61,7 @@ impl RunHandler {
         // A run whose turn ended waits for the decision on it (`waiting`) and keeps waiting; one whose turn ended with
         // the outcome declared was only waiting for its background to stop, which the kill above did
         // (docs/design/contracts.md 6); the others had an attempt going, which is lost (a drain step's too: its next
-        // attempt gives no issue its entry has given). A run waiting in an await step has no attempt to lose: it waits on.
+        // attempt gives no bead its entry has given). A run waiting in an await step has no attempt to lose: it waits on.
         let caught: Vec<(String, bool, bool)> = {
             let mut stmt = tx.sql().prepare(
                 "SELECT r.id, r.state IN ('running', 'finishing') AND r.waiting IS NOT NULL, \
@@ -143,7 +143,7 @@ impl RunHandler {
         for (run, at) in waiting {
             tx.set_deadline(&format!("{run}:decide"), at + DECIDE_SLACK_MS)?;
         }
-        // A run in `preparing` with a state deadline waits for the tracker: the claim of its issue, or its comments and
+        // A run in `preparing` with a state deadline waits for the tracker: the claim of its bead, or its comments and
         // parents.
         tx.sql().execute(
             "UPDATE deadlines SET at_ms = ?1 WHERE id IN (SELECT id || ':state' FROM runs WHERE state = 'preparing')",

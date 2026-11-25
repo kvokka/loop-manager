@@ -1,12 +1,12 @@
 //! Recovery by hand of a run that failed for good (docs/guide/recovery.md): what the state shows of the failure and
 //! of the sessions of every attempt, and the ways on from it with the operations of the frontends: continue the
-//! session, a new run on the same issue with or without a note, or abandon the issue. On the managed clock.
+//! session, a new run on the same bead with or without a note, or abandon the bead. On the managed clock.
 
 use crate::common;
 
 use common::{
     POLICY, World,
-    issues::{FIX, next_ready, slow_turn},
+    beads::{FIX, next_ready, slow_turn},
     world,
 };
 use loop_manager_core::{
@@ -17,16 +17,16 @@ use loop_manager_testkit::Step;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// A formula on an issue whose prompt carries a note for the session: the note is an input of the formula.
+/// A formula on a bead whose prompt carries a note for the session: the note is an input of the formula.
 const REFIX: &[(&str, &str)] = &[
     ("shop/agents/refixer/agent.toml", "harness = \"scripted\"\n"),
     (
         "shop/agents/refixer/prompt.template.md",
-        "{{ inputs.note }} Fix {{ issue.title }}.",
+        "{{ inputs.note }} Fix {{ bead.title }}.",
     ),
     (
         "shop/formulas/refix.toml",
-        "name = \"refix\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"refix\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          note = { type = \"string\", required = true }\n[[step]]\nkind = \"ai\"\nagent = \"refixer\"\n",
     ),
 ];
@@ -63,10 +63,10 @@ impl World {
         reply["run"].as_str().unwrap().to_owned()
     }
 
-    /// A run of `fix` on `issue` whose only attempt fails: no policy decides, so the run fails for good.
-    async fn failed_on(&self, issue: &str) -> String {
+    /// A run of `fix` on `bead` whose only attempt fails: no policy decides, so the run fails for good.
+    async fn failed_on(&self, bead: &str) -> String {
         self.driver.script(crash());
-        let run = self.run_on(json!(issue)).await;
+        let run = self.run_on(json!(bead)).await;
         assert_eq!(self.states(&run).await.last().unwrap(), "failed");
         run
     }
@@ -75,9 +75,9 @@ impl World {
 #[tokio::test(start_paused = true)]
 async fn a_failed_run_shows_its_failure_and_the_session_and_failure_kind_of_every_attempt() {
     let w = world(&[POLICY, FIX].concat());
-    let issue = w.tracker.add(&[], None);
+    let bead = w.tracker.add(&[], None);
     w.driver.script(crash());
-    let run = w.run_on(json!(issue)).await;
+    let run = w.run_on(json!(bead)).await;
     let new_session = Decision::NewSession {
         after: Duration::ZERO,
         gate: None,
@@ -99,8 +99,8 @@ async fn a_failed_run_shows_its_failure_and_the_session_and_failure_kind_of_ever
     assert_eq!(listed.len(), 1, "{listed:?}");
     let view = &listed[0];
     assert_eq!(
-        (&view["id"], &view["class"], &view["reason"], &view["issue"]),
-        (&json!(run), &json!("infrastructure"), &json!("given up"), &json!(issue))
+        (&view["id"], &view["class"], &view["reason"], &view["bead"]),
+        (&json!(run), &json!("infrastructure"), &json!("given up"), &json!(bead))
     );
     let attempts = view["attempts"].as_array().unwrap();
     let kinds: Vec<&Value> = attempts.iter().map(|a| &a["failure_kind"]).collect();
@@ -112,29 +112,29 @@ async fn a_failed_run_shows_its_failure_and_the_session_and_failure_kind_of_ever
     );
 }
 
-/// S1: a new run continues the session of the run that failed on its attempt, on the same issue.
+/// S1: a new run continues the session of the run that failed on its attempt, on the same bead.
 #[tokio::test(start_paused = true)]
-async fn a_run_that_failed_on_an_attempt_is_continued_in_its_session_on_its_issue() {
+async fn a_run_that_failed_on_an_attempt_is_continued_in_its_session_on_its_bead() {
     let w = world(FIX);
-    let issue = w.tracker.add(&[], None);
-    let failed = w.failed_on(&issue).await;
+    let bead = w.tracker.add(&[], None);
+    let failed = w.failed_on(&bead).await;
     w.driver.script(slow_turn());
-    let next = w.start_with("fix", json!({ "issue": issue }), Some(&failed)).await;
+    let next = w.start_with("fix", json!({ "bead": bead }), Some(&failed)).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
-    assert_eq!(w.assignee(&issue), Some(format!("loop-manager:{next}")));
+    assert_eq!(w.assignee(&bead), Some(format!("loop-manager:{next}")));
     let attempt = &w.show(&next)["attempts"][0];
     assert_eq!(attempt["kind"], "resume", "{attempt}");
     assert_eq!(attempt["session"], w.show(&failed)["attempts"][0]["session"]);
 }
 
-/// S2 and S3: a new run of a formula takes the issue of the failed run again, in a session of its own; a formula
+/// S2 and S3: a new run of a formula takes the bead of the failed run again, in a session of its own; a formula
 /// whose prompt carries a note tells that session the work was begun before.
 #[tokio::test(start_paused = true)]
-async fn a_new_run_takes_the_issue_of_a_failed_run_again_with_or_without_a_note() {
+async fn a_new_run_takes_the_bead_of_a_failed_run_again_with_or_without_a_note() {
     let w = world(&[FIX, REFIX].concat());
-    let issue = w.tracker.add(&[], None);
-    let first = w.failed_on(&issue).await;
-    let again = w.failed_on(&issue).await;
+    let bead = w.tracker.add(&[], None);
+    let first = w.failed_on(&bead).await;
+    let again = w.failed_on(&bead).await;
     assert_eq!(w.show(&again)["attempts"][0]["kind"], "new_session");
     assert_ne!(
         w.show(&again)["attempts"][0]["session"],
@@ -142,30 +142,28 @@ async fn a_new_run_takes_the_issue_of_a_failed_run_again_with_or_without_a_note(
     );
     w.driver.script(slow_turn());
     let note = "Begun before, state unknown: sort it out.";
-    let noted = w
-        .start_with("refix", json!({ "issue": issue, "note": note }), None)
-        .await;
+    let noted = w.start_with("refix", json!({ "bead": bead, "note": note }), None).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
-    assert_eq!(w.assignee(&issue), Some(format!("loop-manager:{noted}")));
+    assert_eq!(w.assignee(&bead), Some(format!("loop-manager:{noted}")));
     let prompts = w.driver.sent(&noted, 1).1;
-    assert_eq!(prompts.last(), Some(&format!("{note} Fix Task {issue}.")));
+    assert_eq!(prompts.last(), Some(&format!("{note} Fix Task {bead}.")));
 }
 
-/// S4: a failed run has already released its issue and cannot be cancelled; a gate on the issue keeps every run off it
+/// S4: a failed run has already released its bead and cannot be cancelled; a gate on the bead keeps every run off it
 /// until the operator opens the gate.
 #[tokio::test(start_paused = true)]
-async fn an_abandoned_issue_is_released_and_a_gate_keeps_runs_off_it() {
+async fn an_abandoned_bead_is_released_and_a_gate_keeps_runs_off_it() {
     let w = world(FIX);
-    let issue = w.tracker.add(&[], None);
-    let failed = w.failed_on(&issue).await;
-    let released = w.tracker.issue(&issue).unwrap();
+    let bead = w.tracker.add(&[], None);
+    let failed = w.failed_on(&bead).await;
+    let released = w.tracker.bead(&bead).unwrap();
     assert_eq!((released.assignee, released.status.as_str()), (None, "open"));
     let cancel = Msg::Cancel {
         run: failed,
         reason: "abandoned".into(),
     };
     assert!(matches!(w.core.send(None, cancel).await, Err(Error::Rejected(_))));
-    let key = format!("issue:shop/{issue}");
+    let key = format!("bead:shop/{bead}");
     let gate = GateSpec {
         key: key.clone(),
         until_ms: None,
@@ -174,7 +172,7 @@ async fn an_abandoned_issue_is_released_and_a_gate_keeps_runs_off_it() {
     w.core.send(None, Msg::CloseGate(gate)).await.unwrap();
     w.changed().await;
     assert_eq!(w.fix(next_ready()).await.unwrap(), json!({ "nothing_ready": true }));
-    let waiting = w.run_on(json!(issue)).await;
+    let waiting = w.run_on(json!(bead)).await;
     assert_eq!(w.show(&waiting)["gate"]["key"], key.as_str());
     assert_eq!(w.show(&waiting)["state"], "queued");
 }

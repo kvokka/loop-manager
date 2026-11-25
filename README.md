@@ -18,7 +18,7 @@ Scripts can request JSON with the global `--json` flag, as in `loop-manager run 
 - [Operator skills and the T3 Code run card](plugins/README.md)
 - [Using addons](docs/guide/addons.md)
 - [Writing an addon](docs/guide/addon-development.md)
-- [Demos](demos/README.md): a planner agent files a request as issues, and coder agents on claude and codex do them
+- [Demos](demos/README.md): a planner agent files a request as beads, and coder agents on claude and codex do them
 - Reference: [configuration files](docs/design/config.md), [contracts](docs/design/contracts.md) (events, hooks,
   run states), [HTTP API](docs/api/openapi.json)
 - [Everything else](docs/README.md): the map of the documentation
@@ -40,7 +40,7 @@ on its `PATH`; a harness may name its binary in the config instead (`[harness.cl
 mise is a convenience, not a requirement: install these binaries any way you like.
 
 - `loop-manager doctor` checks what the daemon needs: the config, each harness binary with its source, version and
-  login, the tracker binary ([br](docs/guide/issue-trackers.md#the-br-tracker)) and its license, the mode of the state
+  login, the tracker binary ([br](docs/guide/trackers.md#the-br-tracker)) and its license, the mode of the state
   and socket directories, the state and its outbox. It asks the running daemon; before the first start, `loop-manager
   doctor --config <file>` checks a file with no daemon. It exits non-zero on an error; warnings (an unsupported or
   untested version, no login file) do not fail it.
@@ -58,8 +58,8 @@ mise is a convenience, not a requirement: install these binaries any way you lik
 
 A project with a `<project>/.beads` directory uses [br](https://github.com/Dicklesworthstone/beads_rust) as its
 tracker. br is a separate binary you install yourself (this repository pins 0.7.6 in `mise.toml`); loop-manager runs it
-as a process and never links, vendors or ships it. How loop-manager works with issues, how br is wired and how to
-inspect it by hand: [issue trackers](docs/guide/issue-trackers.md).
+as a process and never links, vendors or ships it. How loop-manager works with beads, how br is wired and how to
+inspect it by hand: [trackers](docs/guide/trackers.md).
 
 **br is not plain MIT.** Its license is MIT with a rider that grants no rights to OpenAI, Anthropic, their affiliates
 or anyone acting on their behalf. Check whether that rider applies to you before you install br. Whether it applies to

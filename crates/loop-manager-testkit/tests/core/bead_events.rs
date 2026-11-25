@@ -1,11 +1,11 @@
-//! Tracker writes as issue events on the scripted driver and the tracker in memory (docs/design/tracker-br.md,
+//! Tracker writes as bead events on the scripted driver and the tracker in memory (docs/design/tracker-br.md,
 //! docs/design/contracts.md 1).
 
 use crate::common;
 
 use common::{
     World,
-    issues::{FIX, slow_turn},
+    beads::{FIX, slow_turn},
     world,
 };
 use loop_manager_core::Journal;
@@ -13,31 +13,31 @@ use serde_json::json;
 use std::time::Duration;
 
 #[tokio::test(start_paused = true)]
-async fn tracker_writes_become_issue_events_and_a_write_by_a_run_carries_its_chain() {
+async fn tracker_writes_become_bead_events_and_a_write_by_a_run_carries_its_chain() {
     let w = world(FIX);
     let old = w.tracker.add(&[], None);
     w.changed().await;
     assert!(
-        w.all("issue.created").is_empty(),
+        w.all("bead.created").is_empty(),
         "the history before the first read raises nothing"
     );
-    let ready = w.all("issue.ready");
-    assert_eq!((ready.len(), &ready[0]["issue"]["id"]), (1, &json!(old)));
+    let ready = w.all("bead.ready");
+    assert_eq!((ready.len(), &ready[0]["bead"]["id"]), (1, &json!(old)));
     let new = w.tracker.add_in("w", &[], None);
     w.changed().await;
-    let created = w.all("issue.created");
+    let created = w.all("bead.created");
     assert_eq!(created.len(), 1, "{created:?}");
     assert_eq!(
-        (&created[0]["issue"]["id"], &created[0]["actor"]),
+        (&created[0]["bead"]["id"], &created[0]["actor"]),
         (&json!(new), &json!("human"))
     );
-    assert_eq!(w.all("issue.ready").len(), 2, "each issue is ready once");
+    assert_eq!(w.all("bead.ready").len(), 2, "each bead is ready once");
     w.driver.script(slow_turn());
     let run = w.run_on(json!(new)).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     w.changed().await;
     let all = Journal::new(&w.journal).read_from(1, 100_000).unwrap();
-    let claimed = all.iter().rfind(|e| e["type"] == "issue.updated").unwrap();
+    let claimed = all.iter().rfind(|e| e["type"] == "bead.updated").unwrap();
     let queued = all.iter().find(|e| e["type"] == "run.queued").unwrap();
     assert_eq!(
         (&claimed["run"], &claimed["rig"], &claimed["correlation"]),
@@ -53,27 +53,27 @@ async fn a_write_whose_signal_is_lost_is_read_by_the_periodic_resync() {
     w.changed().await;
     let lost = w.tracker.add(&[], None);
     tokio::time::sleep(Duration::from_secs(4 * 60)).await;
-    assert!(w.all("issue.created").is_empty(), "no signal, no read yet");
+    assert!(w.all("bead.created").is_empty(), "no signal, no read yet");
     tokio::time::sleep(Duration::from_secs(61)).await;
-    let created = w.all("issue.created");
+    let created = w.all("bead.created");
     assert_eq!(created.len(), 1, "{created:?}");
-    assert_eq!(created[0]["issue"]["id"], json!(lost));
+    assert_eq!(created[0]["bead"]["id"], json!(lost));
 }
 
-/// A project trigger on a label gained by a ready issue, with a label other than devloop's `auto`.
-const ON_REVIEW: &str = "[rigs.web]\npath = \"web\"\n\n[[trigger]]\nname = \"on-review\"\non = \"issue.labeled\"\n\
+/// A project trigger on a label gained by a ready bead, with a label other than devloop's `auto`.
+const ON_REVIEW: &str = "[rigs.web]\npath = \"web\"\n\n[[trigger]]\nname = \"on-review\"\non = \"bead.labeled\"\n\
      where = { label = \"review\", ready = true }\nrun = \"fix\"\nrig = \"web\"\n\
-     inputs = { issue = \"{{ event.issue.id }}\" }\n";
+     inputs = { bead = \"{{ event.bead.id }}\" }\n";
 
 #[tokio::test(start_paused = true)]
-async fn a_label_a_ready_issue_gains_fires_a_trigger_once_and_nothing_else_does() {
+async fn a_label_a_ready_bead_gains_fires_a_trigger_once_and_nothing_else_does() {
     let w = on_review();
     let fired = || w.all("trigger.fired");
-    let labeled = || w.all("issue.labeled");
+    let labeled = || w.all("bead.labeled");
     let ready = w.tracker.add_in("w", &["ui"], None);
     let held = w.tracker.add_in("w", &[], None);
     w.changed().await;
-    // An issue a human holds is not ready: the label it gains is told, and starts nothing.
+    // A bead a human holds is not ready: the label it gains is told, and starts nothing.
     w.tracker.assign(&held, "bob");
     w.tracker.label(&held, "review");
     w.changed().await;
@@ -99,19 +99,19 @@ async fn a_label_a_ready_issue_gains_fires_a_trigger_once_and_nothing_else_does(
     w.changed().await;
     let fired_once = fired();
     assert_eq!(fired_once.len(), 1, "{fired_once:?}");
-    assert_eq!(fired_once[0]["inputs"]["issue"], json!(ready));
+    assert_eq!(fired_once[0]["inputs"]["bead"], json!(ready));
     let review = labeled().pop().unwrap();
     assert_eq!(
-        (&review["issue"]["labels"], &review["ready"]),
+        (&review["bead"]["labels"], &review["ready"]),
         (&json!(["ui", "docs", "review"]), &json!(true))
     );
-    // Reading the same tracker again, or a write on another issue, sees no new label.
+    // Reading the same tracker again, or a write on another bead, sees no new label.
     w.changed().await;
     w.tracker.retitle(&held, "Renamed");
     w.changed().await;
 
-    // An issue filed with the label, or labelled before the core first read it, is new to the ready set: `issue.ready`
-    // tells it, and no label is told as gained, since each write is read with the issue as it is now.
+    // A bead filed with the label, or labelled before the core first read it, is new to the ready set: `bead.ready`
+    // tells it, and no label is told as gained, since each write is read with the bead as it is now.
     let filed = w.tracker.add_in("w", &["review"], None);
     let late = w.tracker.add_in("w", &[], None);
     w.tracker.label(&late, "review");
@@ -119,16 +119,16 @@ async fn a_label_a_ready_issue_gains_fires_a_trigger_once_and_nothing_else_does(
     let of = |id: &str| {
         labeled()
             .into_iter()
-            .filter(|e| e["issue"]["id"] == id)
+            .filter(|e| e["bead"]["id"] == id)
             .collect::<Vec<_>>()
     };
     assert!(of(&filed).is_empty(), "{:?}", of(&filed));
     assert!(of(&late).is_empty(), "{:?}", of(&late));
-    let new_ready = w.all("issue.ready");
+    let new_ready = w.all("bead.ready");
     assert!(
         [&filed, &late]
             .iter()
-            .all(|id| new_ready.iter().any(|e| e["issue"]["id"] == ***id)),
+            .all(|id| new_ready.iter().any(|e| e["bead"]["id"] == ***id)),
         "{new_ready:?}"
     );
     assert_eq!(fired().len(), 1, "{:?}", fired());
@@ -142,7 +142,7 @@ fn on_review() -> World {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_issue_known_from_the_history_of_the_first_read_tells_the_label_it_gains() {
+async fn a_bead_known_from_the_history_of_the_first_read_tells_the_label_it_gains() {
     let w = on_review();
     // Held by a human from the start, so never in the ready set: only the history of the first read knows its labels.
     let held = w.tracker.add_in("w", &[], None);
@@ -150,33 +150,33 @@ async fn an_issue_known_from_the_history_of_the_first_read_tells_the_label_it_ga
     w.changed().await;
     w.tracker.label(&held, "review");
     w.changed().await;
-    let labeled = w.all("issue.labeled");
+    let labeled = w.all("bead.labeled");
     assert_eq!(labeled.len(), 1, "{labeled:?}");
     assert_eq!(
-        (&labeled[0]["issue"]["id"], &labeled[0]["label"], &labeled[0]["ready"]),
+        (&labeled[0]["bead"]["id"], &labeled[0]["label"], &labeled[0]["ready"]),
         (&json!(held), &json!("review"), &json!(false))
     );
     assert!(w.all("trigger.fired").is_empty(), "{:?}", w.all("trigger.fired"));
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_ready_issue_whose_write_a_read_missed_fires_once_on_the_label_it_gains() {
+async fn a_ready_bead_whose_write_a_read_missed_fires_once_on_the_label_it_gains() {
     let w = on_review();
     w.changed().await;
-    // The issue is filed after the read of the writes and before the read of the ready set: ready, its write unread.
+    // The bead is filed after the read of the writes and before the read of the ready set: ready, its write unread.
     w.tracker.lag();
     let late = w.tracker.add_in("w", &[], None);
     w.changed().await;
-    assert!(w.all("issue.created").is_empty(), "{:?}", w.all("issue.created"));
-    assert_eq!(w.all("issue.ready").len(), 1, "{:?}", w.all("issue.ready"));
+    assert!(w.all("bead.created").is_empty(), "{:?}", w.all("bead.created"));
+    assert_eq!(w.all("bead.ready").len(), 1, "{:?}", w.all("bead.ready"));
     // The label joins the unread write: the next read has one write, the creation, with the label.
     w.driver.script(slow_turn());
     w.tracker.label_with_last(&late, "review");
     w.changed().await;
-    let created = w.all("issue.created");
+    let created = w.all("bead.created");
     assert_eq!(created.len(), 1, "{created:?}");
-    assert_eq!(created[0]["issue"]["labels"], json!(["review"]));
-    let labeled = w.all("issue.labeled");
+    assert_eq!(created[0]["bead"]["labels"], json!(["review"]));
+    let labeled = w.all("bead.labeled");
     assert_eq!(labeled.len(), 1, "{labeled:?}");
     assert_eq!(
         (&labeled[0]["label"], &labeled[0]["ready"]),
@@ -185,8 +185,8 @@ async fn a_ready_issue_whose_write_a_read_missed_fires_once_on_the_label_it_gain
     let fired = w.all("trigger.fired");
     assert_eq!(fired.len(), 1, "{fired:?}");
     assert_eq!(
-        (&fired[0]["trigger"], &fired[0]["inputs"]["issue"]),
+        (&fired[0]["trigger"], &fired[0]["inputs"]["bead"]),
         (&json!("shop.on-review"), &json!(late))
     );
-    assert_eq!(w.all("issue.ready").len(), 1, "{:?}", w.all("issue.ready"));
+    assert_eq!(w.all("bead.ready").len(), 1, "{:?}", w.all("bead.ready"));
 }

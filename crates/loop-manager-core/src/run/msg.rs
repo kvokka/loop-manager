@@ -3,7 +3,7 @@
 use super::{Exit, GateSpec};
 use crate::{
     driver::{DriverEvent, Failure, InstanceHandle, PromptKey, SessionRef},
-    tracker::{Change, Issue, TrackerError, Wait},
+    tracker::{Bead, Change, TrackerError, Wait},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -149,18 +149,18 @@ pub enum Msg {
     /// The result of the tracker call of the effect `payload`.
     Tracked {
         payload: Value,
-        result: Result<Option<Issue>, TrackerError>,
+        result: Result<Option<Bead>, TrackerError>,
     },
-    /// The issue of the read effect `payload` with its comments and parents, for the prompt that shows them.
+    /// The bead of the read effect `payload` with its comments and parents, for the prompt that shows them.
     Lineage {
         payload: Value,
         result: Result<crate::tracker::Lineage, TrackerError>,
     },
-    /// The writes to the tracker of `project` after its cursor, its ready set and, for the root issue of each run in
-    /// a drain step when the read was asked, the ready issues under it at any depth and the open ones that wait.
+    /// The writes to the tracker of `project` after its cursor, its ready set and, for the root bead of each run in
+    /// a drain step when the read was asked, the ready beads under it at any depth and the open ones that wait.
     Ready {
         project: String,
-        issues: Vec<Issue>,
+        beads: Vec<Bead>,
         changes: Vec<Change>,
         under: BTreeMap<String, Vec<String>>,
         waits: BTreeMap<String, Vec<Wait>>,
@@ -186,14 +186,14 @@ pub enum Msg {
         token: String,
         outcome: Outcome,
     },
-    /// A comment of an attempt on the issue of its run (contracts 6.3); the reply is
-    /// `{"answer": "accepted"|"no_issue"|"stale_attempt"|"run_terminal"|"invalid"}`.
+    /// A comment of an attempt on the bead of its run (contracts 6.3); the reply is
+    /// `{"answer": "accepted"|"no_bead"|"stale_attempt"|"run_terminal"|"invalid"}`.
     Comment {
         run: String,
         token: String,
         text: String,
     },
-    /// The reply of a request the API carried out itself, outside the core (an issue filed or closed): the reply is
+    /// The reply of a request the API carried out itself, outside the core (a bead filed or closed): the reply is
     /// this value, kept under the request's idempotency key.
     Keep(Value),
 }
@@ -217,7 +217,7 @@ pub enum Verdict {
 /// (`parent_run` and its attempt `token`: the core takes the correlation and the depth from the parent).
 pub struct Create {
     pub project: String,
-    /// `None`: the rig of the prefix of the issue id an input names, else the root (docs/design/contracts.md 6).
+    /// `None`: the rig of the prefix of the bead id an input names, else the root (docs/design/contracts.md 6).
     pub rig: Option<String>,
     /// A formula reference as a project writes it: `name` or `<pack>.<name>`.
     pub formula: String,

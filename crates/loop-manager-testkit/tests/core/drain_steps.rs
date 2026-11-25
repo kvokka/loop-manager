@@ -1,10 +1,10 @@
-//! The drain step (docs/design/config.md, docs/design/tracker-br.md): every ready issue under the run's issue, at any
+//! The drain step (docs/design/config.md, docs/design/tracker-br.md): every ready bead under the run's bead, at any
 //! depth, gets a run of the step's formula, once per entry of the step, on the scripted driver and the tracker in
 //! memory.
 
 use crate::common;
 
-use common::{POLICY, drain::SWEEP, issues::slow_turn, world};
+use common::{POLICY, beads::slow_turn, drain::SWEEP, world};
 use loop_manager_core::run::{Create, Decision, GateSpec, Msg, Verdict};
 use serde_json::json;
 use std::{
@@ -13,7 +13,7 @@ use std::{
 };
 
 #[tokio::test(start_paused = true)]
-async fn a_drain_gives_every_ready_issue_under_the_root_a_run() {
+async fn a_drain_gives_every_ready_bead_under_the_root_a_run() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let web = w.tracker.add_in("w", &["agent:qa"], Some(&root));
@@ -29,26 +29,26 @@ async fn a_drain_gives_every_ready_issue_under_the_root_a_run() {
     let kids = w.kids(&run);
     assert_eq!(kids.len(), 2, "{kids:?}");
     let correlation = &kids[0].5;
-    for (kid, (issue, rig, agent)) in kids.iter().zip([(&web, "web", "shop.qa"), (&api, "api", "shop.dev")]) {
+    for (kid, (bead, rig, agent)) in kids.iter().zip([(&web, "web", "shop.qa"), (&api, "api", "shop.dev")]) {
         assert_eq!(
             (&kid.1, kid.2.as_str(), kid.3.as_str(), kid.4.as_str(), kid.6),
-            (issue, "passed", rig, agent, 1)
+            (bead, "passed", rig, agent, 1)
         );
         assert_eq!(&kid.5, correlation);
-        assert_eq!(w.tracker.issue(issue).unwrap().status, "closed");
+        assert_eq!(w.tracker.bead(bead).unwrap().status, "closed");
     }
     assert_eq!(w.wrap(&run).await, "Wrap up: 2 closed, 0 failed, 0 refused.");
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_issue_added_meanwhile_runs_too() {
+async fn a_bead_added_meanwhile_runs_too() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let first = w.tracker.add_in("w", &[], Some(&root));
     let run = w.sweep(&root).await;
     let mut done = BTreeSet::new();
     w.settle(&run, &[], &[first.as_str()], &mut done).await;
-    // No word from the tracker: the read after the close of the first issue brings it.
+    // No word from the tracker: the read after the close of the first bead brings it.
     let later = w.tracker.add_in("a", &[], Some(&root));
     let outcome = w.settle(&run, &[], &[], &mut done).await;
     assert_eq!(outcome["data"]["closed"], json!([first, later]));
@@ -56,7 +56,7 @@ async fn an_issue_added_meanwhile_runs_too() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_failed_issue_stops_nothing_and_runs_once() {
+async fn a_failed_bead_stops_nothing_and_runs_once() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let bad = w.tracker.add_in("w", &[], Some(&root));
@@ -72,13 +72,13 @@ async fn a_failed_issue_stops_nothing_and_runs_once() {
         (&json!("pass"), &json!([good]), &json!([bad]))
     );
     let kids: Vec<String> = w.kids(&run).into_iter().map(|k| k.1).collect();
-    assert_eq!(kids, [bad.clone(), good], "one run per issue");
-    assert_eq!(w.tracker.issue(&bad).unwrap().status, "open");
+    assert_eq!(kids, [bad.clone(), good], "one run per bead");
+    assert_eq!(w.tracker.bead(&bad).unwrap().status, "open");
     assert_eq!(w.wrap(&run).await, "Wrap up: 1 closed, 1 failed, 0 refused.");
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_refused_issue_gets_no_run_and_a_reason() {
+async fn a_refused_bead_gets_no_run_and_a_reason() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let codex = w.tracker.add_in("w", &["harness:codex"], Some(&root));
@@ -91,23 +91,23 @@ async fn a_refused_issue_gets_no_run_and_a_reason() {
         "{why}"
     );
     let why = outcome["data"]["refused"][&labelled].as_str().unwrap();
-    assert!(why.contains("the rig of an issue is the prefix of its id"), "{why}");
+    assert!(why.contains("the rig of a bead is the prefix of its id"), "{why}");
     assert!(w.kids(&run).is_empty());
-    assert_eq!(w.tracker.issue(&codex).unwrap().assignee, None);
+    assert_eq!(w.tracker.bead(&codex).unwrap().assignee, None);
     assert_eq!(w.wrap(&run).await, "Wrap up: 0 closed, 0 failed, 2 refused.");
 }
 
 /// A child of a drain is one level deeper than its run, under the common depth limit (docs/design/contracts.md 6).
 #[tokio::test(start_paused = true)]
-async fn a_drain_at_the_depth_limit_gives_no_issue_a_run() {
+async fn a_drain_at_the_depth_limit_gives_no_bead_a_run() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
-    let issue = w.tracker.add_in("w", &[], Some(&root));
+    let bead = w.tracker.add_in("w", &[], Some(&root));
     let create = Create {
         project: "shop".into(),
         rig: Some("web".into()),
         formula: "sweep".into(),
-        inputs: [("issue".to_owned(), json!(root))].into_iter().collect(),
+        inputs: [("bead".to_owned(), json!(root))].into_iter().collect(),
         correlation: None,
         depth: 10,
         parent_run: None,
@@ -118,15 +118,15 @@ async fn a_drain_at_the_depth_limit_gives_no_issue_a_run() {
     let reply = w.core.send(None, Msg::Create(create)).await.unwrap();
     let run = reply["run"].as_str().unwrap();
     let outcome = w.settle(run, &[], &[], &mut BTreeSet::new()).await;
-    assert_eq!(outcome["data"]["refused"][&issue], "depth 11 is over 10", "{outcome}");
+    assert_eq!(outcome["data"]["refused"][&bead], "depth 11 is over 10", "{outcome}");
     assert!(w.kids(run).is_empty());
 }
 
-/// `kill -9` while one issue has failed, one has a live run and one waits in the queue (docs/design/invariants.md,
-/// decision 10): the drain's attempt fails with `daemon_crash` too, and its next attempt gives no issue of the entry
+/// `kill -9` while one bead has failed, one has a live run and one waits in the queue (docs/design/invariants.md,
+/// decision 10): the drain's attempt fails with `daemon_crash` too, and its next attempt gives no bead of the entry
 /// again.
 #[tokio::test(start_paused = true)]
-async fn a_restart_mid_drain_fails_the_attempt_and_gives_no_issue_twice() {
+async fn a_restart_mid_drain_fails_the_attempt_and_gives_no_bead_twice() {
     let config = format!(
         "{}[settings]\naddons = [{{ name = \"policy\" }}]\n[[addon]]\npath = \"policy\"\n",
         SWEEP[0].1
@@ -170,8 +170,8 @@ async fn a_restart_mid_drain_fails_the_attempt_and_gives_no_issue_twice() {
         outcome["data"],
         json!({ "closed": [three], "failed": [one, two], "refused": {} })
     );
-    let issues: Vec<String> = w.kids(&run).into_iter().map(|k| k.1).collect();
-    assert_eq!(issues, [one, two, three]);
+    let beads: Vec<String> = w.kids(&run).into_iter().map(|k| k.1).collect();
+    assert_eq!(beads, [one, two, three]);
     let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
     let sql =
         "SELECT harness, json_extract(failure, '$.kind') FROM attempts WHERE run = ?1 AND step = 'all' ORDER BY n";
@@ -203,7 +203,7 @@ async fn a_read_older_than_the_end_of_a_child_does_not_end_the_step() {
     w.until(Some(&kid), "run.passed", 0).await;
     let stale = Msg::Ready {
         project: "shop".into(),
-        issues: Vec::new(),
+        beads: Vec::new(),
         changes: Vec::new(),
         under: [(root.clone(), Vec::new())].into_iter().collect(),
         waits: [(root.clone(), Vec::new())].into_iter().collect(),
@@ -216,7 +216,7 @@ async fn a_read_older_than_the_end_of_a_child_does_not_end_the_step() {
     assert_eq!(outcome["data"]["closed"], json!([first, later]));
 }
 
-/// A child that ends before it started touches no issue; the read it asks for still tells the drain.
+/// A child that ends before it started touches no bead; the read it asks for still tells the drain.
 #[tokio::test(start_paused = true)]
 async fn a_child_cancelled_in_the_queue_ends_the_step_at_once() {
     let w = world(SWEEP);
@@ -227,11 +227,11 @@ async fn a_child_cancelled_in_the_queue_ends_the_step_at_once() {
     };
     w.core.send(None, Msg::CloseGate(gate)).await.unwrap();
     let root = w.tracker.add(&[], None);
-    let issue = w.tracker.add_in("a", &[], Some(&root));
+    let bead = w.tracker.add_in("a", &[], Some(&root));
     let run = w.sweep(&root).await;
     tokio::time::sleep(Duration::from_secs(5)).await;
     let kid = w.kids(&run)[0].clone();
-    assert_eq!((&kid.1, kid.2.as_str()), (&issue, "queued"));
+    assert_eq!((&kid.1, kid.2.as_str()), (&bead, "queued"));
     let cancel = Msg::Cancel {
         run: kid.0,
         reason: "operator".into(),
@@ -242,7 +242,7 @@ async fn a_child_cancelled_in_the_queue_ends_the_step_at_once() {
     let step = w.all("run.step_finished").into_iter().find(|d| d["run"]["id"] == run);
     assert_eq!(
         step.expect("the step ended")["outcome"]["data"]["failed"],
-        json!([issue])
+        json!([bead])
     );
 }
 
@@ -261,7 +261,7 @@ async fn a_read_that_does_not_know_the_root_decides_nothing() {
     w.until(Some(&kid), "run.passed", 0).await;
     let blind = Msg::Ready {
         project: "shop".into(),
-        issues: Vec::new(),
+        beads: Vec::new(),
         changes: Vec::new(),
         under: BTreeMap::new(),
         waits: BTreeMap::new(),
@@ -275,10 +275,10 @@ async fn a_read_that_does_not_know_the_root_decides_nothing() {
     assert_eq!(outcome["data"]["closed"], json!([first]));
 }
 
-/// An issue of an epic under the root runs too; the epic, ready once its issues are closed, is given out as any issue:
+/// A bead of an epic under the root runs too; the epic, ready once its beads are closed, is given out as any bead:
 /// its id has no rig prefix, so its run works in the project root (docs/design/config.md).
 #[tokio::test(start_paused = true)]
-async fn an_issue_of_a_nested_epic_runs_and_the_emptied_epic_runs_in_the_project_root() {
+async fn a_bead_of_a_nested_epic_runs_and_the_emptied_epic_runs_in_the_project_root() {
     let w = world(SWEEP);
     let root = w.tracker.add(&[], None);
     let sub = w.tracker.add(&[], Some(&root));

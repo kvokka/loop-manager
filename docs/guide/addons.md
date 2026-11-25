@@ -53,7 +53,7 @@ layer, an array of `{ name, params, enabled }`:
 
 | Where | Reaches |
 |---|---|
-| `[settings]` of the orchestrator or a project | every agent there; also the events of no agent (`issue.*`, `service.*`, exec steps) |
+| `[settings]` of the orchestrator or a project | every agent there; also the events of no agent (`bead.*`, `service.*`, exec steps) |
 | `[rigs.<rig>.settings]` | the agents on that rig |
 | `agent.toml`, a variant `[agents.<name>]`, an edit `[agents.<agent>]` or `[rigs.<rig>.agents.<agent>]` | that agent |
 

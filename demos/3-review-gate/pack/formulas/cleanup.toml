@@ -1,15 +1,15 @@
 name = "cleanup"
-description = "Clears what a cancelled feature left: its open pull requests, its branches and its issues"
+description = "Clears what a cancelled feature left: its open pull requests, its branches and its beads"
 
 [inputs]
-issue = { type = "string", required = true }   # the issue of the cancelled feature, which nothing holds any more
+bead = { type = "string", required = true }   # the bead of the cancelled feature, which nothing holds any more
 
 [[step]]
 name = "cleanup"
 kind = "exec"
 command = ["sh", "-c", '''
 set -eu
-branch="feature/$LOOP_MANAGER_INPUT_ISSUE"
+branch="feature/$LOOP_MANAGER_INPUT_BEAD"
 project=$(loop-manager --json run show "$LOOP_MANAGER_RUN" | jq -r .project)
 places=$(loop-manager --json project list --project "$project")
 for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); do
@@ -22,10 +22,10 @@ for repo in $(printf '%s' "$places" | jq -r '.[0] | .rigs[].path, .root.path'); 
   git reset -q --hard "origin/$base"    # a feature cancelled before `pr` left its commits here
   ! git show-ref -q --verify "refs/heads/$branch" || git branch -q -D "$branch"
 done
-# The issues under it close first, the newest first: a parent with an open child is not closed. A closed one stays so.
-issues=$(loop-manager --json issue list --project "$project" "$LOOP_MANAGER_INPUT_ISSUE")
-for issue in $(printf '%s' "$issues" | jq -r 'reverse | .[] | select(.status != "closed") | .id') "$LOOP_MANAGER_INPUT_ISSUE"; do
-  loop-manager issue close --project "$project" --reason "the feature was cancelled" "$issue" >/dev/null
+# The beads under it close first, the newest first: a parent with an open child is not closed. A closed one stays so.
+beads=$(loop-manager --json bead list --project "$project" "$LOOP_MANAGER_INPUT_BEAD")
+for bead in $(printf '%s' "$beads" | jq -r 'reverse | .[] | select(.status != "closed") | .id') "$LOOP_MANAGER_INPUT_BEAD"; do
+  loop-manager bead close --project "$project" --reason "the feature was cancelled" "$bead" >/dev/null
 done
-echo "cleanup: $LOOP_MANAGER_INPUT_ISSUE"
+echo "cleanup: $LOOP_MANAGER_INPUT_BEAD"
 ''']

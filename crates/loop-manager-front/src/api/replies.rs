@@ -37,7 +37,7 @@ pub(crate) struct Run {
     /// (docs/design/config.md).
     #[schema(minimum = 1)]
     step_attempt: u32,
-    issue: Option<String>,
+    bead: Option<String>,
     workdir: String,
     depth: i64,
     parent_run: Option<String>,
@@ -209,7 +209,7 @@ pub(crate) enum Keyed {
 pub(crate) struct Failed(ErrorReply);
 
 /// A run started: `run` is its id; `nothing_ready` (and no `run`) when a task input `{ next_ready = true }` found
-/// no ready issue the run can take; `passed_over`: the ready issues it skipped, each with why (a `harness:` label the
+/// no ready bead the run can take; `passed_over`: the ready beads it skipped, each with why (a `harness:` label the
 /// config does not give, an `agent:` label that does not resolve).
 #[derive(ToSchema)]
 pub(crate) struct Started {
@@ -241,21 +241,21 @@ pub(crate) struct Finished {
 
 #[derive(ToSchema)]
 pub(crate) struct Commented {
-    /// `accepted`, `no_issue`, `stale_attempt`, `run_terminal` or `invalid`.
+    /// `accepted`, `no_bead`, `stale_attempt`, `run_terminal` or `invalid`.
     answer: String,
 }
 
-/// An issue of a project with its comments, oldest first.
+/// A bead of a project with its comments, oldest first.
 #[derive(serde::Serialize, ToSchema)]
-pub(crate) struct IssueReply {
+pub(crate) struct BeadReply {
     #[serde(flatten)]
-    issue: Issue,
-    comments: Vec<IssueComment>,
+    bead: Bead,
+    comments: Vec<BeadComment>,
 }
 
-/// An issue of a project as its tracker gives it (docs/design/contracts.md 5.2).
+/// A bead of a project as its tracker gives it (docs/design/contracts.md 5.2).
 #[derive(serde::Serialize, ToSchema)]
-pub(crate) struct Issue {
+pub(crate) struct Bead {
     id: String,
     title: String,
     description: String,
@@ -265,7 +265,7 @@ pub(crate) struct Issue {
     priority: i64,
     labels: Vec<String>,
     assignee: Option<String>,
-    /// The parent of the issue.
+    /// The parent of the bead.
     epic: Option<String>,
     created_at: String,
     updated_at: String,
@@ -273,7 +273,7 @@ pub(crate) struct Issue {
 }
 
 #[derive(serde::Serialize, ToSchema)]
-pub(crate) struct IssueComment {
+pub(crate) struct BeadComment {
     author: String,
     created_at: String,
     text: String,
@@ -427,7 +427,7 @@ pub(crate) struct Project {
 pub(crate) struct Rig {
     name: String,
     path: String,
-    /// The prefix of the ids of the rig's issues; null for the root, whose issues carry the tracker's own.
+    /// The prefix of the ids of the rig's beads; null for the root, whose beads carry the tracker's own.
     prefix: Option<String>,
     vars: BTreeMap<String, String>,
 }

@@ -93,8 +93,8 @@ pub(super) fn place(tx: &Tx<'_>, project: &Project, id: &str) -> Result<Place, E
     })
 }
 
-/// The title of the issue of run `id` when its step parent is in a `drain` step with `worktree = true`, by the
-/// step's config snapshot: the run merges into its base under it (see [`Place::merge`]). An issue not read yet has an
+/// The title of the bead of run `id` when its step parent is in a `drain` step with `worktree = true`, by the
+/// step's config snapshot: the run merges into its base under it (see [`Place::merge`]). A bead not read yet has an
 /// empty title.
 fn merged(tx: &Tx<'_>, id: &str, parent: Option<&str>) -> Result<Option<String>, Error> {
     let Some(parent) = parent else {
@@ -103,8 +103,8 @@ fn merged(tx: &Tx<'_>, id: &str, parent: Option<&str>) -> Result<Option<String>,
     let title: Option<String> = tx
         .sql()
         .query_row(
-            "SELECT COALESCE(json_extract(c.issue_data, '$.title'), '') FROM runs c, runs p \
-             WHERE c.id = ?1 AND p.id = ?2 AND c.issue IS NOT NULL \
+            "SELECT COALESCE(json_extract(c.bead_data, '$.title'), '') FROM runs c, runs p \
+             WHERE c.id = ?1 AND p.id = ?2 AND c.bead IS NOT NULL \
              AND p.step_kind = 'drain' AND json_extract(p.config, '$.worktree') = 1",
             params![id, parent],
             |r| r.get(0),

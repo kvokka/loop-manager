@@ -21,4 +21,4 @@ model = "terra"
 path = "../frontend"
 [rigs.backend]
 path = "../backend"
-prefix = "api"                        # its issues are `api-…`, not the acronym `b-…`
+prefix = "api"                        # its beads are `api-…`, not the acronym `b-…`

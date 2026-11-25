@@ -55,9 +55,9 @@ impl RunHandler {
         let inputs: serde_json::Map<String, Value> = serde_json::from_str(&row.inputs).unwrap_or_default();
         context.push(("LOOP_MANAGER_RUN".to_owned(), json!(row.id)));
         context.extend(
-            row.issue
+            row.bead
                 .as_ref()
-                .map(|issue| ("LOOP_MANAGER_ISSUE".to_owned(), json!(issue))),
+                .map(|bead| ("LOOP_MANAGER_BEAD".to_owned(), json!(bead))),
         );
         for (name, value) in inputs {
             let text = value.as_str().map_or_else(|| value.to_string(), str::to_owned);

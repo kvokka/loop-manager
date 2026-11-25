@@ -38,10 +38,10 @@ const BUILD: (&str, &str) = (
     "name = \"build\"\nworktree = true\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
 );
 
-/// `work`, one ai step on an issue, the formula of the children of a drain.
+/// `work`, one ai step on a bead, the formula of the children of a drain.
 const WORK: (&str, &str) = (
     "shop/formulas/work.toml",
-    "name = \"work\"\n[inputs]\nissue = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+    "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
 );
 
 /// The world with `files` over the common ones and the bundled addons, its rig a plain directory.
@@ -299,12 +299,12 @@ async fn a_child_of_a_formula_step_works_in_the_worktree_of_its_parent_and_leave
 async fn a_drain_without_the_key_gives_each_child_its_own_branch_and_merges_nothing() {
     let sweep = (
         "shop/formulas/sweep.toml",
-        "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"drain\"\nformula = \"task\"\npool = 2\n",
     );
     let task = (
         "shop/formulas/task.toml",
-        "name = \"task\"\nworktree = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"task\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
     );
     let w = world(&[sweep, task]);
@@ -315,7 +315,7 @@ async fn a_drain_without_the_key_gives_each_child_its_own_branch_and_merges_noth
     }
     let go = [Arc::new(Notify::new()), Arc::new(Notify::new())];
     go.iter().for_each(|g| w.driver.script(held_turn(g)));
-    let reply = w.start_issue("sweep", Some("web"), json!(root)).await.unwrap();
+    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
     let kids = [w.child(&parent, 0).await, w.child(&parent, 1).await];
     // Both at once, each in a worktree of its own from the HEAD of the checkout, on a branch of its own.
@@ -345,7 +345,7 @@ async fn a_drain_without_the_key_gives_each_child_its_own_branch_and_merges_noth
 async fn the_children_of_a_root_run_with_a_worktree_work_in_its_base_of_their_rig() {
     let epic = (
         "shop/formulas/epic.toml",
-        "name = \"epic\"\nworktree = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"epic\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"drain\"\nformula = \"work\"\n",
     );
     let w = world(&[epic, WORK]);
@@ -358,7 +358,7 @@ async fn the_children_of_a_root_run_with_a_worktree_work_in_its_base_of_their_ri
     w.driver.script(hollow_turn());
     w.driver.script(held_turn(&go));
     // On the root, a plain directory: the run works there; its children on `web` work in its base there.
-    let reply = w.start_issue("epic", None, json!(root)).await.unwrap();
+    let reply = w.start_bead("epic", None, json!(root)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
     let base = rig.join(".git/loop-manager/worktrees").join(&parent);
     let first = w.child(&parent, 0).await;
@@ -389,7 +389,7 @@ async fn the_bases_of_a_root_run_are_its_workdir_and_its_worktree_in_each_rig_of
     );
     let epic = (
         "shop/formulas/epic.toml",
-        "name = \"epic\"\nworktree = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"epic\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\n",
     );
     let w = world(&[places, ("shop/api/.keep", ""), epic, WORK]);
@@ -400,7 +400,7 @@ async fn the_bases_of_a_root_run_are_its_workdir_and_its_worktree_in_each_rig_of
     let go = Arc::new(Notify::new());
     w.driver.script(held_turn(&go));
     w.driver.script(held_turn(&go));
-    let reply = w.start_issue("epic", None, json!(root)).await.unwrap();
+    let reply = w.start_bead("epic", None, json!(root)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
     let reader = loop_manager_core::run::Reader::open(&w.dir.path().join("state.db")).unwrap();
     let mut expected = std::collections::BTreeMap::new();
@@ -488,7 +488,7 @@ async fn a_child_of_a_formula_step_with_a_worktree_of_its_own_deletes_its_branch
 async fn a_child_elsewhere_than_its_parent_without_the_key_works_in_the_checkout_of_its_rig() {
     let sweep = (
         "shop/formulas/sweep.toml",
-        "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"drain\"\nformula = \"work\"\n",
     );
     // `build` turns the bundled `worktree` on in the project; no run here has its key.
@@ -497,7 +497,7 @@ async fn a_child_elsewhere_than_its_parent_without_the_key_works_in_the_checkout
     let root = w.tracker.add(&[], None);
     w.tracker.add_in("w", &[], Some(&root));
     w.driver.script(hollow_turn());
-    let reply = w.start_issue("sweep", None, json!(root)).await.unwrap();
+    let reply = w.start_bead("sweep", None, json!(root)).await.unwrap();
     let parent = reply["run"].as_str().unwrap().to_owned();
     let kid = w.child(&parent, 0).await;
     // The base of a parent without the key is the checkout: it has no worktree in the rig of its child.

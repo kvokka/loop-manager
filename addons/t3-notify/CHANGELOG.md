@@ -1,5 +1,10 @@
 # t3-notify changelog
 
+## 0.4.0
+
+- Name the run's bead in a notice, read from the `bead` field of the run in the event instead of `issue`. Needs a
+  loop-manager build whose run events carry `bead`; on a build that sends `issue` the hook fails, so stay on 0.3.0.
+
 ## 0.3.0
 
 - The notice of a passed, failed or cancelled run carries its spend as the table of `loop-manager run spend`, a row

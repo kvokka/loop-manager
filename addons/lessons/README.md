@@ -1,8 +1,8 @@
 # lessons
 
-An addon of loop-manager for claude and codex agents: when an agent has finished its work on an issue, the same session
+An addon of loop-manager for claude and codex agents: when an agent has finished its work on a bead, the same session
 is asked, in the context it just used and while its prompt cache is warm, for the lessons that would have saved
-another agent at least 1,000 tokens on similar work. A useful answer goes on the run's issue as one comment; an empty
+another agent at least 1,000 tokens on similar work. A useful answer goes on the run's bead as one comment; an empty
 answer, the usual one, leaves nothing. The addon ends there: what is done with the notes later is not its part.
 
 ## Install
@@ -15,7 +15,7 @@ If you already have a `[settings]` table, append the attachment to its `addons` 
 ```toml
 [[addon]]
 git = "https://github.com/kvokka/loop-manager.git"
-rev = "addons/lessons/0.4.0"
+rev = "addons/lessons/0.5.0"
 dir = "addons/lessons"
 
 [settings]
@@ -31,7 +31,7 @@ It has no params.
 ## How it works
 
 The hook `hooks/lessons` runs on the harness's `Stop`, at the end of each turn of the session's own agent. It does
-nothing in a run without an issue, for a subagent (an input with `agent_id`), or before the agent has declared its
+nothing in a run without a bead, for a subagent (an input with `agent_id`), or before the agent has declared its
 outcome.
 
 1. **The turn that finished the work ends.** The current attempt of the run has a declared outcome (`outcome` of
@@ -39,7 +39,7 @@ outcome.
    <request.md>}`: the harness does not end the turn but sends the request to the model as the next message of the
    same conversation. The outcome stays declared: the request asks for no tool and no change to it.
 2. **The answer to the request ends.** The input has `stop_hook_active: true`; its `last_assistant_message` is the
-   answer. An answer that is empty or only `NONE` publishes nothing. Any other answer goes on the issue of the run
+   answer. An answer that is empty or only `NONE` publishes nothing. Any other answer goes on the bead of the run
    with `loop-manager comment`, as the actor of the session's attempt:
 
    ```text
@@ -75,7 +75,7 @@ next prompt of the turn, and its next `Stop` carries `stop_hook_active` and `las
 ## Needs on the host
 
 `jq` and `loop-manager` (to read the run and to leave the comment) on the `PATH` of the harness's hooks. The comment
-goes through the daemon to the run's issue, whatever the tracker of the project: the addon does not call `br`, and
+goes through the daemon to the run's bead, whatever the tracker of the project: the addon does not call `br`, and
 needs a loop-manager with the `comment` command.
 
 ## Checking it
@@ -83,13 +83,13 @@ needs a loop-manager with the `comment` command.
 - The config: `loop-manager config check --config <file>` loads the declaration, and
   `loop-manager config explain --config <file> --project <p> --agent <a>` shows the `Stop` hook with the paths filled
   in for the agent.
-- A run: after a run of an attached agent on an issue, the issue shows the `LESSONS` comment, or none.
+- A run: after a run of an attached agent on a bead, the bead shows the `LESSONS` comment, or none.
 - The tests: `crates/loop-manager/tests/e2e/lessons.rs` runs a real daemon with the real `claude` and the real
   `codex app-server` on fake providers. It checks that the request goes to the model on the conversation of the
-  finished turn, that a useful answer reaches the run's issue once and no other issue, through loop-manager while `br`
+  finished turn, that a useful answer reaches the run's bead once and no other bead, through loop-manager while `br`
   fails in the session, that an empty answer leaves no comment, that the request leaves the outcome as declared, that
   no request follows the answer, and that a session `context-budget` stopped is not asked. It drives the hook by hand
-  for the rest: no outcome, a subagent, a run on no issue, the stops after the answer, and a stop of an asked session
+  for the rest: no outcome, a subagent, a run on no bead, the stops after the answer, and a stop of an asked session
   that is not the end of its answer.
 
 See the [changelog](CHANGELOG.md) for version history.

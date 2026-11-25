@@ -12,7 +12,7 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::{Map, Value, json};
 
 /// Chain depth (contracts 6.1): a run started by a trigger is one deeper than the run that caused it, except on
-/// `issue.ready`; a run an agent session starts is one deeper than the session's run.
+/// `bead.ready`; a run an agent session starts is one deeper than the session's run.
 pub(super) const MAX_DEPTH: i64 = 10;
 
 /// One trigger on one rig of its project.
@@ -292,10 +292,10 @@ impl RunHandler {
             }
             None => None,
         };
-        // An issue made ready is the next work of the tracker, not a run the parent started (docs/design/config.md,
-        // decision 18): it keeps its parent's depth, so a long epic is legal; an issue retried in a loop is bounded by
+        // A bead made ready is the next work of the tracker, not a run the parent started (docs/design/config.md,
+        // decision 18): it keeps its parent's depth, so a long epic is legal; a bead retried in a loop is bounded by
         // its failures.
-        let step = i64::from(cause.is_none_or(|e| e["type"] != "issue.ready"));
+        let step = i64::from(cause.is_none_or(|e| e["type"] != "bead.ready"));
         let depth = parent_depth.map_or(1, |d| (d + step).max(1));
         if depth > MAX_DEPTH {
             return skip(tx, "depth", format!("depth {depth} is over {MAX_DEPTH}"));
@@ -340,9 +340,9 @@ impl RunHandler {
         let run = match created {
             Ok(reply) if reply["run"].is_string() => reply["run"].as_str().unwrap_or_default().to_owned(),
             Ok(reply) => {
-                let mut why = "no ready issue to take".to_owned();
-                for (issue, reason) in reply["passed_over"].as_object().into_iter().flatten() {
-                    why += &format!("; passed over `{issue}`: {}", reason.as_str().unwrap_or_default());
+                let mut why = "no ready bead to take".to_owned();
+                for (bead, reason) in reply["passed_over"].as_object().into_iter().flatten() {
+                    why += &format!("; passed over `{bead}`: {}", reason.as_str().unwrap_or_default());
                 }
                 return skip(tx, "nothing_ready", why);
             }

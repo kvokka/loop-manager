@@ -147,7 +147,7 @@ async fn kill_in(d: &Daemon, run: &str, dir: &Path, name: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn resumed_and_continued_sessions_replay_only_the_selected_work() {
     let finish = |result: &str| format!("{} finish {result} --summary {result}ed", common::EXE);
-    // The first run fails: its issue stays open and unclaimed for the second.
+    // The first run fails: its bead stays open and unclaimed for the second.
     let provider = Provider::start(vec![
         Reply::Bash(held("c-one", "echo one")),
         Reply::Bash("echo two".into()),
@@ -161,9 +161,9 @@ async fn resumed_and_continued_sessions_replay_only_the_selected_work() {
     let d = claude::daemon(&provider).await;
     let shop = d.dir.path().join("config/loop-manager/shop");
     let web = shop.join("web");
-    let issue = br_in(&shop, Some("w"), &["create", "Fix the total", "--silent"]);
+    let bead = br_in(&shop, Some("w"), &["create", "Fix the total", "--silent"]);
     let start = async |continue_from: Option<&str>| {
-        let body = json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "issue": issue },
+        let body = json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "bead": bead },
             "continue_from": continue_from });
         let reply = d.post("/v1/runs", body, None).await.unwrap();
         reply["run"].as_str().unwrap().to_owned()
@@ -182,7 +182,7 @@ async fn resumed_and_continued_sessions_replay_only_the_selected_work() {
     assert_eq!(d.get(&url(&second)).await["live"], true);
     assert_eq!(d.get(&url(&first)).await["live"], false);
     let mut provider = CardProvider::start(&d, true).await;
-    let native = format!("lm-agent/shop/{issue}#t:{second}.1");
+    let native = format!("lm-agent/shop/{bead}#t:{second}.1");
     let (updates, response) = provider.resume(&native).await;
     assert_eq!(response["result"], json!({}));
     assert!(updates.iter().any(|m| m["params"]["update"]["state"] == "running"));
@@ -210,7 +210,7 @@ async fn resumed_and_continued_sessions_replay_only_the_selected_work() {
     let sessions = list["result"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 2, "{list}");
     for (run, expected, excluded) in [(&first, "c-one", "c-three"), (&second, "c-three", "c-one")] {
-        let native = format!("lm-agent/shop/{issue}#t:{run}.1");
+        let native = format!("lm-agent/shop/{bead}#t:{run}.1");
         assert!(sessions.iter().any(|s| s["sessionId"] == native));
         let page = d.get(&url(run)).await;
         let entries = page["entries"].as_array().unwrap();
@@ -287,7 +287,7 @@ command = ["sh", "-c", "test -e reviewed || { touch reviewed; exit 1; }"]
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_issueless_codex_session_opens_by_its_listed_id() {
+async fn a_beadless_codex_session_opens_by_its_listed_id() {
     let finish = format!("{} finish pass --summary built", common::EXE);
     let provider = openai::Provider::start(vec![
         openai::Reply::Command(finish),

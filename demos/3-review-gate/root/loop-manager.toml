@@ -25,18 +25,18 @@ path = "../gate-demo"
 
 [rigs.backend]
 path = "../gate-demo-backend"
-prefix = "api"                        # its issues are `api-…`, not the acronym `b-…`
+prefix = "api"                        # its beads are `api-…`, not the acronym `b-…`
 [rigs.frontend]
 path = "../gate-demo-frontend"
 
-# A cancelled feature leaves pull requests, branches and its issue: the pack's `cleanup` clears them. A failed one is
+# A cancelled feature leaves pull requests, branches and its bead: the pack's `cleanup` clears them. A failed one is
 # left as it is, for a human to look into.
 [[trigger]]
 name = "cleanup-cancelled"
 on = "run.cancelled"
 where = { "run.formula" = "dev.feature" }
 run = "dev.cleanup"
-inputs = { issue = "{{ event.run.issue }}" }
+inputs = { bead = "{{ event.run.bead }}" }
 
 # The demo's stand-in for a human: when a feature waits for its review, the agent `owner` reviews it on GitHub.
 [[trigger]]

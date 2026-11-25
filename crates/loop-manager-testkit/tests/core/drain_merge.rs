@@ -47,16 +47,16 @@ fn merges(rig: &Path, rev: &str) -> Vec<String> {
     log.lines().map(str::to_owned).collect()
 }
 
-/// `work`, one ai step on an issue: the formula of the children.
+/// `work`, one ai step on a bead: the formula of the children.
 const WORK: (&str, &str) = (
     "shop/formulas/work.toml",
-    "name = \"work\"\n[inputs]\nissue = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+    "name = \"work\"\n[inputs]\nbead = { type = \"task\", required = true }\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
 );
 
 /// `sweep`, a drain step with the key and `pool = 2`: its formula has no key.
 const SWEEP: (&str, &str) = (
     "shop/formulas/sweep.toml",
-    "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+    "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
      [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\nworktree = true\n",
 );
 
@@ -145,7 +145,7 @@ async fn until(what: &str, mut check: impl FnMut() -> bool) {
     }
 }
 
-/// The children of `parent` with a session, `(run, issue)`, once there are `n`.
+/// The children of `parent` with a session, `(run, bead)`, once there are `n`.
 async fn kids(w: &World, parent: &str, n: usize) -> Vec<(String, String)> {
     let started = |w: &World| -> Vec<(String, String)> {
         let kids = w.kids(parent).into_iter().map(|k| (k.0, k.1));
@@ -173,14 +173,14 @@ fn prompted(w: &World, text: &str) -> bool {
     w.driver.sent("", 1).1.iter().any(|t| t.contains(text))
 }
 
-/// Starts `formula` on issue `root` on `rig` (`None`: the root).
+/// Starts `formula` on bead `root` on `rig` (`None`: the root).
 async fn start(w: &World, formula: &str, rig: Option<&str>, root: &str) -> String {
-    let reply = w.start_issue(formula, rig, json!(root)).await.unwrap();
+    let reply = w.start_bead(formula, rig, json!(root)).await.unwrap();
     reply["run"].as_str().unwrap().to_owned()
 }
 
-/// An issue of `prefix` under `root` titled `title`.
-fn issue(w: &World, prefix: &str, root: &str, title: &str) -> String {
+/// A bead of `prefix` under `root` titled `title`.
+fn bead(w: &World, prefix: &str, root: &str, title: &str) -> String {
     let id = w.tracker.add_in(prefix, &[], Some(root));
     w.tracker.retitle(&id, title);
     id
@@ -201,15 +201,15 @@ async fn cleaned(rig: &Path, run: &str) {
 async fn a_root_run_merges_its_children_into_the_base_of_each_rig() {
     let epic = (
         "shop/formulas/epic.toml",
-        "name = \"epic\"\nworktree = true\n[inputs]\nissue = { type = \"task\", required = true }\n\
+        "name = \"epic\"\nworktree = true\n[inputs]\nbead = { type = \"task\", required = true }\n\
          [[step]]\nkind = \"drain\"\nformula = \"work\"\npool = 2\nworktree = true\n",
     );
     let w = world(&[epic], bundled());
     let (web, api) = (w.dir.path().join("shop/web"), w.dir.path().join("shop/api"));
     let root = w.tracker.add(&[], None);
-    let a1 = issue(&w, "a", &root, "Add the cart");
-    let a2 = issue(&w, "a", &root, "Price the cart");
-    let w1 = issue(&w, "w", &root, "Show the cart");
+    let a1 = bead(&w, "a", &root, "Add the cart");
+    let a2 = bead(&w, "a", &root, "Price the cart");
+    let w1 = bead(&w, "w", &root, "Show the cart");
     w.tracker.depend(&a2, &a1, "blocks");
     let mut turns = Turns::script(&w, 3);
     let run = start(&w, "epic", None, &root).await;
@@ -266,7 +266,7 @@ async fn a_drain_with_the_key_merges_into_the_branch_of_the_checkout() {
     let web = w.dir.path().join("shop/web");
     git(&web, &["checkout", "-q", "-b", "feature"]);
     let root = w.tracker.add(&[], None);
-    let w1 = issue(&w, "w", &root, "Show the cart");
+    let w1 = bead(&w, "w", &root, "Show the cart");
     let mut turns = Turns::script(&w, 1);
     let run = start(&w, "sweep", Some("web"), &root).await;
     let (kid, _) = kids(&w, &run, 1).await.remove(0);
@@ -286,7 +286,7 @@ async fn a_dirty_final_pass_gets_a_remark_and_then_merges() {
     let w = world(&[], bundled());
     let web = w.dir.path().join("shop/web");
     let root = w.tracker.add(&[], None);
-    let w1 = issue(&w, "w", &root, "Show the cart");
+    let w1 = bead(&w, "w", &root, "Show the cart");
     let mut turns = Turns::script(&w, 2);
     let run = start(&w, "sweep", Some("web"), &root).await;
     let (kid, _) = kids(&w, &run, 1).await.remove(0);
@@ -312,8 +312,8 @@ async fn a_conflict_of_two_siblings_gets_a_remark_and_then_merges() {
     let w = world(&[], bundled());
     let web = w.dir.path().join("shop/web");
     let root = w.tracker.add(&[], None);
-    issue(&w, "w", &root, "Red cart");
-    issue(&w, "w", &root, "Blue cart");
+    bead(&w, "w", &root, "Red cart");
+    bead(&w, "w", &root, "Blue cart");
     let mut turns = Turns::script(&w, 3);
     let run = start(&w, "sweep", Some("web"), &root).await;
     let both = kids(&w, &run, 2).await;
@@ -350,7 +350,7 @@ async fn a_refusal_of_the_projects_hook_fails_the_child() {
     let web = w.dir.path().join("shop/web");
     std::os::unix::fs::symlink(w.dir.path().join(refuse.0), web.join(".git/hooks/pre-merge-commit")).unwrap();
     let root = w.tracker.add(&[], None);
-    issue(&w, "w", &root, "Show the cart");
+    bead(&w, "w", &root, "Show the cart");
     let mut turns = Turns::script(&w, 1);
     let run = start(&w, "sweep", Some("web"), &root).await;
     let (kid, _) = kids(&w, &run, 1).await.remove(0);
@@ -407,7 +407,7 @@ async fn a_merge_repeated_after_a_restart_merges_once() {
     let mut w = world(&[], hooks.clone());
     let web = w.dir.path().join("shop/web");
     let root = w.tracker.add(&[], None);
-    let w1 = issue(&w, "w", &root, "Show the cart");
+    let w1 = bead(&w, "w", &root, "Show the cart");
     let mut turns = Turns::script(&w, 1);
     let run = start(&w, "sweep", Some("web"), &root).await;
     let (kid, _) = kids(&w, &run, 1).await.remove(0);

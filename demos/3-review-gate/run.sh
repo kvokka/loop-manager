@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs the demo from the request to its report on a daemon of the demo's own, with the bridge that gives the review's
 # outcome from GitHub (bridge.sh). The three repositories of the project are clones of the GitHub repositories of
-# OWNER (kvokka-agent by default), in gate-demo/, gate-demo-backend/ and gate-demo-frontend/; the issues are in
+# OWNER (kvokka-agent by default), in gate-demo/, gate-demo-backend/ and gate-demo-frontend/; the beads are in
 # root/.beads, the review the reviser gets in root/feedback, the daemon's state and the bridge's log in .loop-manager/ and the
 # report in RESULT.md, all in .gitignore. EXAMPLE=1 also keeps the result as the author's *-example. LOOP_MANAGER names the loop-manager
 # binary. `gh` must be logged in as an account that may push to the repositories, or GITHUB_TOKEN hold its token.
@@ -45,7 +45,7 @@ export XDG_STATE_HOME="$here/.loop-manager/state" XDG_CONFIG_HOME="$here/.loop-m
 LOOP_MANAGER_SOCKET="$(mktemp -d)/loop-manager.sock"
 export LOOP_MANAGER_SOCKET
 # The project's tracker, br's, in root/.beads; the runs reach it through loop-manager, and a look into it after the run
-# goes as docs/guide/issue-trackers.md#inspect-and-repair-a-br-tracker says.
+# goes as docs/guide/trackers.md#inspect-and-repair-a-br-tracker says.
 (cd root && br init -q >/dev/null)
 # The commit of the demo and of loop-manager, before the run can change the tree.
 sha=$(git describe --always --dirty 2>/dev/null || echo unknown)

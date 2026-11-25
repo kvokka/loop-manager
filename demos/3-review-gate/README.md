@@ -10,20 +10,20 @@ The request is one sentence: "Let a visitor of the site type their name and see 
 KISS".
 
 - `pack/` is the pack `dev`, with not a word about the task:
-  - agents `planner` (files the issues), `coder` (does one issue in its rig and commits it) and `reviser` (works the
+  - agents `planner` (files the beads), `coder` (does one bead in its rig and commits it) and `reviser` (works the
     comments of the review). The reviser reads them only from the file the formula gives it: a `PreToolUse` hook of
     its own, in its `agent.toml`, denies it every shell command that calls `gh`;
   - formula `feature-base` (`internal = true`): `plan`, an ai step of `planner`, and `work`, a `drain` step that gives
-    every ready issue a run of `implement`, two at once;
+    every ready bead a run of `implement`, two at once;
   - formula `feature`, the one a user starts:
     1. `build`, a `formula` step that runs `feature-base`;
     2. `collect`, an exec step with `if = { back_from = "review" }`: after a return from the review, it takes the
        comments and reviews of the authors in the input `feedback_from` (logins, comma-separated; none given,
-       nobody's) that it has not taken yet, writes them to `root/feedback/<issue>.md` and marks each with the reaction
+       nobody's) that it has not taken yet, writes them to `root/feedback/<bead>.md` and marks each with the reaction
        "eyes";
     3. `address`, an ai step of `reviser` with the same `if`;
     4. `pr`, an exec step: in each repository with work of the feature it moves that work to the branch
-       `feature/<issue>`, pushes it and opens or updates the pull request; the root's comes last, with a page that
+       `feature/<bead>`, pushes it and opens or updates the pull request; the root's comes last, with a page that
        links the others, and its address is the last line of the step's output;
     5. `review`, an `await` step with `back_to = "collect"`: it waits for `loop-manager run resolve <run> review pass|fail`,
        which the bridge sends;
@@ -33,7 +33,7 @@ KISS".
     Each repository keeps the feature on one branch over every round, so `feature` has no `worktree`, which is a branch
     per run. Every script can run again with the same result;
   - formula `cleanup`: closes the open pull requests of a feature, deletes its branches, takes each repository back to
-    its default branch as the remote has it and closes its issue and the issues under it.
+    its default branch as the remote has it and closes its bead and the beads under it.
 - `root/` holds the configuration and the tracker of the project; its repository, `[root] path`, is `gate-demo/`.
   `loop-manager.toml` sets the models, `feedback_from` (`kvokka-agent`; put your login there) and two triggers: `cleanup` on
   `run.cancelled` of a `feature` run, and on nothing else (a failed run is left for a human to look into), and
@@ -57,7 +57,7 @@ while there are sessions and gets no socket of the API. It follows the daemon's 
 which covers a run that waited before it started. While a run of the project waits on `review`, it looks at the
 feature's pull requests through `gh` every `INTERVAL` seconds (30 by default); with no run waiting, it asks GitHub
 nothing. The root's pull request is the last line of the output of `pr`, the others are those of the branch
-`feature/<issue>` in each repository.
+`feature/<bead>` in each repository.
 
 - The root's pull request merged: `loop-manager run resolve <run> review pass`, with `{"merged_by": <login>}` as the data.
 - Closed without a merge: `loop-manager run cancel <run>` with the reason `closed without a merge: <address>`; the trigger
@@ -74,7 +74,7 @@ without a model and without GitHub: the real `codex` on fake model APIs, a fake 
 ## Run
 
 You need `loop-manager`, a login of `codex`, `gh` logged in as an account that may push to the repositories (or its token in
-`GITHUB_TOKEN`), the tracker [beads_rust](../../docs/guide/issue-trackers.md) and `jq`.
+`GITHUB_TOKEN`), the tracker [beads_rust](../../docs/guide/trackers.md) and `jq`.
 `mise install` in this directory installs all but `loop-manager` (mise is a convenience, any install does). The repositories
 `gate-demo`, `gate-demo-backend` and `gate-demo-frontend` must exist under the GitHub account `OWNER`
 (`kvokka-agent` by default), each with a default branch. The run spends real tokens and opens real pull requests.

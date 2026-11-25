@@ -77,7 +77,7 @@ async fn resume(driver: &Codex, dir: &std::path::Path) -> Result<(), Failure> {
         attempt: 2,
         token: "tok".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let split = driver.split(&config(), &plan).unwrap();
     let (sink, _events) = tokio::sync::mpsc::unbounded_channel();

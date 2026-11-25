@@ -60,7 +60,7 @@ impl Live {
                 attempt,
                 token,
                 actor: None,
-                issue: None,
+                bead: None,
             },
             Some(session) => SessionPlan::Resume {
                 session,
@@ -69,7 +69,7 @@ impl Live {
                 attempt,
                 token,
                 actor: None,
-                issue: None,
+                bead: None,
             },
         };
         // The config of the claude tests with this many retries and this permission mode.

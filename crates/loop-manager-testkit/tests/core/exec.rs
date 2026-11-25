@@ -88,7 +88,7 @@ async fn exit_0_passes_with_the_output_tail_in_the_outcome() {
     let stdout = out["stdout"].as_str().unwrap();
     assert!(
         stdout.ends_with("/shop/web\nw\n"),
-        "runs in the rig, its issues with its prefix: {out}"
+        "runs in the rig, its beads with its prefix: {out}"
     );
     assert!(
         stdout.starts_with(&format!("loop-manager:{run}:1\n")),
@@ -101,7 +101,7 @@ async fn the_command_gets_the_run_and_its_inputs_in_the_environment_and_inputs_a
     let inputs = "n = { type = \"integer\" }\nflag = { type = \"boolean\" }\nnote-text = { type = \"string\" }\n";
     let (w, _) = check_with(
         inputs,
-        "echo \"$LOOP_MANAGER_RUN $LOOP_MANAGER_INPUT_N $LOOP_MANAGER_INPUT_FLAG $LOOP_MANAGER_INPUT_NOTE_TEXT ${LOOP_MANAGER_ISSUE-none}\"",
+        "echo \"$LOOP_MANAGER_RUN $LOOP_MANAGER_INPUT_N $LOOP_MANAGER_INPUT_FLAG $LOOP_MANAGER_INPUT_NOTE_TEXT ${LOOP_MANAGER_BEAD-none}\"",
         ExecHooks::default(),
     );
     let with = |inputs: Value| Create {
@@ -144,19 +144,19 @@ async fn the_command_gets_the_run_and_its_inputs_in_the_environment_and_inputs_a
 }
 
 #[tokio::test]
-async fn the_command_gets_the_issue_its_run_took_not_the_request_for_one() {
+async fn the_command_gets_the_bead_its_run_took_not_the_request_for_one() {
     let (w, mut create) = check_with(
-        "issue = { type = \"task\", required = true }\n",
-        "echo \"$LOOP_MANAGER_ISSUE $LOOP_MANAGER_INPUT_ISSUE\"",
+        "bead = { type = \"task\", required = true }\n",
+        "echo \"$LOOP_MANAGER_BEAD $LOOP_MANAGER_INPUT_BEAD\"",
         ExecHooks::default(),
     );
-    let issue = w.tracker.add(&[], None);
+    let bead = w.tracker.add(&[], None);
     w.core.send(None, Msg::TrackerChanged("shop".into())).await.unwrap();
-    create.inputs.insert("issue".into(), json!({ "next_ready": true }));
+    create.inputs.insert("bead".into(), json!({ "next_ready": true }));
     let run = w.start_run(create).await;
     let (kind, data) = w.run_end(&run).await;
     assert_eq!(kind, "run.passed", "{data}");
-    assert_eq!(data["outcome"]["data"]["stdout"], json!(format!("{issue} {issue}\n")));
+    assert_eq!(data["outcome"]["data"]["stdout"], json!(format!("{bead} {bead}\n")));
 }
 
 #[tokio::test]

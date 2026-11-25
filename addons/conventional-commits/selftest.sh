@@ -20,14 +20,14 @@ commit() { git commit -q --allow-empty -m "$1"; }
 reject() {
   if commit "$1"; then echo "unexpectedly accepted: $1" >&2; exit 1; fi
 }
-unset LOOP_MANAGER_ISSUE
+unset LOOP_MANAGER_BEAD
 commit 'docs: describe the parser'
 test -f .git/local-hook-ran
 reject 'update docs'
-export LOOP_MANAGER_ISSUE=dev-3.1
+export LOOP_MANAGER_BEAD=dev-3.1
 commit 'feat(api)!: change the response [dev-3.1]'
-reject 'fix: missing issue'
-reject 'fix: wrong issue [dev-3x1]'
+reject 'fix: missing bead'
+reject 'fix: wrong bead [dev-3x1]'
 reject 'fix:  [dev-3.1]'
 git init -q "$tmp/fixture"
 cd "$tmp/fixture"

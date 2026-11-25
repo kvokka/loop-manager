@@ -1,7 +1,7 @@
 """Tool hooks: ask the agent to show the card of each run a tool call started, when the user turned this on.
 
 A run is started by the call when the call starts it (`loop-manager run start`, the MCP tool `start_run`) or when a
-trigger fires on a change the daemon read during the call, such as an issue filed with a label. `pre` (PreToolUse)
+trigger fires on a change the daemon read during the call, such as a bead filed with a label. `pre` (PreToolUse)
 keeps each reachable daemon's journal position; `post` (PostToolUse) reads what the daemons journaled since.
 
 Each run found is also written down with this thread beside its daemon's socket, in `t3-threads/<run>`: the daemon's

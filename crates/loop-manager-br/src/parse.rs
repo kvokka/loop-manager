@@ -1,6 +1,6 @@
 //! What `br show --json` says of a bead (docs/design/tracker-br.md).
 
-use loop_manager_contract::tracker::{Comment, Commented, Issue, TrackerError};
+use loop_manager_contract::tracker::{Bead, Comment, Commented, TrackerError};
 use serde_json::Value;
 
 /// The bead field an `events` row of br changed.
@@ -18,12 +18,12 @@ pub(crate) fn field(kind: &str) -> Option<&'static str> {
 }
 
 /// A bead of `br show --json`; its parent is its epic (br has no epic field, docs/design/tracker-br.md).
-pub(crate) fn bead(v: &Value) -> Result<Issue, TrackerError> {
+pub(crate) fn bead(v: &Value) -> Result<Bead, TrackerError> {
     let text = |k: &str| v[k].as_str().map(str::to_owned);
     let invalid = || TrackerError::Invalid {
         text: format!("not a bead: {v}"),
     };
-    Ok(Issue {
+    Ok(Bead {
         id: text("id").ok_or_else(invalid)?,
         title: text("title").unwrap_or_default(),
         description: text("description").unwrap_or_default(),
@@ -54,7 +54,7 @@ pub(crate) fn commented(v: &Value) -> Result<Commented, TrackerError> {
         })
         .collect();
     Ok(Commented {
-        issue: bead(v)?,
+        bead: bead(v)?,
         comments,
     })
 }

@@ -11,7 +11,7 @@ How the parts of loop-manager fit together and where each lives. The terms are i
 │ CORE: one writer of the state                                            │
 │  input queue → handling in an SQLite transaction → events (outbox)       │
 │  runs and attempts · triggers and timers · config assembly · instances   │
-│  exec hooks of addons · issue ownership · recovery and resync             │
+│  exec hooks of addons · bead ownership · recovery and resync             │
 └──────┬─────────────────────┬─────────────────────┬───────────────────────┘
        │ driver interface    │ tracker interface   │ events → JSONL journal
   harness adapters       tracker adapters      addons (exec hooks, services)
@@ -24,17 +24,17 @@ These are checked by the build, not kept by agreement.
 
 - The core is two crates: `loop-manager-contract`, the contracts adapters, the tracker adapter, addons and test doubles
   are written against, and `loop-manager-core`, the engine over them. The core depends on no adapter, frontend or addon,
-  and neither crate names a harness or a tracker (`codex`, `max_sessions`, a tracker's binary or its own word for an
-  issue): what the core needs comes through the driver's capabilities and the tracker interface, and
-  `scripts/core-boundary.sh` checks the sources of both in CI, and that the adapters (`loop-manager-claude`,
-  `loop-manager-codex`, `loop-manager-br`, `loop-manager-addons`) build without `loop-manager-core`.
+  and neither crate names a harness or a tracker (`codex`, `max_sessions`, a tracker's binary or its directory): what
+  the core needs comes through the driver's capabilities and the tracker interface, and `scripts/core-boundary.sh`
+  checks the sources of both in CI, and that the adapters (`loop-manager-claude`, `loop-manager-codex`,
+  `loop-manager-br`, `loop-manager-addons`) build without `loop-manager-core`.
 - A harness is an abstraction to the core. The root of the build holds the one table of adapters
   (`crates/loop-manager/src/harness.rs`), the only place that names a harness.
 - So is a tracker. Everything of br ([tracker-br](design/tracker-br.md)) — where a project keeps it, its session
   environment, its `doctor` checks, the bv workspace file — lives in `loop-manager-br`; the root holds the one table of
   tracker adapters (`crates/loop-manager/src/tracker.rs`), and `scripts/core-boundary.sh` checks that no other Rust code
-  outside tests names br, bv, `.beads` or a `BR_`/`BD_`/`BEADS_` variable. Adding a tracker is adding a crate and its
-  row ([adapters](design/adapters.md#adding-a-tracker)).
+  outside tests names br, bv, `.beads`, `BEADS_DIR` or a `BR_`/`BD_` variable. Adding a tracker is adding a crate and
+  its row ([adapters](design/adapters.md#adding-a-tracker)).
 - Adapters and frontends only translate protocols.
 - Policy (retry, park, refuse) lives in addons and config, judgement ("is the work done well") in prompts and the
   checks of addons; the core keeps only mechanisms
@@ -70,12 +70,12 @@ and an agent attaches it with `addons = [{ name, params }]`
 - [`context-budget`](../addons/context-budget/README.md), a context budget for claude and codex sessions: a note to
   wrap up past a soft limit, a stop past a hard one, no compaction;
 - [`conventional-commits`](../addons/conventional-commits/README.md), a Git commit-msg check of Conventional Commits
-  subjects, with the issue's id at the end of each subject in a run on an issue;
+  subjects, with the bead's id at the end of each subject in a run on a bead;
 - [`dcg`](../addons/dcg/README.md), the host's `dcg` (destructive_command_guard) as the `PreToolUse` hook of claude
   and codex sessions: a destructive shell command is denied;
 - [`lessons`](../addons/lessons/README.md), a request to a claude or codex session that has declared the outcome of
-  its run on an issue: in the same conversation, the agent writes the lessons that would have saved tokens, and a
-  useful answer goes on the issue as one comment;
+  its run on a bead: in the same conversation, the agent writes the lessons that would have saved tokens, and a
+  useful answer goes on the bead as one comment;
 - [`t3-notify`](../addons/t3-notify/README.md), notices to the T3 Code thread that started a run: the thread's next
   message tells it that the run started, waits for a decision or ended.
 
@@ -89,7 +89,7 @@ The T3 host imports individual sessions through `loop-manager acp`. Claude Code 
 
 1. **A start.** A run starts by an explicit call (API, CLI, MCP), by a subscription to an event or by a schedule
    ([triggers](design/config.md#trigger)). The start names a project, a formula and its inputs; the task either names
-   an existing issue or becomes a new root issue ([tracker](design/tracker-br.md)).
+   an existing bead or becomes a new root bead ([tracker](design/tracker-br.md)).
 2. **One writer.** Everything that happens enters the core as a message to the single writer and is handled in one
    SQLite transaction together with the events it emits; effects run after the commit
    ([event model](design/event-model.md)).

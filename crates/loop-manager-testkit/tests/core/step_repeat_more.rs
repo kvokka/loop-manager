@@ -25,10 +25,10 @@ async fn kids(w: &World, run: &str, n: usize) -> Vec<common::drain::Kid> {
     w.kids(run)
 }
 
-/// The issue whose child failed in the first entry is given again in the second: a repeat is a new entry.
+/// The bead whose child failed in the first entry is given again in the second: a repeat is a new entry.
 #[tokio::test]
 async fn a_repeat_of_a_drain_step_is_a_new_entry() {
-    let sweep = "name = \"sweep\"\n[inputs]\nissue = { type = \"task\", required = true }\n[[step]]\nname = \"all\"\n\
+    let sweep = "name = \"sweep\"\n[inputs]\nbead = { type = \"task\", required = true }\n[[step]]\nname = \"all\"\n\
         kind = \"drain\"\nformula = \"work\"\nmax_attempts = 2\nstep_check_script_path = \"check.sh\"\n";
     let check = script("1 0", "");
     let files = [
@@ -38,9 +38,9 @@ async fn a_repeat_of_a_drain_step_is_a_new_entry() {
     .concat();
     let w = world(&files);
     let root = w.tracker.add(&[], None);
-    let issue = w.tracker.add_in("w", &[], Some(&root));
+    let bead = w.tracker.add_in("w", &[], Some(&root));
     let turns = [w.repeat_turn(), w.repeat_turn()];
-    let reply = w.start_issue("sweep", Some("web"), json!(root)).await.unwrap();
+    let reply = w.start_bead("sweep", Some("web"), json!(root)).await.unwrap();
     let run = reply["run"].as_str().unwrap().to_owned();
     let first = kids(&w, &run, 1).await[0].0.clone();
     w.repeat_declare(&first, 1, Verdict::Fail, &turns[0]).await;
@@ -50,13 +50,13 @@ async fn a_repeat_of_a_drain_step_is_a_new_entry() {
     assert_eq!(kind, "run.passed", "{data}");
     assert_eq!(w.check_calls(), 2);
     let kids: Vec<(String, String)> = w.kids(&run).into_iter().map(|k| (k.1, k.2)).collect();
-    let at = |state: &str| (issue.clone(), state.to_owned());
+    let at = |state: &str| (bead.clone(), state.to_owned());
     assert_eq!(kids, [at("failed"), at("passed")]);
     let entries = w.all("run.step_finished").into_iter().filter(|d| d["run"]["id"] == run);
     // The word of the check script is the outcome of the first entry.
     let said: Vec<_> = entries.map(|d| d["outcome"]["summary"].clone()).collect();
     assert_eq!(said, ["check script: exit 1"]);
-    assert_eq!(w.tracker.issue(&issue).unwrap().status, "closed");
+    assert_eq!(w.tracker.bead(&bead).unwrap().status, "closed");
 }
 
 /// Whether process `pid` is gone: no entry in `/proc`, or a zombie.

@@ -79,7 +79,7 @@ fn the_role_prompt_of_a_pack_agent_reaches_both_adapters() {
         attempt: 1,
         token: "t".into(),
         actor: None,
-        issue: None,
+        bead: None,
     };
     let delivered = |driver: &dyn Driver, config: &EffectiveConfig| {
         let split = driver.split(config, &plan).unwrap();

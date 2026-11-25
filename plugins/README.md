@@ -41,7 +41,7 @@ Ask “Show the T3 run card for run_42”. Use **‹ Round N ›** to move betwe
 Select an agent name to open that step's native T3 thread. Opening the card and switching rounds
 only read run data. On the first click T3 imports the selected working session into the corresponding
 T3 project. Future clicks reuse it. Resumes within a step and round share a thread, while replacement
-sessions and other rounds have their own links. Runs without an issue work too.
+sessions and other rounds have their own links. Runs without a bead work too.
 
 The link uses T3's HTTPS thread URL so desktop, web and iPhone clients can resolve the same thread.
 The T3 MCP Apps host accepts only HTTP(S) links. On iPhone it asks for confirmation and hands the
@@ -79,7 +79,7 @@ it read.
 
 The card can also open without asking. After a tool call of the agent starts a run, a plugin hook asks it to
 show that run's card. The call can start the run itself (`loop-manager run start`, the `start_run` MCP tool) on
-the daemon it names with `--socket` or `LOOP_MANAGER_SOCKET=`. It can also make a change, such as an issue filed
+the daemon it names with `--socket` or `LOOP_MANAGER_SOCKET=`. It can also make a change, such as a bead filed
 with a label, on which a trigger of the default or a registered daemon starts a run. Runs that sessions of LM
 runs start and scheduled runs do not open a card. The hook waits up to 0.3 s past the daemon's journal for a
 change the daemon reads late. This is a per-user setting, off by default:

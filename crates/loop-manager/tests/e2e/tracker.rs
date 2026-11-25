@@ -9,7 +9,7 @@ fn br(project: &Path, args: &[&str]) -> String {
     br_in(project, None, args)
 }
 
-/// br by hand, filing new issues with the id prefix `prefix` (a rig's) if any.
+/// br by hand, filing new beads with the id prefix `prefix` (a rig's) if any.
 pub(crate) fn br_in(project: &Path, prefix: Option<&str>, args: &[&str]) -> String {
     let mut br = common::program("br");
     if let Some(prefix) = prefix {
@@ -31,21 +31,21 @@ pub(crate) fn br_in(project: &Path, prefix: Option<&str>, args: &[&str]) -> Stri
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
 }
 
-/// Reads the stream on to the next event of `kind` whose issue is `id`.
+/// Reads the stream on to the next event of `kind` whose bead is `id`.
 async fn until_event(events: &mut loop_manager_front::client::Events, kind: &str, id: &str) -> Value {
     loop {
         let next = tokio::time::timeout(Duration::from_secs(20), events.next()).await;
         let event = next.unwrap_or_else(|_| panic!("no {kind} for {id}")).unwrap().unwrap();
         let envelope: Value = serde_json::from_str(&event.data).unwrap();
-        if event.event == kind && envelope["data"]["issue"]["id"] == id {
+        if event.event == kind && envelope["data"]["bead"]["id"] == id {
             return envelope;
         }
     }
 }
 
 #[tokio::test]
-async fn an_issue_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_in_br() {
-    let fix = "name = \"fix\"\n[inputs]\nissue = { type = \"task\", required = true }\n\
+async fn a_bead_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_in_br() {
+    let fix = "name = \"fix\"\n[inputs]\nbead = { type = \"task\", required = true }\n\
                [[step]]\nkind = \"exec\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
     let seed = std::cell::RefCell::new(String::new());
     let d = Daemon::start(|dir| {
@@ -59,7 +59,7 @@ async fn an_issue_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_i
                 .unwrap()
                 .success()
         );
-        // A second rig, `api`, whose issue the run on `web` passes over.
+        // A second rig, `api`, whose bead the run on `web` passes over.
         std::fs::write(
             project.join("loop-manager.toml"),
             "[rigs.web]\npath = \"web\"\n[rigs.api]\npath = \"api\"\n",
@@ -77,24 +77,24 @@ async fn an_issue_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_i
     assert!(workspace.contains(&repo), "{workspace}");
     let mut events = d.client.events(Some(1)).await.unwrap();
     // The first read of a tracker is its history, not news: write by hand only after it (the seed turns ready).
-    until_event(&mut events, "issue.ready", &seed.into_inner()).await;
+    until_event(&mut events, "bead.ready", &seed.into_inner()).await;
     let id = br_in(&project, Some("w"), &["create", "Fix the cart", "--silent"]);
     assert!(id.starts_with("w-"), "{id}");
-    let created = until_event(&mut events, "issue.created", &id).await;
+    let created = until_event(&mut events, "bead.created", &id).await;
     assert_eq!(
         (&created["data"]["actor"], &created["rig"]),
         (&json!("alice"), &json!("web"))
     );
-    // The read that saw the write has the issue in the ready set, whichever of the two came first.
+    // The read that saw the write has the bead in the ready set, whichever of the two came first.
     let body =
-        json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "issue": { "next_ready": true } } });
+        json!({ "project": "shop", "rig": "web", "formula": "fix", "inputs": { "bead": { "next_ready": true } } });
     let run = d.post("/v1/runs", body, None).await.unwrap()["run"]
         .as_str()
         .unwrap()
         .to_owned();
     let view = d.until_state(&run, "passed").await;
-    assert_eq!(view["issue"], json!(id));
-    let closed = until_event(&mut events, "issue.closed", &id).await;
+    assert_eq!(view["bead"], json!(id));
+    let closed = until_event(&mut events, "bead.closed", &id).await;
     assert_eq!(
         (&closed["run"], &closed["data"]["actor"]),
         (&json!(run), &json!(format!("loop-manager:{run}")))
@@ -113,7 +113,7 @@ async fn an_issue_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_i
             "web",
             "fix",
             "--input",
-            r#"issue={"next_ready":true}"#,
+            r#"bead={"next_ready":true}"#,
         ])
         .env("LOOP_MANAGER_SOCKET", d.socket())
         .output()
@@ -131,10 +131,10 @@ async fn an_issue_written_by_hand_is_seen_and_a_run_on_it_claims_and_closes_it_i
 async fn a_tracker_that_cannot_be_watched_says_so_in_an_event() {
     use std::os::unix::fs::PermissionsExt;
     let d = Daemon::start(|dir| {
-        let issues = dir.join("config/loop-manager/shop/.beads");
-        std::fs::create_dir_all(&issues).unwrap();
+        let beads = dir.join("config/loop-manager/shop/.beads");
+        std::fs::create_dir_all(&beads).unwrap();
         // A directory with no read right cannot be watched.
-        std::fs::set_permissions(&issues, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(&beads, std::fs::Permissions::from_mode(0o000)).unwrap();
     })
     .await;
     let journal = d.dir.path().join("state/loop-manager/journal/events.jsonl");
@@ -155,14 +155,14 @@ async fn a_tracker_that_cannot_be_watched_says_so_in_an_event() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     assert_eq!(failed["project"], "shop", "{failed}");
-    let issues = d.dir.path().join("config/loop-manager/shop/.beads");
-    std::fs::set_permissions(issues, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let beads = d.dir.path().join("config/loop-manager/shop/.beads");
+    std::fs::set_permissions(beads, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// A task names an issue filed a moment ago, before any read saw it: the run takes it up on its rig and files nothing;
+/// A task names a bead filed a moment ago, before any read saw it: the run takes it up on its rig and files nothing;
 /// a text becomes one root epic (docs/design/tracker-br.md; criterion 28).
 #[tokio::test]
-async fn a_task_takes_up_the_issue_it_names_and_a_text_files_one_root() {
+async fn a_task_takes_up_the_bead_it_names_and_a_text_files_one_root() {
     let fix = "name = \"fix\"\n[inputs]\ntask = { type = \"task\", required = true }\n\
                [[step]]\nkind = \"exec\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
     let d = Daemon::start(|dir| {
@@ -185,20 +185,17 @@ async fn a_task_takes_up_the_issue_it_names_and_a_text_files_one_root() {
         .unwrap()
         .to_owned();
     let view = d.until_state(&run, "passed").await;
-    assert_eq!((&view["issue"], &view["rig"]), (&json!(id), &json!("web")));
-    assert_eq!(count().len(), 1, "no second issue");
+    assert_eq!((&view["bead"], &view["rig"]), (&json!(id), &json!("web")));
+    assert_eq!(count().len(), 1, "no second bead");
     let run = d.post("/v1/runs", start("Add a dark mode"), None).await.unwrap()["run"]
         .as_str()
         .unwrap()
         .to_owned();
     let view = d.until_state(&run, "passed").await;
-    let issues = count();
-    let root = issues
-        .iter()
-        .find(|b| b["id"] == view["issue"])
-        .expect("the root issue");
+    let beads = count();
+    let root = beads.iter().find(|b| b["id"] == view["bead"]).expect("the root bead");
     assert_eq!(
-        (issues.len(), &root["title"], &root["issue_type"]),
+        (beads.len(), &root["title"], &root["issue_type"]),
         (2, &json!("Add a dark mode"), &json!("epic"))
     );
 }
@@ -238,7 +235,7 @@ pub(crate) fn devloop_project() -> String {
 }
 
 #[tokio::test]
-async fn devloop_runs_an_epic_once_for_an_issue_ready_with_auto_whenever_it_got_the_label() {
+async fn devloop_runs_an_epic_once_for_a_bead_ready_with_auto_whenever_it_got_the_label() {
     let epic = "name = \"epic\"\n[inputs]\nepic = { type = \"task\", required = true }\n\
                 [[step]]\nkind = \"exec\"\ncommand = [\"true\"]\ntimeout = \"10s\"\n";
     let d = Daemon::start(|dir| {
@@ -262,17 +259,17 @@ async fn devloop_runs_an_epic_once_for_an_issue_ready_with_auto_whenever_it_got_
     let mut seen = Vec::new();
     let of = |kind: &'static str, id: &str| {
         let id = id.to_owned();
-        move |e: &Value| e["type"] == kind && e["data"]["issue"]["id"] == id
+        move |e: &Value| e["type"] == kind && e["data"]["bead"]["id"] == id
     };
     let labeled = |id: &str, label: &'static str| {
         let id = id.to_owned();
-        move |e: &Value| e["type"] == "issue.labeled" && e["data"]["issue"]["id"] == id && e["data"]["label"] == label
+        move |e: &Value| e["type"] == "bead.labeled" && e["data"]["bead"]["id"] == id && e["data"]["label"] == label
     };
     let create = |args: &[&str]| br(&project, &[&["create", "--silent"], args].concat());
 
     // Ready without `auto`: another label and an edit start nothing; `auto` then starts the epic.
     let plain = create(&["Plain"]);
-    until(&mut events, &mut seen, "plain ready", of("issue.ready", &plain)).await;
+    until(&mut events, &mut seen, "plain ready", of("bead.ready", &plain)).await;
     br(&project, &["label", "add", &plain, "docs"]);
     let docs = until(&mut events, &mut seen, "docs on plain", labeled(&plain, "docs")).await;
     assert_eq!(docs["data"]["ready"], json!(true));
@@ -280,28 +277,28 @@ async fn devloop_runs_an_epic_once_for_an_issue_ready_with_auto_whenever_it_got_
     br(&project, &["label", "add", &plain, "auto"]);
     let auto = until(&mut events, &mut seen, "auto on plain", labeled(&plain, "auto")).await;
     assert_eq!(auto["data"]["ready"], json!(true));
-    until(&mut events, &mut seen, "plain closed", of("issue.closed", &plain)).await;
+    until(&mut events, &mut seen, "plain closed", of("bead.closed", &plain)).await;
 
     // Filed with `auto`: started once, when it is ready.
     let filed = create(&["Filed", "--labels", "auto"]);
-    until(&mut events, &mut seen, "filed closed", of("issue.closed", &filed)).await;
+    until(&mut events, &mut seen, "filed closed", of("bead.closed", &filed)).await;
 
-    // `auto` on a blocked issue waits for its blocker.
+    // `auto` on a blocked bead waits for its blocker.
     let blocker = create(&["Blocker"]);
     let blocked = create(&["Blocked"]);
-    // Read once without the label: br's writes of one issue by one actor read together are one change, and a label
-    // read with the creation is one the issue was filed with.
-    until(&mut events, &mut seen, "blocked created", of("issue.created", &blocked)).await;
+    // Read once without the label: br's writes of one bead by one actor read together are one change, and a label
+    // read with the creation is one the bead was filed with.
+    until(&mut events, &mut seen, "blocked created", of("bead.created", &blocked)).await;
     br(&project, &["dep", "add", &blocked, &blocker]);
     br(&project, &["label", "add", &blocked, "auto"]);
     let waiting = until(&mut events, &mut seen, "auto on blocked", labeled(&blocked, "auto")).await;
     assert_eq!(waiting["data"]["ready"], json!(false));
     br(&project, &["close", &blocker]);
-    until(&mut events, &mut seen, "blocked closed", of("issue.closed", &blocked)).await;
+    until(&mut events, &mut seen, "blocked closed", of("bead.closed", &blocked)).await;
 
     // Every write so far is read once the last one is: no run started late.
     let last = create(&["Last"]);
-    until(&mut events, &mut seen, "last ready", of("issue.ready", &last)).await;
+    until(&mut events, &mut seen, "last ready", of("bead.ready", &last)).await;
     let fired = |kind: &str| -> Vec<(String, String)> {
         let firings = seen.iter().filter(|e| e["type"] == kind);
         let pair = |e: &Value| {
@@ -312,7 +309,7 @@ async fn devloop_runs_an_epic_once_for_an_issue_ready_with_auto_whenever_it_got_
         };
         firings.map(pair).collect()
     };
-    let started = |trigger: &str, issue: &str| (json!(format!("shop.{trigger}")).to_string(), json!(issue).to_string());
+    let started = |trigger: &str, bead: &str| (json!(format!("shop.{trigger}")).to_string(), json!(bead).to_string());
     assert_eq!(
         fired("trigger.fired"),
         [

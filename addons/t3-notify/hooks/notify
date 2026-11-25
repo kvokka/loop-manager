@@ -42,7 +42,7 @@ def spend_table():
 
 
 view = data["run"]
-name = f"{run} ({view['formula']}{', issue ' + view['issue'] if view['issue'] else ''})"
+name = f"{run} ({view['formula']}{', bead ' + view['bead'] if view['bead'] else ''})"
 cli = f"loop-manager --socket '{socket}'"
 card = f"Show its card: call show_run_card with {json.dumps({'socket': socket, 'run': run})}."
 outcome = data.get("outcome") or {}
