@@ -520,3 +520,69 @@ async fn spend_metrics_by_run_formula_and_agent_add_up() {
     assert_eq!(by_agent[1]["cost_usd"], "0.00025");
     assert!(reader.metrics(SpendBy::Run, Some("elsewhere")).unwrap().is_empty());
 }
+
+/// With no table price for the model, a harness's cost is shared by the estimated tokens of its agents, and the shares
+/// add up to it to the pico-USD, the remainder going to the total's owner.
+#[tokio::test(start_paused = true)]
+async fn the_cost_of_an_unpriced_model_is_shared_by_tokens() {
+    let w = world(&[]);
+    let mut steps = hollow_turn();
+    let events = [
+        estimate(Owner::Session, 100),
+        estimate(Owner::Subagent("helper".into()), 200),
+        total_of("proxy", "m1", None, [300, 0, 0, 0], Some(1_000)),
+    ];
+    steps.splice(1..1, events.map(Step::Emit));
+    w.driver.script(steps);
+    let run = w.create().await;
+    w.events(&run, Duration::from_millis(200)).await;
+    let report = spend(&w, &run, SpendDetail::Agent);
+    assert_eq!(report["total"], usage(300, 0, 0, 0, "0.001"));
+    let agents = [
+        row("helper", None, usage(200, 0, 0, 0, "0.000666666666")),
+        row("shop.dev", None, usage(100, 0, 0, 0, "0.000333333334")),
+    ];
+    assert_eq!(report["rows"], json!(agents));
+}
+
+/// The session time of a run is the sum of its attempts' sessions, a resumed one too, and its turns those of both;
+/// grouping by run, formula or agent gives the same.
+#[tokio::test(start_paused = true)]
+async fn the_session_time_and_turns_of_a_resumed_run_add_up_in_every_grouping() {
+    let mut w = world(POLICY);
+    w.driver.script(vec![
+        Step::Emit(Normalized::TurnStarted),
+        Step::Wait(Duration::from_secs(3600)),
+    ]);
+    let run = w.create().await;
+    w.until(Some(&run), "run.state_changed", 2).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    w.restart().await;
+    let mut second = hollow_turn();
+    second.insert(1, Step::Wait(Duration::from_secs(20)));
+    w.driver.script(second);
+    let decision = Decision::Resume {
+        after: Duration::ZERO,
+        gate: None,
+    };
+    w.decide(&run, "run.attempt_failed", 0, decision).await;
+    w.events(&run, Duration::from_secs(60)).await;
+    let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
+    let sql = "SELECT COUNT(*), SUM(turns), SUM(ended_ms - started_ms) / 1000 FROM attempts WHERE run = ?1";
+    let (attempts, turns, seconds): (i64, i64, i64) = db
+        .query_row(sql, [&run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!((attempts, turns), (2, 1));
+    assert!(seconds >= 30, "{seconds}");
+    let reader = Reader::open(&w.dir.path().join("state.db")).unwrap();
+    for by in [SpendBy::Run, SpendBy::Formula, SpendBy::Agent] {
+        let rows = reader.metrics(by, None).unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let row = &rows[0];
+        assert_eq!(
+            (&row["attempts"], &row["turns"], &row["session_s"]),
+            (&json!(attempts), &json!(turns), &json!(seconds)),
+            "{rows:?}"
+        );
+    }
+}
