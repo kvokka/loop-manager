@@ -110,7 +110,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         }
         drivers.push(driver);
     }
-    let beads = beads(&config);
+    let tracked = tracked(&config);
     let trackers = trackers(&paths.config, &config);
     let config = Arc::new(config);
     let (core, mut task) = run::start(
@@ -125,7 +125,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
         }),
         journal,
     );
-    let watchers = watch_trackers(core.clone(), beads).await;
+    let watchers = watch_trackers(core.clone(), tracked).await;
     let token = config.api_token.clone();
     let api = Api {
         core: core.clone(),
@@ -210,7 +210,7 @@ async fn bind_tcp(config: &mut Config, state: &Path) -> Result<Option<TcpListene
 }
 
 /// The projects with a tracker: their name, their directory and the adapter of their tracker.
-fn beads(config: &Config) -> Vec<(String, PathBuf, &'static Adapter)> {
+fn tracked(config: &Config) -> Vec<(String, PathBuf, &'static Adapter)> {
     (config.projects.iter())
         .filter_map(|p| Some((p.name.clone(), p.dir.clone(), crate::tracker::of(&p.dir)?)))
         .collect()
@@ -239,11 +239,11 @@ fn trackers(config_file: &Path, config: &Config) -> BTreeMap<String, Arc<dyn Tra
 }
 
 /// Keeps filesystem watches active until the daemon drops the returned guard.
-async fn watch_trackers(core: CoreHandle<Msg>, beads: Vec<(String, PathBuf, &'static Adapter)>) -> impl Drop {
+async fn watch_trackers(core: CoreHandle<Msg>, tracked: Vec<(String, PathBuf, &'static Adapter)>) -> impl Drop {
     // Each watched write tells the core to read its project's tracker; a burst of writes is one read.
     let (changed, mut changes) = mpsc::unbounded_channel::<String>();
     let mut watchers = Vec::new();
-    for (name, dir, adapter) in beads {
+    for (name, dir, adapter) in tracked {
         let (changed, project) = (changed.clone(), name.clone());
         match (adapter.watch)(&dir, Box::new(move || drop(changed.send(project.clone())))) {
             Ok(w) => watchers.push(w),
