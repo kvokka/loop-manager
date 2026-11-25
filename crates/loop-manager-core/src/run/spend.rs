@@ -25,6 +25,7 @@ pub(super) struct Total<'a> {
     pub(super) counter: &'a str,
     pub(super) provider: &'a str,
     pub(super) model: &'a str,
+    pub(super) service_tier: Option<&'a str>,
     pub(super) tokens: &'a Tokens,
     pub(super) cost: Option<Usd>,
 }
@@ -78,7 +79,10 @@ pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, to
         cache_write_1h,
         output,
     };
-    let (price, amount) = match (delta_cost, pricing.lookup(total.provider, total.model, None)) {
+    let (price, amount) = match (
+        delta_cost,
+        pricing.lookup(total.provider, total.model, total.service_tier),
+    ) {
         (Some(cost), _) => (json!({ "source": "harness" }), cost),
         (None, Some((source, price))) => {
             let rates = price.rates(&tokens);

@@ -15,16 +15,17 @@ use std::time::Duration;
 
 /// A running total of counter `m1` (input, cache read, cache write 5m, output) with a harness cost in micro-USD.
 fn total(tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
-    total_of("anthropic", "m1", tokens, micro_usd)
+    total_of("anthropic", "m1", None, tokens, micro_usd)
 }
 
-/// [`total`] of `model` from `provider`, the model naming the counter.
-fn total_of(provider: &str, model: &str, tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
+/// [`total`] of `model` from `provider` on `tier`, the model naming the counter.
+fn total_of(provider: &str, model: &str, tier: Option<&str>, tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
     let [input, cache_read, cache_write_5m, output] = tokens;
     Normalized::UsageTotal {
         counter: model.into(),
         provider: provider.into(),
         model: model.into(),
+        service_tier: tier.map(str::to_owned),
         tokens: Tokens {
             input,
             cache_read,
@@ -140,8 +141,8 @@ async fn a_total_without_a_harness_cost_is_priced_by_the_users_entry_and_an_unpr
     let w = world(&[("config.toml", config.as_str())]);
     let mut steps = hollow_turn();
     let totals = [
-        total_of("proxy", "m1", [1000, 2000, 100, 50], None),
-        total_of("proxy", "private", [7, 0, 0, 3], None),
+        total_of("proxy", "m1", None, [1000, 2000, 100, 50], None),
+        total_of("proxy", "private", None, [7, 0, 0, 3], None),
     ];
     steps.splice(1..1, totals.map(Step::Emit));
     w.driver.script(steps);
@@ -149,4 +150,24 @@ async fn a_total_without_a_harness_cost_is_priced_by_the_users_entry_and_an_unpr
     w.events(&run, Duration::from_millis(200)).await;
     // (1000 * 2 + 2000 * 0.5 + 100 * 3 + 50 * 10) / 1M USD; the private model's tokens count at no cost.
     assert_eq!(view(&w, &run)["usage"], usage(1007, 2000, 100, 53, "0.0038"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_total_on_a_service_tier_is_priced_by_the_entry_of_its_tier_else_by_the_tierless_one() {
+    let pricing = "[[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\ninput = 2\noutput = 10\n\
+        [[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\nservice_tier = \"priority\"\ninput = 4\noutput = 20\n\
+        [[pricing]]\nprovider = \"proxy\"\nmodel = \"m2\"\ninput = 1\noutput = 5\n";
+    let config = format!("{}{pricing}", FILES[0].1);
+    let w = world(&[("config.toml", config.as_str())]);
+    let mut steps = hollow_turn();
+    let totals = [
+        total_of("proxy", "m1", Some("priority"), [1000, 0, 0, 100], None),
+        total_of("proxy", "m2", Some("priority"), [1000, 0, 0, 100], None),
+    ];
+    steps.splice(1..1, totals.map(Step::Emit));
+    w.driver.script(steps);
+    let run = w.create().await;
+    w.events(&run, Duration::from_millis(200)).await;
+    // m1 on its tier: (1000 * 4 + 100 * 20) / 1M USD; m2, with no entry of the tier: (1000 * 1 + 100 * 5) / 1M USD.
+    assert_eq!(view(&w, &run)["usage"], usage(2000, 0, 0, 200, "0.0075"));
 }

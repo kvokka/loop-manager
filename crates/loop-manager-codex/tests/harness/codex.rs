@@ -365,7 +365,8 @@ async fn a_detached_command_goes_with_its_thread() {
 }
 
 /// The usage of a thread is its running total with the cached input apart from the ordinary one, named by the
-/// thread's provider and model; a thread resumed by a new app-server goes on from its total.
+/// thread's provider, model and service tier (`fast` of the config is `priority` on the wire, for a model whose tiers
+/// codex knows); a thread resumed by a new app-server goes on from its total.
 #[tokio::test]
 async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
     let usage = |input: u64, cached: u64, written: u64, output: u64| {
@@ -389,18 +390,25 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
         actor: None,
         issue: None,
     };
-    let totals = |events: &[Normalized]| -> Vec<(String, String, String, Tokens, bool)> {
+    let mut fast = config(&provider);
+    fast.model = Some(agent("gpt-5.5".into()));
+    if let Some(native) = &mut fast.native {
+        native.value["service_tier"] = json!("fast");
+    }
+    let totals = |events: &[Normalized]| -> Vec<(String, String, String, Option<String>, Tokens, bool)> {
         let totals = events.iter().filter_map(|e| match e {
             Normalized::UsageTotal {
                 counter,
                 provider,
                 model,
+                service_tier,
                 tokens,
                 cost,
             } => Some((
                 counter.clone(),
                 provider.clone(),
                 model.clone(),
+                service_tier.clone(),
                 *tokens,
                 cost.is_some(),
             )),
@@ -408,7 +416,7 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
         });
         totals.collect()
     };
-    let split = driver.split(&config(&provider), &plan).unwrap();
+    let split = driver.split(&fast, &plan).unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let instance = driver.start_instance("i1", &split.process, tx.clone()).await.unwrap();
     let session = driver.start_session(&instance, &split.session).await.unwrap();
@@ -425,7 +433,15 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
             cache_write_1h: 0,
             output,
         };
-        (thread.clone(), "fake".to_owned(), "gpt-fake".to_owned(), tokens, false)
+        let tier = Some("priority".to_owned());
+        (
+            thread.clone(),
+            "fake".to_owned(),
+            "gpt-5.5".to_owned(),
+            tier,
+            tokens,
+            false,
+        )
     };
     assert_eq!(first, [told(30, 60, 10, 8)]);
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
@@ -440,7 +456,7 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
         actor: None,
         issue: None,
     };
-    let split = driver.split(&config(&provider), &plan).unwrap();
+    let split = driver.split(&fast, &plan).unwrap();
     let instance = driver.start_instance("i2", &split.process, tx).await.unwrap();
     let resumed = driver.resume_session(&instance, &session, &split.session);
     resumed.await.unwrap();
@@ -452,5 +468,6 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
     let (again, last) = second.split_at(second.len().saturating_sub(1));
     assert!(again.iter().all(|t| *t == told(30, 60, 10, 8)), "{second:?}");
     assert_eq!(last, [told(60, 80, 10, 10)]);
+    assert!(provider.requests().iter().all(|r| r.body["service_tier"] == "priority"));
     driver.stop_instance(&instance, Duration::from_secs(4)).await;
 }

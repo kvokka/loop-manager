@@ -138,6 +138,7 @@ async fn a_turn_tells_the_running_total_of_its_model_with_cache_and_cost() {
                 model,
                 tokens,
                 cost,
+                ..
             } => Some((counter.as_str(), provider.as_str(), model.as_str(), *tokens, *cost)),
             _ => None,
         })

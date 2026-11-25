@@ -237,6 +237,8 @@ pub enum Normalized {
         /// The provider the requests went to, as the harness tells it.
         provider: String,
         model: String,
+        /// The service tier the requests went on, as the harness tells it: the price of that tier first.
+        service_tier: Option<String>,
         tokens: Tokens,
         /// The harness's own running cost of the counter, an explicit zero included.
         cost: Option<Usd>,

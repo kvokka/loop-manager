@@ -158,7 +158,8 @@ pub(crate) async fn read(
                 && let (Some(thread), Some(model)) = (result["thread"]["id"].as_str(), result["model"].as_str())
             {
                 let provider = result["modelProvider"].as_str().map(str::to_owned);
-                lock(&instance.stream).bind(thread, Some(model.to_owned()), provider);
+                let tier = result["serviceTier"].as_str().map(str::to_owned);
+                lock(&instance.stream).bind(thread, Some(model.to_owned()), provider, tier);
             }
             if let Some(tx) = lock(&instance.pending).remove(&id) {
                 let _ = tx.send(reply);

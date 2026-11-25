@@ -32,6 +32,9 @@ struct Thread {
     model: Option<String>,
     /// `modelProvider` of the thread's start or resume: the provider its usage names.
     provider: Option<String>,
+    /// `serviceTier` of the thread's start or resume: the tier codex sends its requests on (`priority` for the
+    /// `fast` of its config), none for the standard one. The usage of the Responses API names no tier.
+    tier: Option<String>,
     /// A turn started and no `turn/completed` closed it yet.
     open: bool,
     /// We sent `turn/interrupt`: the next `turn/completed` is cancelled whatever its status says.
@@ -64,11 +67,13 @@ impl Stream {
         }
     }
 
-    /// A thread of this process runs `model` of `provider`: its failures name the model, its usage both.
-    pub(crate) fn bind(&mut self, thread: &str, model: Option<String>, provider: Option<String>) {
+    /// A thread of this process runs `model` of `provider` on `tier`: its failures name the model, its usage all
+    /// three.
+    pub(crate) fn bind(&mut self, thread: &str, model: Option<String>, provider: Option<String>, tier: Option<String>) {
         let known = self.threads.entry(thread.to_owned()).or_default();
         known.model = model;
         known.provider = provider;
+        known.tier = tier;
     }
 
     /// `turn/start` was accepted: the turn is open before its `turn/started` arrives.
@@ -229,6 +234,7 @@ impl Stream {
         let rest = Thread {
             model: thread.model,
             provider: thread.provider,
+            tier: thread.tier,
             commands: thread.commands,
             ..Thread::default()
         };
@@ -351,6 +357,7 @@ fn usage(id: &str, thread: &Thread, total: &Value) -> Normalized {
         counter: id.to_owned(),
         provider: thread.provider.clone().unwrap_or_default(),
         model: thread.model.clone().unwrap_or_default(),
+        service_tier: thread.tier.clone(),
         tokens: Tokens {
             input: count("inputTokens")
                 .saturating_sub(cache_read)

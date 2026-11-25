@@ -29,7 +29,7 @@ pub(super) fn turn_completed(status: &str, error: Value) -> Value {
 #[test]
 fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
     let mut stream = Stream::new(Some("acct".into()));
-    stream.bind("t", Some("gpt-fake".into()), Some("fake".into()));
+    stream.bind("t", Some("gpt-fake".into()), Some("fake".into()), None);
     let command = json!({ "type": "commandExecution", "id": "c1" });
     let events = play(
         &mut stream,
@@ -68,6 +68,7 @@ fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
                 counter: "t".into(),
                 provider: "fake".into(),
                 model: "gpt-fake".into(),
+                service_tier: None,
                 tokens: Tokens {
                     input: 9,
                     output: 4,
@@ -106,6 +107,7 @@ fn a_thread_tells_its_running_total_without_the_cache_in_the_input_and_again_on_
         counter: "t".into(),
         provider: "openai".into(),
         model: "gpt-fake".into(),
+        service_tier: None,
         tokens: Tokens {
             input,
             cache_read,
@@ -116,20 +118,51 @@ fn a_thread_tells_its_running_total_without_the_cache_in_the_input_and_again_on_
         cost: None,
     };
     let mut first = Stream::new(None);
-    first.bind("t", Some("gpt-fake".into()), Some("openai".into()));
+    first.bind("t", Some("gpt-fake".into()), Some("openai".into()), None);
     let events = play(&mut first, &[total(100, 60, Some(10), 8), total(5, 9, None, 1)]);
     // More cached than input (not seen from codex) leaves no ordinary input rather than wrapping.
     assert_eq!(events, [told(30, 60, 10, 8), told(0, 9, 0, 1)]);
     let mut resumed = Stream::new(None);
-    resumed.bind("t", Some("gpt-fake".into()), Some("openai".into()));
+    resumed.bind("t", Some("gpt-fake".into()), Some("openai".into()), None);
     let events = play(&mut resumed, &[total(100, 60, Some(10), 8)]);
     assert_eq!(events, [told(30, 60, 10, 8)]);
+}
+
+/// The usage names the service tier of the thread's start or resume, the turns after the first included.
+#[test]
+fn a_thread_tells_its_usage_on_its_service_tier() {
+    let mut stream = Stream::new(None);
+    stream.bind(
+        "t",
+        Some("gpt-fake".into()),
+        Some("openai".into()),
+        Some("priority".into()),
+    );
+    let total = |input: u64| {
+        let total = json!({ "inputTokens": input, "outputTokens": 1 });
+        note(
+            "thread/tokenUsage/updated",
+            json!({ "threadId": "t", "tokenUsage": { "last": total, "total": total } }),
+        )
+    };
+    let events = play(
+        &mut stream,
+        &[total(5), turn_completed("completed", Value::Null), total(9)],
+    );
+    let tiers: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            Normalized::UsageTotal { service_tier, .. } => Some(service_tier.as_deref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tiers, [Some("priority"), Some("priority")]);
 }
 
 #[test]
 fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
     let mut stream = Stream::new(Some("acct".into()));
-    stream.bind("t", Some("gpt-fake".into()), None);
+    stream.bind("t", Some("gpt-fake".into()), None, None);
     let limits = json!({ "rateLimits": { "primary": { "usedPercent": 100, "resetsAt": 1_794_284_533 },
         "secondary": { "usedPercent": 42, "resetsAt": 1_794_680_933 } } });
     let error = json!({ "message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded" });
@@ -176,7 +209,7 @@ fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
 #[test]
 fn a_window_past_its_reset_no_longer_counts() {
     let mut stream = Stream::new(None);
-    stream.bind("t", None, None);
+    stream.bind("t", None, None, None);
     let limits = |l: Value| note("account/rateLimits/updated", json!({ "rateLimits": l }));
     let events = play(
         &mut stream,

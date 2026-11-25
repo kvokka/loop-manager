@@ -471,6 +471,7 @@ async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_se
             counter: "m1".into(),
             provider: "p".into(),
             model: "m1".into(),
+            service_tier: None,
             tokens: Tokens {
                 input: 100,
                 output: 20,

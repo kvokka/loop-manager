@@ -127,6 +127,7 @@ impl RunHandler {
             counter,
             provider,
             model,
+            service_tier,
             tokens,
             cost,
         } = &event.event
@@ -152,6 +153,7 @@ impl RunHandler {
                     counter,
                     provider,
                     model,
+                    service_tier: service_tier.as_deref(),
                     tokens,
                     cost: *cost,
                 };

@@ -225,6 +225,8 @@ impl Stream {
                     counter: model.clone(),
                     provider: self.provider.clone(),
                     model: model.clone(),
+                    // `modelUsage` names no tier, and claude prices every model of it itself.
+                    service_tier: None,
                     tokens: Tokens {
                         input: count(u, "inputTokens"),
                         cache_read: count(u, "cacheReadInputTokens"),

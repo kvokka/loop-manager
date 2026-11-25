@@ -383,7 +383,8 @@ env = { GH_TOKEN = "${LOOP_MANAGER_GH_TOKEN}" }  # merged by key under the proje
 provider = "openrouter"             # as the harness reports it: codex its `model_provider`; claude the host of
                                     # ANTHROPIC_BASE_URL, else `anthropic`
 model = "gpt-5.3-codex"             # the model id as the harness reports it
-service_tier = "priority"           # optional: the entry is for that tier only
+service_tier = "priority"           # optional: the entry is for that tier only, as the harness reports it
+                                    # (codex: `priority` for the `fast` of its config)
 input = 1.75                        # USD per 1M tokens of ordinary input; at most six decimals
 cache_read = 0.175                  # optional, default `input`
 cache_write = 1.75                  # optional, default `input`: a cache write of the short duration (Anthropic: 5m)

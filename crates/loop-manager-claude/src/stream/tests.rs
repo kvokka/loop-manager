@@ -61,6 +61,7 @@ fn a_reply_is_acked_started_and_completed() {
                 counter: "claude-haiku-5-5".into(),
                 provider: "anthropic".into(),
                 model: "claude-haiku-5-5".into(),
+                service_tier: None,
                 tokens: Tokens {
                     input: 3,
                     output: 2,
@@ -337,6 +338,7 @@ fn a_result_tells_the_running_total_of_every_model_with_its_cache_and_cost() {
         counter: model.into(),
         provider: "gateway.example".into(),
         model: model.into(),
+        service_tier: None,
         tokens,
         cost,
     };

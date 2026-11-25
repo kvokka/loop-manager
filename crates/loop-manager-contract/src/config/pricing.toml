@@ -184,6 +184,7 @@ output = 5
 # OpenAI: the GPT models. `service_tier` is the value of the request parameter (`flex`, `fast`, `ultrafast`;
 # the API also takes `priority` for `fast` and reports `priority` for GPT-5.6 and earlier). `cache_write` is the
 # 30-minute write. A long-context rate applies over 272K input tokens.
+# A `priority` entry repeats the `fast` one: codex sends and reports its `fast` as `priority` on every model.
 
 # The 12-hour cache write is 20 (40 over the context threshold).
 [[pricing]]
@@ -199,6 +200,16 @@ long_context = { input = 16, cache_read = 0.8, cache_write = 20, output = 60 }
 [[pricing]]
 model = "gpt-6.2-astra"
 service_tier = "fast"
+input = 16
+cache_read = 0.8
+cache_write = 20
+output = 80
+long_context_over = 272000
+long_context = { input = 32, cache_read = 1.6, cache_write = 40, output = 120 }
+
+[[pricing]]
+model = "gpt-6.2-astra"
+service_tier = "priority"
 input = 16
 cache_read = 0.8
 cache_write = 20
@@ -233,6 +244,16 @@ long_context = { input = 4, cache_read = 0.2, cache_write = 5, output = 15 }
 [[pricing]]
 model = "gpt-6.2-sol"
 service_tier = "fast"
+input = 4
+cache_read = 0.2
+cache_write = 5
+output = 20
+long_context_over = 272000
+long_context = { input = 8, cache_read = 0.4, cache_write = 10, output = 30 }
+
+[[pricing]]
+model = "gpt-6.2-sol"
+service_tier = "priority"
 input = 4
 cache_read = 0.2
 cache_write = 5
@@ -285,6 +306,16 @@ output = 100
 long_context_over = 272000
 long_context = { input = 40, cache_read = 4, cache_write = 50, output = 150 }
 
+[[pricing]]
+model = "gpt-6-astra"
+service_tier = "priority"
+input = 20
+cache_read = 2
+cache_write = 25
+output = 100
+long_context_over = 272000
+long_context = { input = 40, cache_read = 4, cache_write = 50, output = 150 }
+
 # The 12-hour cache write is 150 (300 over the context threshold).
 [[pricing]]
 model = "gpt-6-astra"
@@ -321,6 +352,16 @@ long_context = { input = 2, cache_read = 0.1, cache_write = 2.5, output = 7.5 }
 [[pricing]]
 model = "gpt-6.1-sol"
 service_tier = "fast"
+input = 4
+cache_read = 0.2
+cache_write = 5
+output = 20
+long_context_over = 272000
+long_context = { input = 8, cache_read = 0.4, cache_write = 10, output = 30 }
+
+[[pricing]]
+model = "gpt-6.1-sol"
+service_tier = "priority"
 input = 4
 cache_read = 0.2
 cache_write = 5
@@ -371,6 +412,16 @@ output = 10
 long_context_over = 272000
 long_context = { input = 4, cache_read = 0.2, cache_write = 5, output = 15 }
 
+[[pricing]]
+model = "gpt-6.1-terra"
+service_tier = "priority"
+input = 2
+cache_read = 0.1
+cache_write = 2.5
+output = 10
+long_context_over = 272000
+long_context = { input = 4, cache_read = 0.2, cache_write = 5, output = 15 }
+
 # The 12-hour cache write is 0.25 (0.5 over the context threshold).
 [[pricing]]
 model = "gpt-6-luna"
@@ -403,6 +454,16 @@ output = 1
 long_context_over = 272000
 long_context = { input = 0.4, cache_read = 0.04, cache_write = 0.5, output = 1.5 }
 
+[[pricing]]
+model = "gpt-6-luna"
+service_tier = "priority"
+input = 0.2
+cache_read = 0.02
+cache_write = 0.25
+output = 1
+long_context_over = 272000
+long_context = { input = 0.4, cache_read = 0.04, cache_write = 0.5, output = 1.5 }
+
 # The 12-hour cache write is 5 (10 over the context threshold).
 [[pricing]]
 model = "gpt-6-sol"
@@ -428,6 +489,16 @@ long_context = { input = 2, cache_read = 0.2, cache_write = 2.5, output = 7.5 }
 [[pricing]]
 model = "gpt-6-sol"
 service_tier = "fast"
+input = 4
+cache_read = 0.4
+cache_write = 5
+output = 20
+long_context_over = 272000
+long_context = { input = 8, cache_read = 0.8, cache_write = 10, output = 30 }
+
+[[pricing]]
+model = "gpt-6-sol"
+service_tier = "priority"
 input = 4
 cache_read = 0.4
 cache_write = 5
@@ -468,6 +539,16 @@ output = 40
 long_context_over = 272000
 long_context = { input = 16, cache_read = 1.6, cache_write = 20, output = 60 }
 
+[[pricing]]
+model = "gpt-5.6-sol"
+service_tier = "priority"
+input = 8
+cache_read = 0.8
+cache_write = 10
+output = 40
+long_context_over = 272000
+long_context = { input = 16, cache_read = 1.6, cache_write = 20, output = 60 }
+
 # The 12-hour cache write is 5 (10 over the context threshold).
 [[pricing]]
 model = "gpt-5.6-terra"
@@ -493,6 +574,16 @@ long_context = { input = 2, cache_read = 0.2, cache_write = 2.5, output = 9 }
 [[pricing]]
 model = "gpt-5.6-terra"
 service_tier = "fast"
+input = 4
+cache_read = 0.4
+cache_write = 5
+output = 24
+long_context_over = 272000
+long_context = { input = 8, cache_read = 0.8, cache_write = 10, output = 36 }
+
+[[pricing]]
+model = "gpt-5.6-terra"
+service_tier = "priority"
 input = 4
 cache_read = 0.4
 cache_write = 5
@@ -533,6 +624,16 @@ long_context_over = 272000
 long_context = { input = 0.8, cache_read = 0.08, cache_write = 1, output = 3.6 }
 
 [[pricing]]
+model = "gpt-5.6-luna"
+service_tier = "priority"
+input = 0.4
+cache_read = 0.04
+cache_write = 0.5
+output = 2.4
+long_context_over = 272000
+long_context = { input = 0.8, cache_read = 0.08, cache_write = 1, output = 3.6 }
+
+[[pricing]]
 model = "gpt-5.5"
 input = 5
 cache_read = 0.5
@@ -553,6 +654,13 @@ long_context = { input = 5, cache_read = 0.5, output = 22.5 }
 [[pricing]]
 model = "gpt-5.5"
 service_tier = "fast"
+input = 12.5
+cache_read = 1.25
+output = 75
+
+[[pricing]]
+model = "gpt-5.5"
+service_tier = "priority"
 input = 12.5
 cache_read = 1.25
 output = 75
@@ -597,6 +705,13 @@ cache_read = 0.5
 output = 30
 
 [[pricing]]
+model = "gpt-5.4"
+service_tier = "priority"
+input = 5
+cache_read = 0.5
+output = 30
+
+[[pricing]]
 model = "gpt-5.4-pro"
 input = 30
 output = 180
@@ -627,6 +742,13 @@ output = 2.25
 [[pricing]]
 model = "gpt-5.4-mini"
 service_tier = "fast"
+input = 1.5
+cache_read = 0.15
+output = 9
+
+[[pricing]]
+model = "gpt-5.4-mini"
+service_tier = "priority"
 input = 1.5
 cache_read = 0.15
 output = 9
@@ -665,6 +787,13 @@ cache_read = 0.35
 output = 28
 
 [[pricing]]
+model = "gpt-5.2"
+service_tier = "priority"
+input = 3.5
+cache_read = 0.35
+output = 28
+
+[[pricing]]
 model = "gpt-5.2-pro"
 input = 21
 output = 168
@@ -690,6 +819,13 @@ cache_read = 0.25
 output = 20
 
 [[pricing]]
+model = "gpt-5.1"
+service_tier = "priority"
+input = 2.5
+cache_read = 0.25
+output = 20
+
+[[pricing]]
 model = "gpt-5"
 input = 1.25
 cache_read = 0.125
@@ -710,6 +846,13 @@ cache_read = 0.25
 output = 20
 
 [[pricing]]
+model = "gpt-5"
+service_tier = "priority"
+input = 2.5
+cache_read = 0.25
+output = 20
+
+[[pricing]]
 model = "gpt-5-mini"
 input = 0.25
 cache_read = 0.025
@@ -725,6 +868,13 @@ output = 1
 [[pricing]]
 model = "gpt-5-mini"
 service_tier = "fast"
+input = 0.45
+cache_read = 0.045
+output = 3.6
+
+[[pricing]]
+model = "gpt-5-mini"
+service_tier = "priority"
 input = 0.45
 cache_read = 0.045
 output = 3.6
@@ -761,6 +911,13 @@ cache_read = 0.875
 output = 14
 
 [[pricing]]
+model = "gpt-4.1"
+service_tier = "priority"
+input = 3.5
+cache_read = 0.875
+output = 14
+
+[[pricing]]
 model = "gpt-4.1-mini"
 input = 0.4
 cache_read = 0.1
@@ -769,6 +926,13 @@ output = 1.6
 [[pricing]]
 model = "gpt-4.1-mini"
 service_tier = "fast"
+input = 0.7
+cache_read = 0.175
+output = 2.8
+
+[[pricing]]
+model = "gpt-4.1-mini"
+service_tier = "priority"
 input = 0.7
 cache_read = 0.175
 output = 2.8
@@ -787,6 +951,13 @@ cache_read = 2.125
 output = 17
 
 [[pricing]]
+model = "gpt-4o"
+service_tier = "priority"
+input = 4.25
+cache_read = 2.125
+output = 17
+
+[[pricing]]
 model = "gpt-4o-mini"
 input = 0.15
 cache_read = 0.075
@@ -795,6 +966,13 @@ output = 0.6
 [[pricing]]
 model = "gpt-4o-mini"
 service_tier = "fast"
+input = 0.25
+cache_read = 0.125
+output = 1
+
+[[pricing]]
+model = "gpt-4o-mini"
+service_tier = "priority"
 input = 0.25
 cache_read = 0.125
 output = 1
@@ -825,6 +1003,13 @@ cache_read = 0.875
 output = 14
 
 [[pricing]]
+model = "o3"
+service_tier = "priority"
+input = 3.5
+cache_read = 0.875
+output = 14
+
+[[pricing]]
 model = "gpt-5.3-codex"
 input = 1.75
 cache_read = 0.175
@@ -833,6 +1018,13 @@ output = 14
 [[pricing]]
 model = "gpt-5.3-codex"
 service_tier = "fast"
+input = 3.5
+cache_read = 0.35
+output = 28
+
+[[pricing]]
+model = "gpt-5.3-codex"
+service_tier = "priority"
 input = 3.5
 cache_read = 0.35
 output = 28
