@@ -51,8 +51,10 @@ The behaviour itself is described in the document named under each heading; this
 
 - The driver interface has no steer mid-turn, no change of model inside a live session, no human joining.
 - An instance has a limit of sessions; past it a second instance with the same fingerprint starts.
-- A usage counter of a session that reports less than its checkpoint has restarted from zero: it is charged whole. A
-  harness that loses its count and outgrows the old value before its next report is undercounted once.
+- A field of a usage counter that reports less than its checkpoint charges nothing, and the lower total becomes the
+  checkpoint. claude saves its running totals only when its process exits, so a resume after a kill falls back to the
+  totals of the last exit (docs/design/experiments.md, experiment 11): the first total after it is undercounted by at
+  most the work it adds over the killed process's last report, and nothing is charged twice.
 - The subtree of a run, whose spend its total includes, is the runs its sessions and steps started, down the chain; a
   run a trigger started on an event of the run is an invocation of its own.
 

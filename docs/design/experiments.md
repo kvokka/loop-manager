@@ -19,6 +19,7 @@ A cheap experiment comes before the code that relies on it. The set and where ea
 | 7 | opencode, by the open questions [below](#opencode-experiment-7) | next release | deferred to the next release, with the opencode adapter |
 | 8 | background work after the outcome: what stops a command a session left running, without touching other sessions | criterion 34 | done for codex and claude on fake providers (below) |
 | 9 | compaction on both harnesses (hooks, thresholds, stopping a session), codex roles and skills per thread, claude `--agents` from a file | the context-budget addon, native subagents | done on fake providers; compaction of a codex multi-agent v2 child not checked (below) |
+| 11 | the running usage totals of a claude session across a resume after an exit and after `kill -9` in a turn | spend accounting | done on the fake provider (below) |
 
 Not checked by any experiment: a real subscription quota running out and a login expiring in the middle of a session
 (both seen only on fake APIs; the claude half of criterion 10 stays open, and with an API key claude gives no reset
@@ -588,6 +589,34 @@ For codex native subagents: per-thread roles (`config.agents.<role>`) and per-th
 as seen on 0.168.0, hooks or MCP), and any unknown key drops the role. `features.multi_agent_v2` can be set per thread. The built-in roles stay
 visible; a thread without roles has no `agent_type` to choose. A role's `[[skills.config]]` only disables: nothing
 a thread, the process or a calling role disabled comes back, so a per-thread allow-list would also bind the children.
+
+## claude usage totals across a resume (experiment 11)
+
+Code: the adapter test `a_resume_after_a_kill_reports_the_totals_saved_at_the_last_exit` in
+`crates/loop-manager-claude/tests/harness/claude.rs` pins the result; it runs on every `mise run ci`. claude 2.1.331
+runs as the adapter starts it, against the fake Messages API of `loop-manager-testkit` with a usage set per reply,
+model `claude-haiku-5-5`. One session goes through three processes: the first ends a turn and exits on EOF; the second
+resumes it, ends a turn, and is killed with `kill -9` while its next request waits on the model; the third resumes it
+and ends a turn.
+
+<!-- MEASURE id=claude-usage-totals-resume date=2026-11-25 ver=claude-2.1.331 env=linux-arm64-orbstack src=crates/loop-manager-claude/tests/harness/claude.rs note="fake Messages API with a usage set per reply, n=4 runs of the test agree; an earlier run without a prior exit (process 1 killed after its turn) gave the last turn's usage alone" -->
+
+| Process | Turn usage (input, cache read, cache write 5m, output) | `modelUsage` of its `result` | `costUSD` = `total_cost_usd` |
+|---|---|---|---|
+| 1, then exits | 7, 300, 20, 4 | 7, 300, 20, 4 | 0.0000082 |
+| 2, resumed; then killed in a turn | 5, 100, 10, 2 | 12, 400, 30, 6 | 0.00001195 |
+| 3, resumed | 70, 3000, 200, 40 | 77, 3300, 220, 44 | 0.0000902 |
+
+The running totals of `result.modelUsage` and `total_cost_usd` live in the claude process and are saved when it exits.
+A resume after an exit goes on from the saved totals. A resume after `kill -9` starts from the totals saved at the
+last exit, or from zero when no process of the session exited: what the killed process added since then is gone from
+every later total, and the turn cut by the kill adds nothing. With one model, `costUSD` of the model equals
+`total_cost_usd`, and the adapter reports it exactly (`a_turn_tells_the_running_total_of_its_model_with_cache_and_cost`).
+
+So a new total after a kill can sit in any relation to the last total the killed process reported. In the run above
+every field of process 3's total is above process 2's last one, and the difference to it (65, 2900, 190, 38) falls
+short of the turn's own usage by the turn of process 2. When some field is below, the new total includes the totals
+saved at the last exit, which the session's earlier processes already reported.
 
 ## opencode (experiment 7)
 

@@ -78,16 +78,23 @@ async fn a_run_is_charged_the_increments_of_its_running_totals_once() {
     assert_eq!(json!(fields.map(|f| &attempt[f])), json!([105, 30, 12, 27, "0.75"]));
 }
 
+/// A total that falls back, as claude's does on a resume after its process was killed, charges only the fields that
+/// rose and becomes the checkpoint: what its session already reported is never charged twice.
 #[tokio::test(start_paused = true)]
-async fn a_total_below_its_checkpoint_is_a_new_count_and_charged_whole() {
+async fn a_total_below_its_checkpoint_charges_only_what_rose_and_becomes_the_checkpoint() {
     let w = world(&[]);
     let mut steps = hollow_turn();
-    let totals = [total([100, 0, 0, 20], None), total([40, 0, 0, 5], None)];
+    let totals = [
+        total([100, 50, 0, 20], Some(400_000)),
+        total([40, 80, 0, 5], Some(300_000)),
+        total([60, 90, 0, 9], Some(350_000)),
+    ];
     steps.splice(1..1, totals.map(Step::Emit));
     w.driver.script(steps);
     let run = w.create().await;
     w.events(&run, Duration::from_millis(200)).await;
-    assert_eq!(view(&w, &run)["usage"], usage(140, 0, 0, 25, "0"));
+    // 100 + 0 + 20 input, 50 + 30 + 10 cache read, 20 + 0 + 4 output, 0.4 + 0 + 0.05 USD.
+    assert_eq!(view(&w, &run)["usage"], usage(120, 90, 0, 24, "0.45"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -217,6 +224,7 @@ async fn a_runs_usage_includes_its_childs_and_not_a_triggered_runs() {
         parent_run: Some(parent.clone()),
         token: Some(token),
         continue_from: None,
+        budget: None,
     };
     let reply = w.core.send(None, Msg::Create(child)).await.unwrap();
     let child = reply["run"].as_str().unwrap().to_owned();

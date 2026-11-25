@@ -30,9 +30,11 @@ pub(super) struct Total<'a> {
     pub(super) cost: Option<Usd>,
 }
 
-/// Charges to `(run, attempt)` what `total` adds over the checkpoint of its counter, and moves the checkpoint. A total
-/// below the checkpoint in any field means the harness counts from zero again: it is charged whole. Each request is
-/// thereby charged once, however often a total that includes it is repeated, across a resume and a restart.
+/// Charges to `(run, attempt)` what `total` adds over the checkpoint of its counter, and moves the checkpoint to it.
+/// Each request is thereby charged once, however often a total that includes it is repeated, across a resume and a
+/// restart. A field below its checkpoint adds nothing: a claude process killed in a turn loses what it added since its
+/// session last saved its totals, so the next total can fall back (docs/design/experiments.md, experiment 11);
+/// charging it whole would charge the saved part twice.
 pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, total: &Total<'_>) -> Result<(), Error> {
     let now = fields(total.tokens).map(sql_int);
     let cost = total.cost.map(|c| c.0);
@@ -45,13 +47,9 @@ pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, to
             |r| Ok(([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?], r.get(5)?)),
         )
         .optional()?;
-    let restarted = last.is_some_and(|(t, c)| now.iter().zip(t).any(|(n, l)| *n < l) || cost < c);
-    let (base, base_cost) = match last {
-        Some((t, c)) if !restarted => (t, c.unwrap_or_default()),
-        _ => ([0; 5], 0),
-    };
-    let delta: [i64; 5] = std::array::from_fn(|i| now[i] - base[i]);
-    let delta_cost = cost.map(|c| c - base_cost);
+    let (base, base_cost) = last.map_or(([0; 5], 0), |(t, c)| (t, c.unwrap_or_default()));
+    let delta: [i64; 5] = std::array::from_fn(|i| (now[i] - base[i]).max(0));
+    let delta_cost = cost.map(|c| (c - base_cost).max(0));
     tx.sql().execute(
         "INSERT OR REPLACE INTO spend_counters \
          (session, counter, input, cache_read, cache_write_5m, cache_write_1h, output, cost) \
