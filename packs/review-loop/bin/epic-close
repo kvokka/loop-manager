@@ -1,14 +1,19 @@
 #!/bin/sh
+# Archive the run's scratch directory when the project names an archive, close the epic, then commit and push the
+# tracker. A failed push is exit 75: the repeat reuses the local commit.
 set -eu
-[ "$#" -eq 0 ] || { echo "usage: close.sh" >&2; exit 2; }
+[ "$#" -eq 0 ] || { echo "usage: epic-close" >&2; exit 2; }
 run=${LOOP_MANAGER_RUN:?}
 bead=${LOOP_MANAGER_BEAD:?}
+tracker=${BEADS_DIR:?}
+scope=$(basename "$(dirname "$tracker")")
+archive=${LOOP_MANAGER_INPUT_ARCHIVE_DIR:-}
 case "$run" in *[!a-zA-Z0-9_-]*) echo "invalid run id" >&2; exit 1;; esac
 
-source=target/devloop/runs/$run
-if [ -d "$source" ]; then
-  mkdir -p "devloop/artifacts/$run"
-  cp -R "$source/." "devloop/artifacts/$run/"
+source=${LOOP_MANAGER_INPUT_SCRATCH_DIR:?}/$run
+if [ -n "$archive" ] && [ -d "$source" ]; then
+  mkdir -p "$archive/$run"
+  cp -R "$source/." "$archive/$run/"
 fi
 
 # A retry after a failed push may already have closed and committed the epic.
@@ -18,7 +23,7 @@ if [ "$status" != closed ]; then
 fi
 br sync --flush-only -q
 export GIT_TERMINAL_PROMPT=0
-git add -- devloop/.beads
-git diff --cached --quiet -- devloop/.beads || \
-  git commit -q -m "chore(devloop): close epic [$bead]" -- devloop/.beads
-git push -q || { echo "close: tracker commit is local; git push failed" >&2; exit 75; }
+git add -- "$tracker"
+git diff --cached --quiet -- "$tracker" || \
+  git commit -q -m "chore($scope): close epic [$bead]" -- "$tracker"
+git push -q || { echo "epic-close: tracker commit is local; git push failed" >&2; exit 75; }

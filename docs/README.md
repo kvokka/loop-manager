@@ -22,7 +22,8 @@ The big references (`design/contracts.md`, `design/config.md`) are meant to be r
 | [api/frontends.md](api/frontends.md) | the HTTP API and the CLI; what a human sees and does with a run |
 | [api/mcp.md](api/mcp.md), [api/openapi.json](api/openapi.json) | the MCP server; the OpenAPI document |
 | [../demos/README.md](../demos/README.md) | two live examples |
-| [../devloop/README.md](../devloop/README.md) | the project that develops loop-manager with loop-manager, on the pack `packs/review-loop/` |
+| [../packs/review-loop/README.md](../packs/review-loop/README.md) | the pack `review-loop`: an epic through rounds of a coder, the project's CI and a reviewer; its inputs and what a project supplies |
+| [../devloop/README.md](../devloop/README.md) | the project that develops loop-manager with loop-manager on that pack |
 
 ## How it works inside
 

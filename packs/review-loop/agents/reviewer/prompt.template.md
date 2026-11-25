@@ -10,14 +10,21 @@ The last comments on the epic, oldest first; `br comments {{ bead.id }}` gives a
 {{ bead.comments }}
 </comments>
 
-The full test run that followed the coder (the step `ci_report`: `mise run ci` on the tree the coder left):
+The full CI that followed the coder (the step `ci_report`: `{{ inputs.ci_command }}` on the tree the coder left):
 
 <tests>
 {{ steps.ci_report.data.stdout }}
 </tests>
 
-The run is `{{ run.id }}`; you work in `{{ rig.path }}`. Review as your role says, leave the review as a comment on
-the epic, then finish:
+The rules of the project the review judges by:
+
+<project>
+{{ agent.project }}
+</project>
+
+The run is `{{ run.id }}`; you work in `{{ rig.path }}`. The run's scratch directory is
+`{{ inputs.scratch_dir }}/{{ run.id }}`, which git ignores: the file of your review goes there. Review as your role
+says, leave the review as a comment on the epic, then finish:
 `loop-manager finish pass --summary "SCORE <n>/10, VERDICT <verdict>" --data '{"score": <n>, "verdict": "<verdict>", "needs_owner": false}'`.
 If no authorized choice unblocks the work, leave a separate `QUESTION: <id>` comment and add `needs-owner`, then
 finish with `verdict: "continue"`, `needs_owner: true` and `question_id: "<id>"` in the data. The formula waits at

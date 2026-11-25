@@ -1,26 +1,29 @@
 #!/bin/sh
-# Collect one CI invocation. The next step routes its exit code and the report is archived even on failure.
+# Collect one invocation of the project's CI command. The next step routes its exit code and the report is archived
+# even on failure. The command may write a report of its individual checks to the file `REVIEW_LOOP_CI_REPORT` names:
+# `{"tasks": [{"name": .., "status": .., "exit_code": ..}]}`. Without it the report has the exit code and the log only.
 set -eu
 run=${LOOP_MANAGER_RUN:?}
-case "$run" in *[!a-zA-Z0-9_-]*) echo "tests: invalid run id" >&2; exit 1;; esac
-mkdir -p "target/devloop/runs/$run"
-dir=$(mktemp -d "target/devloop/runs/$run/tests.$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
+command=${LOOP_MANAGER_INPUT_CI_COMMAND:?}
+scratch=${LOOP_MANAGER_INPUT_SCRATCH_DIR:?}
+tracker=${BEADS_DIR:?}
+case "$run" in *[!a-zA-Z0-9_-]*) echo "epic-ci-report: invalid run id" >&2; exit 1;; esac
+mkdir -p "$scratch/$run"
+dir=$(mktemp -d "$scratch/$run/tests.$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
 log=$dir/ci.log
+checks=$(cd "$dir" && pwd)/checks.json
 head=$(git rev-parse HEAD)
 start=$(date +%s)
 rc=0
-DEVLOOP_CI_REPORT="$dir/checks.json" "$(dirname "$0")/../../../devloop/scripts/test-env" mise run ci >"$log" 2>&1 || rc=$?
+REVIEW_LOOP_CI_REPORT="$checks" sh -c "$command" >"$log" 2>&1 || rc=$?
 duration=$(($(date +%s) - start))
-changes=$(git status --porcelain -- . ':!devloop/.beads')
+changes=$(git status --porcelain -- . ":(exclude)$tracker")
 uncommitted=0
 if [ -n "$changes" ]; then uncommitted=$(printf '%s\n' "$changes" | wc -l); fi
 failed='[]'
-if [ -s "$dir/checks.json" ]; then
+if [ -s "$checks" ]; then
   failed=$(jq -ce '[.tasks[] | select(.status != "passed" and .status != "cached")
-    | {name, status, exit_code}]' "$dir/checks.json")
-elif [ "$rc" = 0 ]; then
-  echo "tests: CI succeeded without writing $dir/checks.json" >&2
-  exit 75
+    | {name, status, exit_code}]' "$checks")
 fi
 {
   echo "HEAD: $head"
@@ -28,7 +31,7 @@ fi
   echo "TIME: $duration s"
   echo "LOG: $log"
   printf '%s\n' "$failed" | jq -r '.[] | "CHECK: \(.name) \(.status) (exit \(.exit_code))"'
-  if [ "$rc" = 0 ]; then echo "RESULT: pass"; else echo "RESULT: FAIL (mise run ci: exit $rc)"; fi
+  if [ "$rc" = 0 ]; then echo "RESULT: pass"; else echo "RESULT: FAIL ($command: exit $rc)"; fi
 } >"$dir/result.txt"
 jq -cn --argjson exit_code "$rc" --arg head "$head" --argjson uncommitted "$uncommitted" \
   --arg log "$log" --argjson failed "$failed" '{ $exit_code, $head, $uncommitted, $log, $failed }'

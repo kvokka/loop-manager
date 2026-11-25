@@ -1,11 +1,22 @@
 # The project of loop-manager's own development. Its workflow is the pack `review-loop` (../packs/review-loop): the
-# formula `epic`, its agents and the commands of its steps. This directory holds the rig, the triggers, the addons,
-# the operator's scripts (scripts/) and the tracker (.beads/). The work itself is done in the rig.
+# formula `epic`, its agents and the commands of its steps. This directory holds what is this project's own: the rig,
+# the triggers, the addons, the inputs of the formula, the text the agents get of this repository
+# (.loop-manager/agents/ and the edits below), the operator's scripts (scripts/) and the tracker (.beads/). The work
+# itself is done in the rig.
 name = "devloop"
 packs = ["../packs/review-loop"]
 
+# What the formula `epic` asks of a project (../packs/review-loop/README.md, "Inputs"); the paths are from the rig.
+[inputs]
+# The full CI. `test-env` keeps the credentials of the outer run from it and gives it private state directories.
+ci_command = "devloop/scripts/test-env mise run ci"
+# A run keeps its CI logs and notes in `target/devloop/runs/<run>`; git ignores `target/`.
+scratch_dir = "target/devloop/runs"
+# `close` copies them to `devloop/artifacts/<run>`, local and ignored by git (.gitignore).
+archive_dir = "devloop/artifacts"
+
 # The addons of this repository, from this checkout by relative path (README.md, "The addons"); the pack declares
-# `context-budget` itself. The agents that attach them, with their params, are the pack's coder and reviewer.
+# `context-budget` itself. The agents attach them in the `[agents.*]` edits below.
 [[addon]]
 path = "../addons/code-search"
 
@@ -37,6 +48,56 @@ env.DCG_CUSTOM_PATHS = "${DEVLOOP_DCG_PACK}"
 # the long test run is a step of its own, outside any session.
 native.claude.promptCacheTtl = "5m"
 native.claude.subagentPromptCacheTtl = "5m"
+
+# What this project adds to the agents of the pack. The addons are attached here and not in `[settings]`: a hook of
+# the session also runs inside its subagents. `dcg` refuses a destructive shell command before it runs.
+[agents.coder]
+addons = [{ name = "dcg" }, { name = "conventional-commits" }, { name = "lessons" }, { name = "code-search" }]
+
+[agents.reviewer]
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
+
+# The subagents of the coder have a role prompt and no template, so the rules of this repository replace the pack's
+# role prompt whole.
+[agents.subcoder]
+system_prompt = '''
+You are the subcoder of loop-manager's own development. The coder calls you with an errand: what to implement, in
+which files, by which documents of `docs/`, and how to check it. There is no operator: you ask no questions.
+
+- The project's rules in `CLAUDE.md` and `docs/agents/rules-code.md` bind you: Rust, Clippy defaults, no stubs,
+  the latest versions of dependencies, a `MEASURE` marker at every measurement, and code, comments and
+  documentation in English only.
+- Change only the files of your errand: the coder works in the same tree beside you. An edit of another file is not
+  made but described in the answer.
+- Do not commit: the coder does. Before you return: `cargo fmt`, clippy and the tests of your piece are green, run
+  targeted and with their output cut.
+- An errand that does not fit your context: finish a whole part and describe the rest.
+- The answer: what is done, the files changed, how it was checked, what is left, in 15 lines at most. Details, when
+  needed, go to the file the coder named (under `target/devloop/runs/$LOOP_MANAGER_RUN/notes/`).
+- Before the last answer stop everything you started in the background and wait for it to end.
+'''
+
+[agents.expert]
+description = "The expert of loop-manager: the plan or the design of a critical part (the core, the invariants, recovery, the harness protocols), a disputed design choice, a bug the coder failed to fix twice. Writes a document, changes no code."
+system_prompt = '''
+You are the expert of loop-manager's own development (how the product works is in `docs/`, the rules of work in
+`docs/agents/`). The coder calls you in three cases: to write or revise a plan, to design a critical part, to take
+apart a bug it is stuck on. There is no operator: you ask no questions, you decide by the documentation and write
+down what you assumed.
+
+- The owner's decisions (`docs/agents/decisions.md`) are not reconsidered. A departure from an assumption
+  (`docs/agents/assumptions.md`) needs its reason, said in the answer: the coder puts it on the epic.
+- The result is a document in the file the coder named (under `target/devloop/runs/$LOOP_MANAGER_RUN/notes/`, or in `docs/` for a design
+  that stays; `docs/` is in English, a plan in Russian: the coder puts it on the epic as a comment). The answer is
+  the path and the main points in 10 to 20 lines.
+- You change and commit no code of the product. To diagnose you may run builds, tests and debugging commands.
+- A design and a plan follow the code rules in `docs/agents/rules-code.md`: choose the
+  simplest variant that does what was asked. The "done when" of a piece of a plan is checkable, each piece fits
+  100–150k tokens of context, and no acceptance scenario or demo is a condition unless the owner named it.
+- Read the big documents (`docs/design/contracts.md`, `docs/design/config.md`) by section, and cut the output of
+  commands.
+- Before the last answer stop everything you started in the background and wait for it to end.
+'''
 
 # The repository itself. A bead an agent files on this rig has the id prefix `lm`; the tracker's own prefix is `dev`.
 [rigs.repo]

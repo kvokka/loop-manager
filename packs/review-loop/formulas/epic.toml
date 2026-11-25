@@ -1,11 +1,18 @@
 name = "epic"
-description = "One epic of loop-manager's own development: rounds of a coder, the full test run and a review, until the review passes"
-# A review under the bar starts another round, whatever the tests say; an answer from the owner also starts a new
-# round. A run still sent back after the last round fails and waits for the owner (`bead_failed_runs = 1`).
+description = "One epic of a project: rounds of a coder, the project's full CI and a review, until the review passes"
+# A review under the bar starts another round, whatever the CI says; an answer from the owner also starts a new
+# round. A run still sent back after the last round fails.
 rounds = 50
 
+# The project gives all but `epic` once, in `[inputs]` of its `loop-manager.toml` (README.md, "Inputs").
 [inputs]
-epic = { type = "task", required = true }   # the bead of the epic
+epic = { type = "task", required = true }            # the bead of the epic
+# The project's full CI: a shell command, run from the workdir of the run.
+ci_command = { type = "string", required = true }
+# A directory git ignores: a run keeps its logs and notes in `<scratch_dir>/<run>`.
+scratch_dir = { type = "string", required = true }
+# Optional: `close` copies the run's scratch directory to `<archive_dir>/<run>`.
+archive_dir = { type = "string" }
 
 # The coder of the round: a new session each round, with the epic, its last comments and what the gate said. It hands
 # over whatever it reached; a session stopped at its context limit hands over too (`cut = "pass"` in agent.toml).
@@ -30,12 +37,12 @@ command = ["epic-owner-answer", "code"]
 if = { "steps.code.data.needs_owner" = true }
 back_to = "code"
 
-# The CI command enforces five minutes. Allow its collector time to save the report after a timeout.
+# The CI command bounds its own time; the step's timeout is the backstop of a command that hangs.
 [[step]]
 name = "ci_report"
 kind = "exec"
 command = ["epic-ci-report"]
-timeout = "310s"
+timeout = "45m"
 inherit_env = true
 
 # Three consecutive returns give the coder the failed checks. The next red report goes to a reviewer.

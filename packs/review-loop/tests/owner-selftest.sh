@@ -8,7 +8,7 @@ trap 'find "$tmp" -delete' EXIT
 unset BEADS_DIR BD_ACTOR LOOP_MANAGER_STEP_CODE_DATA LOOP_MANAGER_STEP_REVIEW_DATA
 unset LOOP_MANAGER_STEP_CODE_OWNER_SUMMARY LOOP_MANAGER_STEP_CODE_OWNER_DATA
 unset LOOP_MANAGER_STEP_REVIEW_OWNER_SUMMARY LOOP_MANAGER_STEP_REVIEW_OWNER_DATA
-export LOOP_MANAGER_RUN=run_test LOOP_MANAGER_BEAD=dev-test
+export LOOP_MANAGER_RUN=run_test LOOP_MANAGER_BEAD=dev-test LOOP_MANAGER_INPUT_SCRATCH_DIR=scratch/runs
 mkdir "$tmp/bin"
 cat >"$tmp/bin/br" <<'BR'
 #!/bin/sh
@@ -76,4 +76,4 @@ cmp before.txt comments.txt
 export LOOP_MANAGER_STEP_REVIEW_OWNER_DATA='{invalid'
 expect 75 review
 cmp before.txt comments.txt
-echo 'devloop owner selftest: ok'
+echo 'review-loop owner selftest: ok'

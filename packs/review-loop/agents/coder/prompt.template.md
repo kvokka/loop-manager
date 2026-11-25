@@ -16,8 +16,17 @@ Why the workflow returned to you, including any failed CI checks and log path (e
 {{ remarks }}
 </remarks>
 
-The run is `{{ run.id }}`; you work in `{{ rig.path }}`. Work as your role says: take stock of what is there, then the
-review's mandatory items, then the rest of the epic. Before you finish, leave your summary as a comment on the epic.
+The rules of the project you work in:
+
+<project>
+{{ agent.project }}
+</project>
+
+The run is `{{ run.id }}`; you work in `{{ rig.path }}`. The run's scratch directory is
+`{{ inputs.scratch_dir }}/{{ run.id }}`, which git ignores: the file of your comment and, under `notes/`, the long
+results of subagents go there. The full CI that follows your session is `{{ inputs.ci_command }}`. Work as your role
+says: take stock of what is there, then the review's mandatory items, then the rest of the epic. Before you finish,
+leave your summary as a comment on the epic.
 Then `loop-manager finish pass --summary "<done or partial: what was done>" --data '{"needs_owner": false}'`.
 When only an owner's decision can unblock the work, first leave `QUESTION: <id>` and add `needs-owner`, then finish
 `pass --summary "blocked: <what must be decided>" --data '{"needs_owner": true, "question_id": "<id>"}'`.

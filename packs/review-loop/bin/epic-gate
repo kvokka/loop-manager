@@ -1,13 +1,16 @@
 #!/bin/sh
-# Commit the round's tracker state locally. The close step publishes the completed epic.
+# Commit the round's tracker state locally. The close step publishes the completed epic. The tracker's directory
+# lies in the repository of the run; its commits take the name of the project's directory as their scope.
 set -eu
 bead=${LOOP_MANAGER_BEAD:?}
+tracker=${BEADS_DIR:?}
+scope=$(basename "$(dirname "$tracker")")
 head=$(git rev-parse HEAD)
 ci=$(printf '%s\n' "${LOOP_MANAGER_STEP_CI_REPORT_DATA:-null}" | jq -ec '.stdout | fromjson' || echo null)
 review=${LOOP_MANAGER_STEP_REVIEW_DATA:-null}
 score=$(printf '%s\n' "$review" | jq -r '.score? | tonumber?' || true)
 verdict=$(printf '%s\n' "$review" | jq -r '.verdict? | strings' || true)
-changes=$(git status --porcelain -- . ':!devloop/.beads')
+changes=$(git status --porcelain -- . ":(exclude)$tracker")
 pass=false
 if [ -z "$changes" ] && jq -en --argjson ci "$ci" --argjson review "$review" --arg head "$head" \
   '($ci.exit_code == 0 and $ci.uncommitted == 0 and $ci.head == $head)
@@ -16,8 +19,8 @@ if [ -z "$changes" ] && jq -en --argjson ci "$ci" --argjson review "$review" --a
 fi
 if [ "$pass" = false ]; then br update "$bead" -s rework -q; fi
 br sync --flush-only -q
-git add -- devloop/.beads
-git diff --cached --quiet -- devloop/.beads || git commit -q -m "chore(devloop): record tracker state [$bead]" -- devloop/.beads
+git add -- "$tracker"
+git diff --cached --quiet -- "$tracker" || git commit -q -m "chore($scope): record tracker state [$bead]" -- "$tracker"
 
 echo "gate: SCORE ${score:-none}/10, VERDICT ${verdict:-none}"
 if [ "$pass" = true ]; then exit 0; fi

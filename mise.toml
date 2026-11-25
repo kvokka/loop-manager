@@ -32,7 +32,7 @@ run = "cargo nextest run --locked -E 'not binary(chaos)'"
 description = "Run all CI checks and report every failure"
 run = """
 mkdir -p target/ci
-report=${DEVLOOP_CI_REPORT:-$(mktemp target/ci/checks.XXXXXX)}
+report=${REVIEW_LOOP_CI_REPORT:-$(mktemp target/ci/checks.XXXXXX)}
 rc=0
 mise run --jobs 1 --continue-on-error --timeout 5m --report-file "$report" 'ci:*' || rc=$?
 echo "CI report: $report"
@@ -80,6 +80,9 @@ run = """rc=0; git grep -n 'CARGO_BIN_EXE_loop-manager' -- crates ':!crates/loop
 run = "cargo run -q --locked -p loop-manager -- config check --config devloop/config.toml"
 
 [tasks."ci:devloop-selftest"]
+run = "devloop/scripts/selftest.sh"
+
+[tasks."ci:review-loop-selftest"]
 run = """
 cargo build -q --locked -p loop-manager
 metadata=$(cargo metadata --locked --no-deps --format-version 1)

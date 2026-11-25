@@ -1,52 +1,49 @@
 #!/bin/sh
-# Self-test of the step commands in ../bin, in a throwaway repository with a remote, with `br` and `mise` replaced by stubs:
-# each case names the exit code it expects. `mise run ci` runs it, also inside a run of this pack: nothing of the
-# run's environment reaches the scripts.
+# Self-test of the step commands in ../bin, in a throwaway repository with a remote, with `br` and the project's CI
+# command replaced by stubs: each case names the exit code it expects. Nothing of an outer run's environment reaches
+# the commands. `loop-manager` must be on `PATH`: the owner's answer is written with `loop-manager format`.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-devloop=$here/../../../devloop
-sh "$here/owner-selftest.sh"
-sh "$here/close-selftest.sh"
+"$here/owner-selftest.sh"
+"$here/close-selftest.sh"
 tmp=$(mktemp -d)
 trap 'find "$tmp" -delete' EXIT
-unset BEADS_DIR BD_ACTOR LOOP_MANAGER_STEP_REVIEW_DATA LOOP_MANAGER_STEP_CI_REPORT_DATA
+unset BEADS_DIR BD_ACTOR LOOP_MANAGER_STEP_REVIEW_DATA LOOP_MANAGER_STEP_CI_REPORT_DATA LOOP_MANAGER_INPUT_ARCHIVE_DIR
 export LOOP_MANAGER_RUN=run_1 LOOP_MANAGER_BEAD=dev-1
+export LOOP_MANAGER_INPUT_CI_COMMAND='ci run all' LOOP_MANAGER_INPUT_SCRATCH_DIR=scratch/runs
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # no hooks, signing or identity of the host
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.org GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.org
 
-# `br` writes its arguments to a log and, on a write, touches the tracker file; `mise` exits as MISE_RC says.
+# `br` writes its arguments to a log and, on a write, touches the tracker file; `ci` exits as CI_RC says and writes
+# the report of its checks unless CI_REPORT is `none`.
 mkdir "$tmp/bin"
-printf '#!/bin/sh\necho "$*" >>"%s/br.log"\necho "$*" >>devloop/.beads/issues.jsonl\n' "$tmp" >"$tmp/bin/br"
-cat >"$tmp/bin/mise" <<'STUB'
+printf '#!/bin/sh\necho "$*" >>"%s/br.log"\necho "$*" >>"$BEADS_DIR/issues.jsonl"\n' "$tmp" >"$tmp/bin/br"
+cat >"$tmp/bin/ci" <<'STUB'
 #!/bin/sh
-# An inherited socket wins over XDG paths. An inherited tracker wins over the working directory.
-test -z "${LOOP_MANAGER_RUN+x}${LOOP_MANAGER_SOCKET+x}${LOOP_MANAGER_ATTEMPT_TOKEN+x}${BD_ACTOR+x}" || exit 88
-test -z "${DCG_CUSTOM_PATHS+x}" || exit 88
-test -z "${GIT_CONFIG_COUNT+x}${GIT_CONFIG_KEY_0+x}${GIT_CONFIG_VALUE_0+x}${GIT_CONFIG_PARAMETERS+x}" || exit 88
-test "$BEADS_DIR" != "$outer_tracker" && test "$XDG_STATE_HOME" != "$outer_state" || exit 88
-test -d "$XDG_RUNTIME_DIR" && test -d "$XDG_STATE_HOME" || exit 88
 echo "ci says $*"
-rc=${MISE_RC:-0}
+rc=${CI_RC:-0}
 status=passed
 [ "$rc" = 0 ] || status=failed
-jq -n --arg status "$status" --argjson rc "$rc" \
-  '{tasks:[{name:"ci:fmt",status:$status,exit_code:$rc},{name:"ci:last",status:"passed",exit_code:0}]}' >"$DEVLOOP_CI_REPORT"
+[ "${CI_REPORT:-}" = none ] || jq -n --arg status "$status" --argjson rc "$rc" \
+  '{tasks:[{name:"ci:fmt",status:$status,exit_code:$rc},{name:"ci:last",status:"passed",exit_code:0}]}' >"$REVIEW_LOOP_CI_REPORT"
 exit "$rc"
 STUB
-chmod +x "$tmp/bin/br" "$tmp/bin/mise"
-export PATH="$tmp/bin:$PATH"
+chmod +x "$tmp/bin/br" "$tmp/bin/ci"
+# The commands are found as a step of the formula finds them: by name, the pack's `bin/` ahead of `PATH`.
+export PATH="$here/../bin:$tmp/bin:$PATH"
 
-# A repository with a remote to push to, one commit, and the tracker's directory.
+# A repository with a remote to push to, one commit, and the tracker's directory in the project `proj`.
 fresh() {
   r=$(mktemp -d "$tmp/r.XXXXXX")
   : >"$tmp/br.log"
   git init -q --bare "$r/origin.git"
   git init -q "$r/work" && cd "$r/work"
   git remote add origin "$r/origin.git"
-  mkdir -p devloop/.beads src
-  : >devloop/.beads/issues.jsonl
+  mkdir -p proj/.beads src
+  export BEADS_DIR="$r/work/proj/.beads"
+  : >proj/.beads/issues.jsonl
   echo one >src/a
-  printf 'target/\n' >.gitignore
+  printf 'scratch/\n' >.gitignore
   git add -A && git commit -q -m init && git push -q -u origin HEAD
   remote_head=$(git rev-parse HEAD)
   ci_data 0
@@ -56,9 +53,9 @@ ci_data() {
     '{stdout:({exit_code:$rc,head:$sha,uncommitted:0,log:"ci.log",failed:[]} | tojson)}')
   export LOOP_MANAGER_STEP_CI_REPORT_DATA
 }
-expect() { # expect <exit code> <script> <label>
+expect() { # expect <exit code> <command> <label>
   got=0
-  "$here/../bin/$2" >"$tmp/out" 2>&1 || got=$?
+  "$2" >"$tmp/out" 2>&1 || got=$?
   [ "$got" = "$1" ] || { echo "selftest: $2: $3: expected exit $1, got $got"; cat "$tmp/out"; exit 1; }
 }
 said() { grep -q -- "$1" "$tmp/out" || { echo "selftest: $2: the output lacks '$1'"; cat "$tmp/out"; exit 1; }; }
@@ -71,7 +68,12 @@ rework() { grep -q "^update dev-1 -s rework" "$tmp/br.log" || { echo "selftest: 
 no_rework() { ! grep -q rework "$tmp/br.log" || { echo "selftest: epic-gate: $1: status rework on a pass"; exit 1; }; }
 
 fresh; review '{"score":9,"verdict":"complete"}'; expect 0 epic-gate "9 complete"; local_only; no_rework "9 complete"
+# The tracker commit holds the tracker alone, under the name of the project's directory.
+[ "$(git log -1 --format=%s)" = "chore(proj): record tracker state [dev-1]" ]
+[ "$(git show --name-only --format= HEAD)" = proj/.beads/issues.jsonl ]
 fresh; review '{"score":9.5,"verdict":"complete"}'; expect 0 epic-gate "9.5 complete"
+# The tracker is no part of the tree the gate wants clean: a comment of the round has changed it.
+fresh; review '{"score":9,"verdict":"complete"}'; echo note >>proj/.beads/issues.jsonl; expect 0 epic-gate "changed tracker"
 fresh; review '{"score":"10","verdict":"complete"}'; expect 0 epic-gate "the score as text"
 fresh; review '{"score":8.9,"verdict":"complete"}'; expect 1 epic-gate "8.9"; rework "8.9"; local_only
 fresh; review '{"score":9,"verdict":"continue"}'; expect 1 epic-gate "9 continue"; rework "9 continue"
@@ -86,29 +88,22 @@ fresh; review '{"score":9,"verdict":"complete"}'; ci_data 0 deadbeef; expect 1 e
 fresh; review '{"score":9,"verdict":"complete"}'; echo dirty >>src/a; expect 1 epic-gate "review left a dirty tree"
 fresh; review '{"score":9,"verdict":"complete"}'; git remote set-url origin "$r/gone.git"; expect 0 epic-gate "close step owns the push"
 
-fresh
-outer_state=$tmp/working-state
-outer_tracker=$r/work/devloop/.beads
-export outer_state outer_tracker
-export BEADS_DIR="$outer_tracker" XDG_STATE_HOME="$outer_state" LOOP_MANAGER_SOCKET="$tmp/working.sock"
-export BD_ACTOR=working LOOP_MANAGER_ATTEMPT_TOKEN=outer-token
-for operator in "$devloop/lm" "$devloop/scripts/install.sh"; do
-  if "$operator" --help >"$tmp/operator" 2>&1; then echo "agent ran $operator" >&2; exit 1; fi
-  grep -q 'operator command' "$tmp/operator"
-  if "$devloop/scripts/test-env" "$operator" --help >"$tmp/operator" 2>&1; then echo "test ran $operator" >&2; exit 1; fi
-  grep -q 'operator command' "$tmp/operator"
-done
-export DCG_CUSTOM_PATHS="$devloop/dcg.yaml"
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=test
-MISE_RC=0 expect 0 epic-ci-report "green"; jq -e '.exit_code == 0 and .uncommitted == 0 and .failed == []' "$tmp/out" >/dev/null
+fresh; echo note >>proj/.beads/issues.jsonl
+CI_RC=0 expect 0 epic-ci-report "green"; jq -e '.exit_code == 0 and .uncommitted == 0 and .failed == []' "$tmp/out" >/dev/null
 log=$(jq -r .log "$tmp/out")
-grep -q "ci says run ci" "$log"
-MISE_RC=0 expect 0 epic-ci-report "second test run"
-[ "$(find target/devloop/runs/run_1 -name ci.log | wc -l | tr -d ' ')" = 2 ]
-fresh; echo two >src/a; MISE_RC=101 expect 0 epic-ci-report "red report"
+grep -q "ci says run all" "$log"
+CI_RC=0 expect 0 epic-ci-report "second test run"
+[ "$(find scratch/runs/run_1 -name ci.log | wc -l | tr -d ' ')" = 2 ]
+# A project whose CI writes no report of its checks: the exit code and the log are the report.
+CI_REPORT=none CI_RC=0 expect 0 epic-ci-report "green without a report of the checks"
+jq -e '.exit_code == 0 and .uncommitted == 0 and .failed == []' "$tmp/out" >/dev/null
+CI_REPORT=none CI_RC=3 expect 0 epic-ci-report "red without a report of the checks"
+jq -e '.exit_code == 3 and .failed == []' "$tmp/out" >/dev/null
+grep -q "ci says run all" "$(jq -r .log "$tmp/out")"
+fresh; echo two >src/a; CI_RC=101 expect 0 epic-ci-report "red report"
 jq -e '.exit_code == 101 and .uncommitted == 1 and .failed == [{"name":"ci:fmt","status":"failed","exit_code":101}]' "$tmp/out" >/dev/null
 log=$(jq -r .log "$tmp/out")
-grep -Fq 'RESULT: FAIL (mise run ci: exit 101)' "${log%/*}/result.txt"
+grep -Fq 'RESULT: FAIL (ci run all: exit 101)' "${log%/*}/result.txt"
 LOOP_MANAGER_STEP_CI_REPORT_DATA=$(jq -Rs '{stdout:.}' "$tmp/out")
 unset LOOP_MANAGER_REMARKS
 for n in 1 2 3; do
@@ -123,4 +118,4 @@ said "sending the report to review" "escalation"
 LOOP_MANAGER_REMARKS='gate: exit 1'
 expect 1 epic-ci-route "new streak after review"; said "CI return 1/3" "reset"
 ci_data 0; expect 0 epic-ci-route "green goes straight to review"
-echo "devloop selftest: ok"
+echo "review-loop selftest: ok"

@@ -13,17 +13,17 @@ case ${1:-} in
     summary=${LOOP_MANAGER_STEP_REVIEW_OWNER_SUMMARY:-}
     data=${LOOP_MANAGER_STEP_REVIEW_OWNER_DATA:-null}
     ;;
-  *) echo 'owner-answer: expected code or review' >&2; exit 75 ;;
+  *) echo 'epic-owner-answer: expected code or review' >&2; exit 75 ;;
 esac
 bead=${LOOP_MANAGER_BEAD:?}
 if ! printf '%s' "$data" | jq -e --arg summary "$summary" '
   ($summary | test("\\S")) or (. != null and . != {} and . != [] and
     (if type == "string" then test("\\S") else true end))' >/dev/null; then
-  echo 'owner-answer: resolve with a non-empty summary or answer data' >&2
+  echo 'epic-owner-answer: resolve with a non-empty summary or answer data' >&2
   exit 75
 fi
 id=$(printf '%s' "$request" | jq -er '.question_id | strings | select(test("^[A-Za-z0-9][A-Za-z0-9._:-]*$"))') || exit 75
-dir=target/devloop/runs/${LOOP_MANAGER_RUN:?}
+dir=${LOOP_MANAGER_INPUT_SCRATCH_DIR:?}/${LOOP_MANAGER_RUN:?}
 mkdir -p "$dir" || exit 75
 answer=$(mktemp "$dir/answer.XXXXXX") || exit 75
 {

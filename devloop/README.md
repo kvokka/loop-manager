@@ -5,19 +5,40 @@ has a coder work on it, runs the full test gate, has a reviewer review the resul
 coder until the review scores 9 or more with the verdict `complete`. Nothing here ships with the binary: it is a pack
 and a project, read by `loop-manager` as any other.
 
+The workflow is the pack [`review-loop`](../packs/review-loop/README.md): the formula, its five agents and the
+commands of its steps. It knows nothing of this repository and serves any project. This directory is the project:
+what is specific to developing loop-manager.
+
 ```text
-packs/review-loop/      the pack
+packs/review-loop/      the pack: any project can list it
   formulas/epic.toml    code -> tests -> review -> gate -> close, with conditional owner waits
   agents/               coder and reviewer (steps of the formula); helper, subcoder, expert (subagents of the coder)
-  bin/                  the commands of the test, gate, owner-answer and close steps
+  bin/                  the commands of the exec steps: CI report and routing, gate, owner answer, close
   tests/                their self-tests, run by `mise run ci`
 devloop/                the project
   config.toml           the orchestrator config of the loop's own daemon
-  loop-manager.toml     the pack, the addons, the settings of the sessions, the rig `repo` (`..`), the triggers
-  lm, scripts/          the operator's commands (`lm`, `install.sh`) and `test-env`
+  loop-manager.toml     the pack, the inputs of its formula, the addons, the settings of the sessions, the edits of
+                        the pack's agents, the rig `repo` (`..`), the triggers
+  .loop-manager/agents/ the rules of this repository for the coder and the reviewer (`project.md` of each)
+  lm, scripts/          the operator's commands (`lm`, `install.sh`), `test-env` and their self-test
+  dcg.yaml              what the sessions may not do to the working daemon
   artifacts/<run>/      full logs and notes, local and ignored by git
   .beads/               the tracker of the epics (br), committed with the code; policy.yaml lists its statuses
 ```
+
+## What the project gives the pack
+
+- **Inputs** (`[inputs]` of `loop-manager.toml`): the CI command `devloop/scripts/test-env mise run ci`, the scratch
+  directory of runs `target/devloop/runs` and the archive `devloop/artifacts`.
+- **Rules for the agents**: `.loop-manager/agents/coder/project.md` and `.loop-manager/agents/reviewer/project.md`
+  fill the slot `{{ agent.project }}` of the pack's prompt templates: where the rules of this repository live, its
+  build, lint and test commands, what the review checks here, the language of the product and of the comments. The
+  subcoder and the expert have no template, so `[agents.subcoder]` and `[agents.expert]` of `loop-manager.toml`
+  replace their role prompts.
+- **Addons**: the pack declares and attaches `context-budget`; the project declares the rest and attaches them in
+  `[agents.coder]` and `[agents.reviewer]` (see "The addons").
+- **The report of the CI checks**: the `ci` task of `mise.toml` writes it to the file the pack names in
+  `REVIEW_LOOP_CI_REPORT`.
 
 ## A run
 
@@ -25,9 +46,9 @@ devloop/                the project
   `partial` or `blocked` with `BASE:` and `HEAD:`. When only the owner can unblock it, the session finishes with
   `pass` and `data.needs_owner = true`: `code_owner` waits for the answer. A session stopped at its context limit
   still goes on to the next step.
-- `ci_report`: runs `mise run ci` with a five-minute limit. The independent checks all run within that deadline;
-  nextest runs the suite with fail-fast disabled. The run keeps the full log, per-check JSON report and digest
-  under `target/devloop/runs/<run>/tests.*/`. The step returns the CI exit code, tested revision, dirty path
+- `ci_report`: runs `mise run ci` through `test-env`. The task has a five-minute limit: the independent checks all
+  run within that deadline; nextest runs the suite with fail-fast disabled. The run keeps the full log, per-check
+  JSON report and digest under `target/devloop/runs/<run>/tests.*/`. The step returns the CI exit code, tested revision, dirty path
   count, failed checks and log path. A timeout retains the statuses of interrupted and pending checks.
 - `ci_route`: green CI goes directly to review. Red CI returns the failed checks and log path to the coder up to
   three consecutive times. If CI is still red after those three fixes, the reviewer gets the report. A return from
@@ -68,8 +89,8 @@ resolves that concern. The following lines explain it in Russian. An ordinary fi
 The installed daemon, socket, state and tracker serve working epics. Agents use them to report on their assigned
 work. Only an explicit owner request authorizes testing on, administering or upgrading this daemon. Coder and
 reviewer checks use isolated tests, including tests of daemon startup, shutdown and tracker writes. The DCG addon
-loads the [devloop pack](dcg.yaml) for these sessions through the project's `DCG_CUSTOM_PATHS` setting. It applies
-to both Claude and Codex. The pack blocks daemon drain, restart, config reload, dev binary installation and
+loads the [devloop DCG pack](dcg.yaml) for these sessions through the project's `DCG_CUSTOM_PATHS` setting. It applies
+to both Claude and Codex. That pack blocks daemon drain, restart, config reload, dev binary installation and
 commands to stop, restart or disable the `loop-manager-dev` service.
 
 The tracker writes `.beads/issues.jsonl` as its Git export. Prek excludes this generated file from its checks.
@@ -116,10 +137,10 @@ its directory first on the daemon's `PATH` for child commands. The dev database 
 `~/.local/state/loop-manager-dev/loop-manager/`, separate from the ordinary installation.
 
 The daemon runs this installed copy, not the checkout's build, and keeps the config and pack it read at start
-until an explicit reload. A run may therefore change the product's interface, including the names the devloop pack
-uses, without affecting the running daemon; the change takes effect when the owner installs the new binary and
-restarts the service. The step scripts and the hooks of the addons attached by `path` are the exception: the daemon
-runs them from the checkout, so a change of a name they read reaches them at once, and an addon's hook does nothing
+until an explicit reload. A run may therefore change the product's interface, including the names the pack and this
+project use, without affecting the running daemon; the change takes effect when the owner installs the new binary and
+restarts the service. The step commands of the pack, `test-env` and the hooks of the addons attached by `path` are
+the exception: the daemon runs them from the checkout, so a change of a name they read reaches them at once, and an addon's hook does nothing
 or fails until the service runs the new build.
 
 For an authorized upgrade, install the new artifact between epics with `mise run devloop-install`, then restart the
@@ -233,7 +254,7 @@ and selects the roles that Ponytail matches. The coder's native subagents share 
 
 `[settings]` in `loop-manager.toml` supplies the three toolchain variables above and sets the Claude prompt cache
 to 5 minutes for each session and its subagents. Every round starts a new session, and the long test run happens
-outside it. Both roles attach `context-budget` and `dcg`, which refuses a destructive shell command
+outside it. Both roles attach `context-budget` (the pack's own attachment) and `dcg`, which refuses a destructive shell command
 before it runs; what `dcg` needs on the host is in `addons/dcg/README.md`. `devloop/lm config explain --config
 devloop/config.toml --project devloop --formula epic --rig repo` shows what each step gets and from which layer.
 
@@ -260,6 +281,11 @@ can [pin a published addon](../docs/guide/addons.md#declare-it).
 
 Anyone may change `devloop/` and `packs/review-loop/`, the agents of an epic included. The daemon runs the commands
 of `packs/review-loop/bin/` and `scripts/test-env` from the working tree at the moment a step needs them, so an edit
-of `epic-gate` or `epic-ci-report` holds from the next step on. The config, the formula and the prompts are held in
-memory: an edit of them holds only after `devloop/lm config reload`, and a running run keeps the ones it started
-with. `mise run ci` runs the pack's `tests/selftest.sh` and `config check` on this directory.
+of `epic-gate` or `epic-ci-report` holds from the next step on. The config, the formula, the prompts and the
+project's files under `.loop-manager/agents/` are held in memory: an edit of them holds only after
+`devloop/lm config reload`, and a running run keeps the ones it started with. `mise run ci` runs the pack's
+`tests/selftest.sh`, `scripts/selftest.sh` and `config check` on this directory.
+
+What goes where: a rule any project would keep (the steps, the gate, the formats of the comments, the protocol of
+the owner's questions) belongs to the pack and names no tool, path or document of this repository; what names them
+belongs here.
