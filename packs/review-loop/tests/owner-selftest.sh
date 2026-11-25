@@ -26,7 +26,7 @@ export PATH="$tmp/bin:$PATH"
 cd "$tmp"
 expect() {
   rc=0
-  sh "$here/owner-answer.sh" "$2" >output.txt 2>error.txt || rc=$?
+  "$here/../bin/epic-owner-answer" "$2" >output.txt 2>error.txt || rc=$?
   [ "$rc" = "$1" ] || { echo "owner-selftest: $2 expected $1, got $rc"; cat error.txt; exit 1; }
 }
 export LOOP_MANAGER_STEP_CODE_DATA='{"needs_owner":true,"question_id":"run_test-choice"}'

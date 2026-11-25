@@ -1,0 +1,7 @@
+# The workflow `epic`: a coder, the project's full CI and a reviewer, in rounds, until the review passes (README.md).
+name = "review-loop"
+version = "0.1.0"
+
+# The one addon the pack's own agents attach: the context budget of the coder's and the reviewer's sessions.
+[[addon]]
+path = "../../addons/context-budget"

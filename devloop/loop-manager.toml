@@ -1,14 +1,13 @@
-# The project of loop-manager's own development. Its root is this directory: the agents (agents/), the formula
-# (formulas/), the scripts the formula names (scripts/) and the tracker (.beads/). The work itself is done in the rig.
+# The project of loop-manager's own development. Its workflow is the pack `review-loop` (../packs/review-loop): the
+# formula `epic`, its agents and the commands of its steps. This directory holds the rig, the triggers, the addons,
+# the operator's scripts (scripts/) and the tracker (.beads/). The work itself is done in the rig.
 name = "devloop"
+packs = ["../packs/review-loop"]
 
-# The addons of this repository, from this checkout by relative path (README.md, "The addons"). The agents that
-# attach them, with their params, are agents/coder and agents/reviewer.
+# The addons of this repository, from this checkout by relative path (README.md, "The addons"); the pack declares
+# `context-budget` itself. The agents that attach them, with their params, are the pack's coder and reviewer.
 [[addon]]
 path = "../addons/code-search"
-
-[[addon]]
-path = "../addons/context-budget"
 
 [[addon]]
 path = "../addons/dcg"

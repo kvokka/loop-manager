@@ -25,11 +25,11 @@ git add -A && git commit -qm init && git push -qu origin HEAD
 
 git remote set-url origin "$tmp/missing.git"
 rc=0
-sh "$here/close.sh" >"$tmp/output" 2>&1 || rc=$?
+"$here/../bin/epic-close" >"$tmp/output" 2>&1 || rc=$?
 [ "$rc" = 75 ]
 before=$(git rev-parse HEAD)
 git remote set-url origin "$tmp/origin.git"
-sh "$here/close.sh"
+"$here/../bin/epic-close"
 [ "$(git rev-parse HEAD)" = "$before" ]
 [ "$(git -C "$tmp/origin.git" rev-parse HEAD)" = "$before" ]
 git -C "$tmp/origin.git" show HEAD:devloop/.beads/issues.jsonl |

@@ -84,7 +84,7 @@ run = """
 cargo build -q --locked -p loop-manager
 metadata=$(cargo metadata --locked --no-deps --format-version 1)
 target=$(echo "$metadata" | jq -er .target_directory)
-PATH="$target/debug:$PATH" devloop/scripts/selftest.sh
+PATH="$target/debug:$PATH" packs/review-loop/tests/selftest.sh
 """
 
 [tasks.acceptance]

@@ -3,15 +3,18 @@
 A loop-manager project whose rig is this repository. The owner files an epic as a bead; a run of the formula `epic`
 has a coder work on it, runs the full test gate, has a reviewer review the result, and sends the work back to the
 coder until the review scores 9 or more with the verdict `complete`. Nothing here ships with the binary: it is a pack
-and a config, read by `loop-manager` as any other.
+and a project, read by `loop-manager` as any other.
 
 ```text
-devloop/
-  config.toml           the orchestrator config of the loop's own daemon
-  loop-manager.toml     the project: the addons, the settings of the sessions, the rig `repo` (`..`), the triggers
-  agents/               coder and reviewer (steps of the formula); helper, subcoder, expert (subagents of the coder)
+packs/review-loop/      the pack
   formulas/epic.toml    code -> tests -> review -> gate -> close, with conditional owner waits
-  scripts/              test, gate, owner-answer and close steps; self-tests in `mise run ci`
+  agents/               coder and reviewer (steps of the formula); helper, subcoder, expert (subagents of the coder)
+  bin/                  the commands of the test, gate, owner-answer and close steps
+  tests/                their self-tests, run by `mise run ci`
+devloop/                the project
+  config.toml           the orchestrator config of the loop's own daemon
+  loop-manager.toml     the pack, the addons, the settings of the sessions, the rig `repo` (`..`), the triggers
+  lm, scripts/          the operator's commands (`lm`, `install.sh`) and `test-env`
   artifacts/<run>/      full logs and notes, local and ignored by git
   .beads/               the tracker of the epics (br), committed with the code; policy.yaml lists its statuses
 ```
@@ -36,7 +39,7 @@ devloop/
   and green CI on the current clean revision. Otherwise it marks the epic `rework` and returns it to the coder.
 - `close`: saves local logs and notes, closes the epic, then commits and pushes the tracker.
 
-A run has 50 rounds (`rounds` in `formulas/epic.toml`). A CI return, a review under the bar or a return after an owner answer starts
+A run has 50 rounds (`rounds` in the pack's `formulas/epic.toml`). A CI return, a review under the bar or a return after an owner answer starts
 the next round. All the working
 context of an epic is in its comments: every round is a new session, which
 reads the last 8 comments in its prompt and the rest with `br comments <id>`. Long notes of subagents go to
@@ -53,8 +56,8 @@ the coder or the reviewer is told to wrap up past 300000 tokens of context and s
 |---|---|---|
 | `open` | filed and waiting for a run, or the last run failed | you (`br create`); loop-manager when a run fails |
 | `in_progress` | a run works on it and no review has sent it back yet | loop-manager, when a run claims it |
-| `rework` | a review sent it back; the next rounds go on | `scripts/gate.sh` |
-| `closed` | the review passed and the close step closes and publishes the epic | `scripts/close.sh`; loop-manager reconciles the close |
+| `rework` | a review sent it back; the next rounds go on | the step `gate` (`epic-gate`) |
+| `closed` | the review passed and the close step closes and publishes the epic | the step `close` (`epic-close`); loop-manager reconciles the close |
 
 The agents change neither the status nor the assignee. br refuses a status not listed in `.beads/policy.yaml`;
 `blocked` and `deferred` are there for you to use by hand. Two labels matter: `auto` makes a ready epic start a run,
@@ -248,13 +251,15 @@ The project attaches [t3-notify](../addons/t3-notify/README.md) in `[settings]`.
 T3 Code thread tells that thread when its run starts, enters `code_owner` or `review_owner`, and ends. The daemon needs
 `t3` on its `PATH`, and the thread's harness the `t3-run-card` plugin with auto-open on.
 
-This pack uses repository-relative declarations (`path = "../addons/<name>"`) so its agents and CI
+The project and the pack use repository-relative declarations (`path = "../addons/<name>"` here,
+`path = "../../addons/context-budget"` in the pack) so the agents and CI
 exercise the addons from the same checkout, including changes under development. External projects
 can [pin a published addon](../docs/guide/addons.md#declare-it).
 
-## Changing this directory
+## Changing the pack and the project
 
-Anyone may change it, the agents of an epic included. The daemon runs `scripts/` from the working tree at the moment
-a step needs them, so an edit of `gate.sh` or `tests.sh` holds from the next step on. The config, the formula and
-the prompts are held in memory: an edit of them holds only after `devloop/lm config reload`, and a running run
-keeps the ones it started with. `mise run ci` runs `scripts/selftest.sh` and `config check` on this directory.
+Anyone may change `devloop/` and `packs/review-loop/`, the agents of an epic included. The daemon runs the commands
+of `packs/review-loop/bin/` and `scripts/test-env` from the working tree at the moment a step needs them, so an edit
+of `epic-gate` or `epic-ci-report` holds from the next step on. The config, the formula and the prompts are held in
+memory: an edit of them holds only after `devloop/lm config reload`, and a running run keeps the ones it started
+with. `mise run ci` runs the pack's `tests/selftest.sh` and `config check` on this directory.

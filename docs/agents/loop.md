@@ -6,4 +6,4 @@ reaching review. Each round takes its context from the epic's comments. Blocking
 report step closes the epic and publishes the handoff.
 
 See the [devloop guide](../../devloop/README.md) for installation, starting the daemon, filing an epic, answering
-a question and recovering a run. The [agent definitions](../../devloop/agents/) give each role its instructions.
+a question and recovering a run. The [agent definitions](../../packs/review-loop/agents/) give each role its instructions.
