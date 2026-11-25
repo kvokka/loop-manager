@@ -5,6 +5,7 @@
 - The notice of a passed, failed or cancelled run carries its spend as the table of `loop-manager run spend`, a row
   per agent by default. The new param `spend` selects `total`, `agent` or `model` detail, or `off` for no table. The
   hook calls `loop-manager` on the daemon's `PATH`; a daemon without `run spend` leaves the table out.
+- Declare `loop-manager` on the daemon's host as a dependency, so `loop-manager doctor` checks it.
 
 ## 0.2.0
 

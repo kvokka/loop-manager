@@ -36,3 +36,9 @@ minimum = "3.14.0"
 command = ["python3", "--version"]
 pattern = '(?m)^Python (\S+)'
 scope = "daemon"
+
+[dependencies.loop-manager]
+minimum = "0.0.1"
+command = ["loop-manager", "--version"]
+pattern = '(?m)^loop-manager (\S+)'
+scope = "daemon"
