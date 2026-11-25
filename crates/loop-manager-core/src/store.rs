@@ -3,7 +3,7 @@ use std::{os::unix::fs::OpenOptionsExt, path::Path};
 
 /// The number of [`SCHEMA`] in `user_version`. Before the first release there are no migrations: a change of the
 /// schema takes the next number, and a database of another number is refused.
-const VERSION: i32 = 29;
+const VERSION: i32 = 30;
 
 const SCHEMA: &str = "
 CREATE TABLE outbox (
@@ -121,13 +121,15 @@ CREATE INDEX attempts_instance ON attempts (instance);
 CREATE INDEX attempts_session ON attempts (session);
 -- The spend ledger (docs/design/formula-budgets.md): sums per attempt, agent, provider, model and the price used.
 -- `price` is the JSON of the price used: its `source` (`harness`, `user`, `catalog`, `none`), and for a table price the
--- rates in USD per 1M tokens and the catalog's `date`. `cost` is in pico-USD.
+-- rates in USD per 1M tokens and the catalog's `date`. `cost` is in pico-USD. `agent` '' is the unattributed part.
+-- `estimate` 1: requests the harness told one by one and no running total has settled yet, at the table price.
 CREATE TABLE spend (
     run TEXT NOT NULL,
     attempt INTEGER NOT NULL,
     agent TEXT NOT NULL,
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
+    estimate INTEGER NOT NULL,
     price TEXT NOT NULL,
     input INTEGER NOT NULL DEFAULT 0,
     cache_read INTEGER NOT NULL DEFAULT 0,
@@ -135,7 +137,7 @@ CREATE TABLE spend (
     cache_write_1h INTEGER NOT NULL DEFAULT 0,
     output INTEGER NOT NULL DEFAULT 0,
     cost INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (run, attempt, agent, provider, model, price)
+    PRIMARY KEY (run, attempt, agent, provider, model, estimate, price)
 );
 -- The last running total each usage counter of a session reported: the checkpoint the next total is charged over.
 CREATE TABLE spend_counters (

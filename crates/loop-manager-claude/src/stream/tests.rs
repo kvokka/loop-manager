@@ -57,8 +57,20 @@ fn a_reply_is_acked_started_and_completed() {
             Normalized::PromptAcked { key },
             Normalized::TurnStarted,
             Normalized::Activity { tool_running: false },
+            // `result.usage` above the main loop's messages estimated: here all of it, no message told its usage.
+            Normalized::UsageEstimate {
+                owner: Owner::Session,
+                provider: "anthropic".into(),
+                model: "claude-haiku-5-5".into(),
+                tokens: Tokens {
+                    input: 3,
+                    output: 2,
+                    ..Tokens::default()
+                },
+            },
             Normalized::UsageTotal {
                 counter: "claude-haiku-5-5".into(),
+                owner: Owner::Session,
                 provider: "anthropic".into(),
                 model: "claude-haiku-5-5".into(),
                 service_tier: None,
@@ -336,6 +348,7 @@ fn a_result_tells_the_running_total_of_every_model_with_its_cache_and_cost() {
     );
     let total = |model: &str, tokens, cost| Normalized::UsageTotal {
         counter: model.into(),
+        owner: Owner::Session,
         provider: "gateway.example".into(),
         model: model.into(),
         service_tier: None,
@@ -343,7 +356,7 @@ fn a_result_tells_the_running_total_of_every_model_with_its_cache_and_cost() {
         cost,
     };
     assert_eq!(
-        events[1..3],
+        events[2..4],
         [
             total(
                 "claude-haiku-5-5",
@@ -369,5 +382,49 @@ fn a_result_tells_the_running_total_of_every_model_with_its_cache_and_cost() {
             ),
         ]
     );
-    assert!(matches!(events[3], Normalized::TurnEnded { .. }), "{events:?}");
+    assert!(matches!(events[4], Normalized::TurnEnded { .. }), "{events:?}");
+}
+
+/// Experiment 1b's `background` log: the main loop starts a subagent, whose messages answer its `Agent` call.
+/// Every assistant message is estimated once, for its agent; the main loop's estimates of a turn add up to its
+/// `result.usage`; the totals after a subagent's work are nobody's in particular.
+#[test]
+fn assistant_messages_are_estimated_for_the_agent_that_sent_them() {
+    let log = include_str!("../../../../experiments/02-claude-process/logs/background.ndjson");
+    let lines: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|l| l["dir"] == "out")
+        .map(|l| l["msg"].clone())
+        .collect();
+    let mut s = Stream::new(None, None, "anthropic".into());
+    let (mut main, mut turns) = (Tokens::default(), Vec::new());
+    let mut owners = Vec::new();
+    for line in &lines {
+        for event in s.line(line, Instant::now()) {
+            match event {
+                Normalized::UsageEstimate { owner, tokens, .. } => {
+                    if owner == Owner::Session {
+                        add(&mut main, &tokens);
+                    }
+                    owners.push(owner);
+                }
+                Normalized::UsageTotal { owner, .. } => turns.push((owner, tokens(&line["usage"]), main)),
+                _ => {}
+            }
+        }
+        if line["type"] == "result" {
+            main = Tokens::default();
+        }
+    }
+    let agent = Owner::Subagent("general-purpose".into());
+    assert_eq!(owners.iter().filter(|o| **o == agent).count(), 2, "{owners:?}");
+    assert!(!owners.contains(&Owner::Unknown), "{owners:?}");
+    let [(first, ..), (second, ..), ..] = &turns[..] else {
+        panic!("{turns:?}")
+    };
+    assert_eq!((first, second), (&Owner::Session, &Owner::Unknown));
+    for (_, told, estimated) in &turns {
+        assert_eq!(told, estimated);
+    }
 }

@@ -7,7 +7,7 @@ use crate::common;
 use common::{POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
     Journal,
-    driver::{Normalized, Tokens},
+    driver::{Normalized, Owner, Tokens},
     run::{Create, Decision, Msg, Reader},
     usd::Usd,
 };
@@ -25,6 +25,7 @@ const NOTE: (&str, &str) = (
 fn spent(cents: i64) -> Normalized {
     Normalized::UsageTotal {
         counter: "m1".into(),
+        owner: Owner::Session,
         provider: "anthropic".into(),
         model: "m1".into(),
         service_tier: None,

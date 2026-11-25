@@ -4,7 +4,7 @@
 use super::SpendDetail;
 use crate::{
     config::Pricing,
-    driver::Tokens,
+    driver::{Owner, Tokens},
     usd::Usd,
     writer::{Error, Tx},
 };
@@ -24,6 +24,7 @@ fn sql_int(n: u64) -> i64 {
 pub(super) struct Total<'a> {
     pub(super) session: &'a str,
     pub(super) counter: &'a str,
+    pub(super) owner: &'a Owner,
     pub(super) provider: &'a str,
     pub(super) model: &'a str,
     pub(super) service_tier: Option<&'a str>,
@@ -31,11 +32,121 @@ pub(super) struct Total<'a> {
     pub(super) cost: Option<Usd>,
 }
 
+/// The ledger row a part of a charge is added to.
+struct Key<'a> {
+    run: &'a str,
+    attempt: u32,
+    agent: &'a str,
+    provider: &'a str,
+    model: &'a str,
+    estimate: bool,
+    price: &'a str,
+}
+
+/// Adds `tokens` and `cost` to the ledger row of `key`.
+fn add(tx: &Tx<'_>, key: &Key<'_>, tokens: [i64; 5], cost: i64) -> Result<(), Error> {
+    tx.sql().execute(
+        "INSERT INTO spend (run, attempt, agent, provider, model, estimate, price, input, cache_read, cache_write_5m, \
+         cache_write_1h, output, cost) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+         ON CONFLICT (run, attempt, agent, provider, model, estimate, price) DO UPDATE SET \
+         input = input + excluded.input, cache_read = cache_read + excluded.cache_read, \
+         cache_write_5m = cache_write_5m + excluded.cache_write_5m, \
+         cache_write_1h = cache_write_1h + excluded.cache_write_1h, output = output + excluded.output, \
+         cost = cost + excluded.cost",
+        params![
+            key.run,
+            key.attempt,
+            key.agent,
+            key.provider,
+            key.model,
+            key.estimate,
+            key.price,
+            tokens[0],
+            tokens[1],
+            tokens[2],
+            tokens[3],
+            tokens[4],
+            cost
+        ],
+    )?;
+    Ok(())
+}
+
+/// The agent a part of the spend of attempt `(run, attempt)` is charged to: `''` for the unattributed part.
+fn agent(tx: &Tx<'_>, run: &str, attempt: u32, owner: &Owner) -> Result<String, Error> {
+    Ok(match owner {
+        Owner::Session => tx
+            .sql()
+            .query_row(
+                "SELECT COALESCE(agent, '') FROM attempts WHERE run = ?1 AND n = ?2",
+                params![run, attempt],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default(),
+        Owner::Subagent(name) => name.clone(),
+        Owner::Unknown => String::new(),
+    })
+}
+
+fn tokens_of(t: [i64; 5]) -> Tokens {
+    let [input, cache_read, cache_write_5m, cache_write_1h, output] = t.map(|n| u64::try_from(n).unwrap_or(0));
+    Tokens {
+        input,
+        cache_read,
+        cache_write_5m,
+        cache_write_1h,
+        output,
+    }
+}
+
+/// The table price of `tokens` (the user's entry, else the catalog's): the record of the price used and the cost;
+/// a model in neither costs zero.
+fn table_price(pricing: &Pricing, provider: &str, model: &str, tier: Option<&str>, tokens: [i64; 5]) -> (Value, i64) {
+    let tokens = tokens_of(tokens);
+    match pricing.lookup(provider, model, tier) {
+        Some((source, price)) => {
+            let rates = price.rates(&tokens);
+            (pricing.record(source, rates), rates.cost(&tokens).0)
+        }
+        None => (json!({ "source": "none" }), 0),
+    }
+}
+
+/// Charges to `(run, attempt)` the tokens of one request a later running total will include (contracts 4.3), at the
+/// table price, as an estimate of `owner`'s spend until [`charge`] settles it.
+pub(super) fn estimate(
+    tx: &Tx<'_>,
+    pricing: &Pricing,
+    (run, attempt): (&str, u32),
+    owner: &Owner,
+    (provider, model): (&str, &str),
+    tokens: &Tokens,
+) -> Result<(), Error> {
+    let tokens = fields(tokens).map(sql_int);
+    let (price, cost) = table_price(pricing, provider, model, None, tokens);
+    let agent = agent(tx, run, attempt, owner)?;
+    let key = Key {
+        run,
+        attempt,
+        agent: &agent,
+        provider,
+        model,
+        estimate: true,
+        price: &price.to_string(),
+    };
+    add(tx, &key, tokens, cost)
+}
+
 /// Charges to `(run, attempt)` what `total` adds over the checkpoint of its counter, and moves the checkpoint to it.
 /// Each request is thereby charged once, however often a total that includes it is repeated, across a resume and a
 /// restart. A field below its checkpoint adds nothing: a harness process killed in a turn loses what it added since its
 /// session last saved its totals, so the next total can fall back (docs/design/experiments.md, experiment 11);
 /// charging it whole would charge the saved part twice.
+///
+/// The increment settles the estimates of its attempt, provider and model: their tokens stay their agents', and the
+/// amount is split between them and the rest of the increment by their table costs (by tokens when nothing has a
+/// price), to the pico-USD; the rest is the total's owner's.
 pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, total: &Total<'_>) -> Result<(), Error> {
     let now = fields(total.tokens).map(sql_int);
     let cost = total.cost.map(|c| c.0);
@@ -69,51 +180,114 @@ pub(super) fn charge(tx: &Tx<'_>, pricing: &Pricing, run: &str, attempt: u32, to
     if delta.iter().all(|d| *d == 0) && delta_cost.unwrap_or_default() == 0 {
         return Ok(());
     }
+    let (provider, model, tier) = (total.provider, total.model, total.service_tier);
     // The harness's cost first, an explicit zero included; else the user's price or the catalog's; else zero.
-    let [input, cache_read, cache_write_5m, cache_write_1h, output] = delta.map(|d| u64::try_from(d).unwrap_or(0));
-    let tokens = Tokens {
-        input,
-        cache_read,
-        cache_write_5m,
-        cache_write_1h,
-        output,
+    let (price, amount) = match delta_cost {
+        Some(cost) => (json!({ "source": "harness" }), cost),
+        None => table_price(pricing, provider, model, tier, delta),
     };
-    let (price, amount) = match (
-        delta_cost,
-        pricing.lookup(total.provider, total.model, total.service_tier),
-    ) {
-        (Some(cost), _) => (json!({ "source": "harness" }), cost),
-        (None, Some((source, price))) => {
-            let rates = price.rates(&tokens);
-            (pricing.record(source, rates), rates.cost(&tokens).0)
-        }
-        (None, None) => (json!({ "source": "none" }), 0),
+    let settled = Settled {
+        run,
+        attempt,
+        provider,
+        model,
+        tier,
+        price: price.to_string(),
+    };
+    settle(tx, pricing, &settled, delta, amount, total.owner)
+}
+
+/// The charge a running total settles: whose, of which model, and the record of the price of its amount.
+struct Settled<'a> {
+    run: &'a str,
+    attempt: u32,
+    provider: &'a str,
+    model: &'a str,
+    tier: Option<&'a str>,
+    price: String,
+}
+
+/// Charges `amount` for the increment `delta` of a total: the estimates of its attempt, provider and model take their
+/// shares, the rest is `owner`'s (docs at [`charge`]).
+fn settle(
+    tx: &Tx<'_>,
+    pricing: &Pricing,
+    s: &Settled<'_>,
+    delta: [i64; 5],
+    amount: i64,
+    owner: &Owner,
+) -> Result<(), Error> {
+    let Settled {
+        run,
+        attempt,
+        provider,
+        model,
+        tier,
+        ref price,
+    } = *s;
+    let estimates: Vec<(String, [i64; 5], i64)> = {
+        let mut stmt = tx.sql().prepare(
+            "SELECT agent, input, cache_read, cache_write_5m, cache_write_1h, output, cost FROM spend \
+             WHERE run = ?1 AND attempt = ?2 AND provider = ?3 AND model = ?4 AND estimate = 1",
+        )?;
+        let rows = stmt.query_map(params![run, attempt, provider, model], |r| {
+            Ok((
+                r.get(0)?,
+                [r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?],
+                r.get(6)?,
+            ))
+        })?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let rest: [i64; 5] = std::array::from_fn(|i| (delta[i] - estimates.iter().map(|e| e.1[i]).sum::<i64>()).max(0));
+    let (_, rest_weight) = table_price(pricing, provider, model, tier, rest);
+    let mut weights: Vec<i64> = estimates.iter().map(|e| e.2).chain([rest_weight]).collect();
+    if weights.iter().all(|w| *w == 0) {
+        weights = estimates
+            .iter()
+            .map(|e| e.1)
+            .chain([rest])
+            .map(|t| t.iter().sum())
+            .collect();
+    }
+    let sum: i128 = weights.iter().map(|w| i128::from(*w)).sum();
+    let share = |w: i64| match sum {
+        0 => 0,
+        sum => i64::try_from(i128::from(amount) * i128::from(w) / sum).unwrap_or(i64::MAX),
     };
     tx.sql().execute(
-        "INSERT INTO spend (run, attempt, agent, provider, model, price, input, cache_read, cache_write_5m, \
-         cache_write_1h, output, cost) \
-         SELECT ?1, ?2, COALESCE(agent, ''), ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11 FROM attempts \
-         WHERE run = ?1 AND n = ?2 \
-         ON CONFLICT (run, attempt, agent, provider, model, price) DO UPDATE SET \
-         input = input + excluded.input, cache_read = cache_read + excluded.cache_read, \
-         cache_write_5m = cache_write_5m + excluded.cache_write_5m, \
-         cache_write_1h = cache_write_1h + excluded.cache_write_1h, output = output + excluded.output, \
-         cost = cost + excluded.cost",
-        params![
+        "DELETE FROM spend WHERE run = ?1 AND attempt = ?2 AND provider = ?3 AND model = ?4 AND estimate = 1",
+        params![run, attempt, provider, model],
+    )?;
+    let mut settled = 0;
+    for ((agent, tokens, _), weight) in estimates.iter().zip(&weights) {
+        let cost = share(*weight);
+        settled += cost;
+        let key = Key {
             run,
             attempt,
-            total.provider,
-            total.model,
-            price.to_string(),
-            delta[0],
-            delta[1],
-            delta[2],
-            delta[3],
-            delta[4],
-            amount
-        ],
-    )?;
-    Ok(())
+            agent,
+            provider,
+            model,
+            estimate: false,
+            price,
+        };
+        add(tx, &key, *tokens, cost)?;
+    }
+    if rest.iter().all(|t| *t == 0) && amount == settled {
+        return Ok(());
+    }
+    let owner = agent(tx, run, attempt, owner)?;
+    let key = Key {
+        run,
+        attempt,
+        agent: &owner,
+        provider,
+        model,
+        estimate: false,
+        price,
+    };
+    add(tx, &key, rest, amount - settled)
 }
 
 /// The sums of the `usage` of contracts 1.3 over ledger rows, in the column order [`usage_at`] reads.

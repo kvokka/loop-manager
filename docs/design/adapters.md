@@ -85,7 +85,9 @@ the core relies on these, and a driver that misses one fails runs by the watchdo
 - **`UsageTotal`** carries the harness's running total of one counter of the session, not an increment: the core
   charges what it adds over the last total of that session and counter, so a total repeated after a resume or a
   reconnect charges nothing. Its token quantities are disjoint: an adapter whose harness counts cached input inside
-  the input takes it out. `RateLimit` is the account's limit alone. `Retrying{delay}` is in real units (the core adds it to the
+  the input takes it out. A harness that tells the usage of each request as well sends it as `UsageEstimate` of the
+  agent that made it (the session's own, a named subagent, or unknown); the next total of its model settles those
+  estimates, and its `owner` takes the part they do not explain. `RateLimit` is the account's limit alone. `Retrying{delay}` is in real units (the core adds it to the
   silence limit); the events of one instance are sent in `seq` order by one sender at a time (a repeat is dropped, a
   gap is told as `resync.diverged`).
 - **`Exited{code, signal}`**, instance-wide, once the process is gone, after the failure of a turn it left open.

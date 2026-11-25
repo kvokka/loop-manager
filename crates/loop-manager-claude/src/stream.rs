@@ -2,12 +2,12 @@
 //! (docs/design/contracts.md 4.3, 4.6; docs/design/experiments.md, experiment 1a and "Idle without background").
 
 use loop_manager_contract::driver::{
-    Failure, FailureKind, Normalized, PromptKey, RateLimit, SessionState, Source, StopReason, Tokens,
+    Failure, FailureKind, Normalized, Owner, PromptKey, RateLimit, SessionState, Source, StopReason, Tokens,
 };
 use loop_manager_contract::usd::Usd;
 use serde_json::Value;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -40,6 +40,16 @@ pub(crate) struct Stream {
     activity: Option<(Instant, bool)>,
     /// `tool_use_id` of every denial already told in this turn: the turn's `result` lists them again.
     denied: HashSet<String>,
+    /// `message.id` of every assistant message already estimated: each repeats its usage on every content block.
+    estimated: HashSet<String>,
+    /// The subagent type of every `Agent` (or `Task`) call, by its `tool_use_id`: the `parent_tool_use_id` of the
+    /// subagent's messages.
+    subagents: HashMap<String, String>,
+    /// The tokens of the main loop's messages estimated since the last result, and the model of the last of them.
+    main: Tokens,
+    main_model: Option<String>,
+    /// A subagent's message was seen since the last result: the session's totals then mix agents.
+    subagent_seen: bool,
 }
 
 impl Stream {
@@ -61,6 +71,11 @@ impl Stream {
             notified_since_result: false,
             activity: None,
             denied: HashSet::new(),
+            estimated: HashSet::new(),
+            subagents: HashMap::new(),
+            main: Tokens::default(),
+            main_model: None,
+            subagent_seen: false,
         }
     }
 
@@ -141,7 +156,9 @@ impl Stream {
                 }
                 let content = msg["message"]["content"].as_array().into_iter().flatten();
                 let tool = content.clone().any(|c| c["type"] == "tool_use");
-                self.activity(now, tool)
+                let mut out = self.estimate(msg);
+                out.extend(self.activity(now, tool));
+                out
             }
             (Some("tool_progress"), _) => self.activity(now, true),
             (Some("user" | "stream_event"), _) | (Some("system"), Some("status")) => self.activity(now, false),
@@ -177,7 +194,10 @@ impl Stream {
     }
 
     fn result(&mut self, msg: &Value) -> Vec<Normalized> {
-        let mut out = self.usage(&msg["modelUsage"]);
+        let mut out = self.main_rest(msg);
+        out.extend(self.usage(&msg["modelUsage"]));
+        self.main = Tokens::default();
+        self.subagent_seen = false;
         let denials = msg["permission_denials"].as_array().into_iter().flatten();
         out.extend(denials.filter_map(|d| self.denial(d, &Value::Null)));
         let failed = msg["is_error"].as_bool().unwrap_or(true) || msg["subtype"] != "success";
@@ -209,9 +229,80 @@ impl Stream {
         out
     }
 
+    /// The estimate of an assistant message seen the first time: its usage, owned by the main loop, by the subagent
+    /// whose `Agent` call it answers, or by no one known. `output_tokens` is its count at the message's start: the
+    /// rest of the output is in the session's totals only (contracts 4.6).
+    fn estimate(&mut self, msg: &Value) -> Vec<Normalized> {
+        let message = &msg["message"];
+        let calls = message["content"].as_array().into_iter().flatten();
+        for call in calls.filter(|c| c["type"] == "tool_use" && matches!(c["name"].as_str(), Some("Agent" | "Task"))) {
+            if let (Some(id), Some(kind)) = (call["id"].as_str(), call["input"]["subagent_type"].as_str()) {
+                self.subagents.insert(id.to_owned(), kind.to_owned());
+            }
+        }
+        let tokens = tokens(&message["usage"]);
+        let (Some(id), Some(model)) = (message["id"].as_str(), message["model"].as_str()) else {
+            return vec![];
+        };
+        if tokens == Tokens::default() || !self.estimated.insert(id.to_owned()) {
+            return vec![];
+        }
+        let owner = match msg["parent_tool_use_id"].as_str() {
+            None => {
+                add(&mut self.main, &tokens);
+                self.main_model = Some(model.to_owned());
+                Owner::Session
+            }
+            Some(parent) => {
+                self.subagent_seen = true;
+                self.subagents
+                    .get(parent)
+                    .cloned()
+                    .map_or(Owner::Unknown, Owner::Subagent)
+            }
+        };
+        vec![Normalized::UsageEstimate {
+            owner,
+            provider: self.provider.clone(),
+            model: model.to_owned(),
+            tokens,
+        }]
+    }
+
+    /// What `result.usage`, the main loop's requests of the turn, has above the main loop's messages estimated in it:
+    /// mostly the output they wrote after their start. It makes the main loop's tokens exact.
+    fn main_rest(&self, msg: &Value) -> Vec<Normalized> {
+        let all = tokens(&msg["usage"]);
+        let m = &self.main;
+        let rest = Tokens {
+            input: all.input.saturating_sub(m.input),
+            cache_read: all.cache_read.saturating_sub(m.cache_read),
+            cache_write_5m: all.cache_write_5m.saturating_sub(m.cache_write_5m),
+            cache_write_1h: all.cache_write_1h.saturating_sub(m.cache_write_1h),
+            output: all.output.saturating_sub(m.output),
+        };
+        let model = self.main_model.as_deref().or(self.model.as_deref());
+        let model = model.or_else(|| msg["modelUsage"].as_object()?.keys().next().map(String::as_str));
+        match model {
+            Some(model) if rest != Tokens::default() => vec![Normalized::UsageEstimate {
+                owner: Owner::Session,
+                provider: self.provider.clone(),
+                model: model.to_owned(),
+                tokens: rest,
+            }],
+            _ => vec![],
+        }
+    }
+
     /// The session's running total per model, all agents and resumes of the session included: `modelUsage` of a
-    /// `result` (`usage` is the main loop's last turn alone). Its `inputTokens` holds no cached token.
+    /// `result` (`usage` is the main loop's last turn alone). Its `inputTokens` holds no cached token. Its part no
+    /// estimate explains is the main loop's, unless a subagent worked since the last result.
     fn usage(&self, models: &Value) -> Vec<Normalized> {
+        let owner = if self.subagent_seen {
+            Owner::Unknown
+        } else {
+            Owner::Session
+        };
         let models = models.as_object().into_iter().flatten();
         let count = |u: &Value, key: &str| u[key].as_u64().unwrap_or_default();
         models
@@ -223,6 +314,7 @@ impl Stream {
                 };
                 Normalized::UsageTotal {
                     counter: model.clone(),
+                    owner: owner.clone(),
                     provider: self.provider.clone(),
                     model: model.clone(),
                     // `modelUsage` names no tier, and claude prices every model of it itself.
@@ -321,6 +413,32 @@ impl Stream {
         failure.provider_model.clone_from(&self.model);
         failure
     }
+}
+
+/// The tokens of an API `usage` (snake case, of a message or a result). A claude that does not split the cache writes
+/// by duration wrote them all for five minutes.
+fn tokens(u: &Value) -> Tokens {
+    let count = |v: &Value| v.as_u64().unwrap_or_default();
+    let split = &u["cache_creation"];
+    let (cache_write_5m, cache_write_1h) = match split["ephemeral_1h_input_tokens"].as_u64() {
+        Some(long) => (count(&split["ephemeral_5m_input_tokens"]), long),
+        None => (count(&u["cache_creation_input_tokens"]), 0),
+    };
+    Tokens {
+        input: count(&u["input_tokens"]),
+        cache_read: count(&u["cache_read_input_tokens"]),
+        cache_write_5m,
+        cache_write_1h,
+        output: count(&u["output_tokens"]),
+    }
+}
+
+fn add(sum: &mut Tokens, t: &Tokens) {
+    sum.input += t.input;
+    sum.cache_read += t.cache_read;
+    sum.cache_write_5m += t.cache_write_5m;
+    sum.cache_write_1h += t.cache_write_1h;
+    sum.output += t.output;
 }
 
 mod classify;

@@ -3,7 +3,7 @@
 //! comes just before it and ends nothing (docs/design/contracts.md 4.6).
 
 use loop_manager_contract::driver::{
-    Failure, FailureKind, Normalized, RateLimit, SessionState, Source, StopReason, Tokens,
+    Failure, FailureKind, Normalized, Owner, RateLimit, SessionState, Source, StopReason, Tokens,
 };
 use serde_json::Value;
 use std::{
@@ -355,6 +355,7 @@ fn usage(id: &str, thread: &Thread, total: &Value) -> Normalized {
     let (cache_read, cache_write) = (count("cachedInputTokens"), count("cacheWriteInputTokens"));
     Normalized::UsageTotal {
         counter: id.to_owned(),
+        owner: Owner::Session,
         provider: thread.provider.clone().unwrap_or_default(),
         model: thread.model.clone().unwrap_or_default(),
         service_tier: thread.tier.clone(),

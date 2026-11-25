@@ -8,7 +8,7 @@ use common::{
     issues::{FIX, next_ready, slow_turn},
     last, world,
 };
-use loop_manager_core::driver::{Normalized, Tokens};
+use loop_manager_core::driver::{Normalized, Owner, Tokens};
 use loop_manager_core::run::{Msg, Verdict};
 use loop_manager_testkit::Step;
 use serde_json::{Value, json};
@@ -469,6 +469,7 @@ async fn an_attempt_record_holds_its_model_session_tokens_and_failure_and_its_se
         1,
         Step::Emit(Normalized::UsageTotal {
             counter: "m1".into(),
+            owner: Owner::Session,
             provider: "p".into(),
             model: "m1".into(),
             service_tier: None,

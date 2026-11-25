@@ -5,7 +5,7 @@ use crate::common;
 
 use common::{FILES, POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
-    driver::{Normalized, Tokens},
+    driver::{Normalized, Owner, Tokens},
     run::{Create, Decision, Msg, Reader, SpendDetail},
     usd::Usd,
 };
@@ -23,6 +23,7 @@ fn total_of(provider: &str, model: &str, tier: Option<&str>, tokens: [u64; 4], m
     let [input, cache_read, cache_write_5m, output] = tokens;
     Normalized::UsageTotal {
         counter: model.into(),
+        owner: Owner::Session,
         provider: provider.into(),
         model: model.into(),
         service_tier: tier.map(str::to_owned),
@@ -420,4 +421,52 @@ async fn the_three_levels_of_a_spend_report_agree_on_the_total() {
             .unwrap()
             .is_none()
     );
+}
+
+fn estimate(owner: Owner, input: u64) -> Normalized {
+    Normalized::UsageEstimate {
+        owner,
+        provider: "proxy".into(),
+        model: "m1".into(),
+        tokens: Tokens {
+            input,
+            ..Tokens::default()
+        },
+    }
+}
+
+/// A running total settles the estimates of its session's requests: each agent keeps its tokens and gets a share of
+/// the harness's cost by its estimate's table cost, the part no estimate explains is the total's owner's, here no
+/// one's, and the shares add up to the harness's cost to the pico-USD. An estimate no total settles counts as it is.
+#[tokio::test(start_paused = true)]
+async fn a_total_settles_the_estimates_of_its_agents_and_keeps_the_harness_cost() {
+    let pricing = "[[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\ninput = 1\noutput = 1\n";
+    let config = format!("{}{pricing}", FILES[0].1);
+    let w = world(&[("config.toml", config.as_str())]);
+    let mut steps = hollow_turn();
+    let mut settling = total_of("proxy", "m1", None, [200, 0, 0, 100], Some(1_000));
+    if let Normalized::UsageTotal { owner, .. } = &mut settling {
+        *owner = Owner::Unknown;
+    }
+    let events = [
+        estimate(Owner::Session, 100),
+        estimate(Owner::Subagent("helper".into()), 100),
+        settling,
+        estimate(Owner::Session, 50),
+    ];
+    steps.splice(1..1, events.map(Step::Emit));
+    w.driver.script(steps);
+    let run = w.create().await;
+    w.events(&run, Duration::from_millis(200)).await;
+    let report = spend(&w, &run, SpendDetail::Agent);
+    assert_eq!(report["total"], usage(250, 0, 0, 100, "0.00105"));
+    let mut unattributed = row("", None, usage(0, 0, 0, 100, "0.000333333334"));
+    unattributed["agent"] = Value::Null;
+    let agents = [
+        unattributed,
+        row("helper", None, usage(100, 0, 0, 0, "0.000333333333")),
+        // The settled share and the estimate of 50 input tokens at 1 USD per 1M.
+        row("shop.dev", None, usage(150, 0, 0, 0, "0.000383333333")),
+    ];
+    assert_eq!(report["rows"], json!(agents));
 }

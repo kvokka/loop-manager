@@ -139,15 +139,10 @@ impl RunHandler {
         if owners.is_empty() && live.len() == 1 {
             owners = live.iter().filter(|(_, _, s)| s.is_none()).collect();
         }
-        if let Normalized::UsageTotal {
-            counter,
-            provider,
-            model,
-            service_tier,
-            tokens,
-            cost,
-        } = &event.event
-        {
+        if matches!(
+            event.event,
+            Normalized::UsageTotal { .. } | Normalized::UsageEstimate { .. }
+        ) {
             // Charged even when its attempt or run has ended: late usage belongs in the final accounts
             // (docs/design/formula-budgets.md). The newest attempt of the session on the instance owns it.
             let owner = match owners.first() {
@@ -163,20 +158,7 @@ impl RunHandler {
                     .optional()?,
             };
             if let Some((run, attempt)) = owner {
-                // shortcut: a total reported before the attempt knows its session is checkpointed under the attempt,
-                // and the next one under the session would be charged whole; both adapters report usage only after
-                // their session is open. Upgrade when a harness reports usage before it.
-                let key = session.clone().unwrap_or_else(|| format!("{run}/{attempt}"));
-                let total = super::spend::Total {
-                    session: &key,
-                    counter,
-                    provider,
-                    model,
-                    service_tier: service_tier.as_deref(),
-                    tokens,
-                    cost: *cost,
-                };
-                super::spend::charge(tx, &self.config.pricing, &run, attempt, &total)?;
+                self.usage(tx, &run, attempt, session.as_deref(), &event.event)?;
                 self.enforce_budget(tx, &run)?;
             }
         }
@@ -184,6 +166,52 @@ impl RunHandler {
             self.attempt_event(tx, run, *attempt, event.event.clone())?;
         }
         Ok(())
+    }
+
+    /// Charges a usage event of the session `session` to attempt `(run, attempt)`.
+    fn usage(
+        &self,
+        tx: &Tx<'_>,
+        run: &str,
+        attempt: u32,
+        session: Option<&str>,
+        event: &Normalized,
+    ) -> Result<(), Error> {
+        let pricing = &self.config.pricing;
+        match event {
+            Normalized::UsageEstimate {
+                owner,
+                provider,
+                model,
+                tokens,
+            } => super::spend::estimate(tx, pricing, (run, attempt), owner, (provider, model), tokens),
+            Normalized::UsageTotal {
+                counter,
+                owner,
+                provider,
+                model,
+                service_tier,
+                tokens,
+                cost,
+            } => {
+                // shortcut: a total reported before the attempt knows its session is checkpointed under the attempt,
+                // and the next one under the session would be charged whole; both adapters report usage only after
+                // their session is open. Upgrade when a harness reports usage before it.
+                let key = session.map_or_else(|| format!("{run}/{attempt}"), str::to_owned);
+                let total = super::spend::Total {
+                    session: &key,
+                    counter,
+                    owner,
+                    provider,
+                    model,
+                    service_tier: service_tier.as_deref(),
+                    tokens,
+                    cost: *cost,
+                };
+                super::spend::charge(tx, pricing, run, attempt, &total)
+            }
+            _ => Ok(()),
+        }
     }
 
     fn attempt_event(&mut self, tx: &mut Tx<'_>, run: &str, attempt: u32, event: Normalized) -> Result<(), Error> {

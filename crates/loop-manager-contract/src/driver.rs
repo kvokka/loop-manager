@@ -206,6 +206,17 @@ pub struct Tokens {
     pub output: u64,
 }
 
+/// Whose requests a usage event counts (contracts 4.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Owner {
+    /// The session's own agent: the agent of its step.
+    Session,
+    /// A subagent of the harness, by the name the harness gives its type.
+    Subagent(String),
+    /// Several agents of the session together, none named: the unattributed part.
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RateLimit {
     pub utilization: f64,
@@ -229,11 +240,21 @@ pub enum Normalized {
     },
     /// The limit of the session's account, as the harness last told it.
     RateLimit(RateLimit),
+    /// The tokens of one request a later `UsageTotal` of the same session and model includes: the core charges them
+    /// at the table price until that total settles them (contracts 4.3).
+    UsageEstimate {
+        owner: Owner,
+        provider: String,
+        model: String,
+        tokens: Tokens,
+    },
     /// The running total of one usage counter of the session, as the harness keeps it (contracts 4.3): the core
     /// charges the increment over the total it recorded last for the same session and counter.
     UsageTotal {
         /// Which counter of the session: one per model, or one per thread of a harness with threads.
         counter: String,
+        /// Whose the part of the increment is that no estimate of the session explains.
+        owner: Owner,
         /// The provider the requests went to, as the harness tells it.
         provider: String,
         model: String,

@@ -404,6 +404,7 @@ async fn a_thread_tells_its_running_total_with_the_cache_across_a_resume() {
                 service_tier,
                 tokens,
                 cost,
+                ..
             } => Some((
                 counter.clone(),
                 provider.clone(),

@@ -1,6 +1,6 @@
 use super::*;
 use crate::rpc;
-use loop_manager_contract::driver::{RateLimit, Tokens};
+use loop_manager_contract::driver::{Owner, RateLimit, Tokens};
 use serde_json::json;
 
 mod classify;
@@ -66,6 +66,7 @@ fn a_turn_runs_a_command_and_ends_only_on_turn_completed() {
             Normalized::Activity { tool_running: false },
             Normalized::UsageTotal {
                 counter: "t".into(),
+                owner: Owner::Session,
                 provider: "fake".into(),
                 model: "gpt-fake".into(),
                 service_tier: None,
@@ -104,6 +105,7 @@ fn a_thread_tells_its_running_total_without_the_cache_in_the_input_and_again_on_
         )
     };
     let told = |input, cache_read, cache_write_5m, output| Normalized::UsageTotal {
+        owner: Owner::Session,
         counter: "t".into(),
         provider: "openai".into(),
         model: "gpt-fake".into(),
