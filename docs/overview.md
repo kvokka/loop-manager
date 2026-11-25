@@ -48,7 +48,7 @@ The release workflow runs the packaged CLI on each platform. The full checks run
 | **finisher** | the call by which an agent reports the outcome of its step |
 | **trigger** | a rule "an event or a schedule → start a formula" |
 | **correlation** | the id of a chain of runs that started one another |
-| **pack** | content fit for any project: agents, formulas, triggers |
+| **pack** | content fit for any project: agents, formulas, triggers and the executables its formulas run |
 | **addon** | an extension, a directory with `addon.toml`: what attaches to agents (skills, hooks, MCP, scripts, env), hooks on orchestrator events, services. Declared once, attached per agent or for all, with parameters ([guide](guide/addons.md)) |
 | **service** | a long-lived process the orchestrator supervises (a shared MCP server, for one) |
 | **issue gate** | a record "start no run by this key until a time, or until opened by hand" |

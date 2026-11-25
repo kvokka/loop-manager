@@ -221,6 +221,9 @@ pub struct Rig {
 pub struct Pack {
     pub name: String,
     pub root: PathBuf,
+    /// Its `bin/` directory, when it has one: ahead of `PATH` for the exec steps and check scripts of its formulas.
+    /// `None` for the project root pack.
+    pub bin: Option<PathBuf>,
     /// `None` for the project root pack.
     pub version: Option<String>,
     pub requires_addons: Vec<String>,

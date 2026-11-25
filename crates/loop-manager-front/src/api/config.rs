@@ -8,7 +8,7 @@ use super::{
 };
 use axum::{Json, extract::Query, http::HeaderMap, http::StatusCode};
 use loop_manager_core::{
-    config::{Config, Name, OnItemFailure, Project, Rig, StepKind},
+    config::{Config, Name, OnItemFailure, Project, Rig, Step, StepKind},
     run::Msg,
 };
 use serde::Deserialize;
@@ -234,7 +234,7 @@ fn explain_formula(config: &Config, project: &str, formula: &str, rig: Option<&s
     let p = (config.projects.iter()).find(|p| p.name == project);
     let p = p.ok_or_else(|| format!("no project `{project}`"))?;
     let rig = rig.unwrap_or(&p.root.0);
-    let (_, f) = p.formula(formula)?;
+    let (name, f) = p.formula(formula)?;
     let (mut text, mut steps, mut host) = (String::new(), Vec::new(), false);
     text += &format!("rounds = {}  # {}\n", f.rounds.value, f.rounds.from);
     if let Some(n) = p.rigs.get(rig).and_then(|r| r.max_writers) {
@@ -242,6 +242,15 @@ fn explain_formula(config: &Config, project: &str, formula: &str, rig: Option<&s
     }
     for (input, given) in &f.defaults {
         text += &format!("inputs.{input} = {}  # {}\n", given.value, given.from);
+    }
+    let commands = |s: &Step| s.check.is_some() || matches!(s.kind, StepKind::Exec { .. });
+    let bin = (p.packs.iter().find(|pack| pack.name == name.pack)).and_then(|pack| pack.bin.as_ref());
+    if let Some(bin) = bin.filter(|_| f.steps.iter().any(commands)) {
+        let bin = bin.display();
+        text += &format!(
+            "# `PATH` of the exec steps and check scripts starts with {bin}  # pack {}\n",
+            name.pack
+        );
     }
     for step in &f.steps {
         let name = &step.name;

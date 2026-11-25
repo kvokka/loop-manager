@@ -250,7 +250,8 @@ daemon holds; with `--config <file>`, on that file with no daemon). The pack, fo
 a run, so they show with `--formula <f> --rig <r>` in place of `--agent`. The formula's `rounds` comes first with its
 layer (`rounds = 2  # project`; `formula <f>` when the formula sets it, `default` when no layer does), then
 `max_writers` of the rig when it sets one (`max_writers = 1  # rig`), then one line per input value the config gives
-(`inputs.focus = "security"  # orchestrator`), then the steps one by one: for an ai step a header
+(`inputs.focus = "security"  # orchestrator`), then, for a formula with an exec step or a check script whose pack has
+`bin/`, ``# `PATH` of the exec steps and check scripts starts with <dir>  # pack <pack>``, then the steps one by one: for an ai step a header
 ``# step `<s>` of `<f>` on `<r>`: agent <a>`` (the rig's variant if it maps one) and its effective config, for an exec
 step one line ``# step `<s>` of `<f>`: exec `<command>` ``, for a drain step
 ``# step `<s>` of `<f>`: drain, a run of `<formula>` per bead, <pool> at a time`` (with ``; on a failed bead:
@@ -577,11 +578,18 @@ inputs = { bead = { next_ready = true, epic = "{{ event.bead.epic }}" } }
 ```
 
 Content: `agents/<agent>/agent.toml` (plus `prompt.md`, `prompt.template.md` and any other files of the agent, see
-"Agent") and
-`formulas/**/*.toml`: every `.toml` file under `formulas/`, in subdirectories too, is a formula. A pack
-is the unit of content: agents, formulas and triggers. It may require addons but never contains one; an addon is
+"Agent"),
+`formulas/**/*.toml`: every `.toml` file under `formulas/`, in subdirectories too, is a formula; and `bin/`, the
+executables its formulas run. A pack
+is the unit of content: agents, formulas, triggers and those executables. It may require addons but never contains one; an addon is
 declared by the orchestrator or the project. A pack holds no word of a user's task: what to do comes only from the
 inputs of a run.
+
+A pack's `bin/` directory, when it has one, goes ahead of `PATH` in the environment of every `exec` step and every
+check script of the pack's formulas (see "Formula"), so a formula writes `command = ["epic-gate"]` wherever the pack
+lies, a directory or the git cache. Nothing else names the pack to a command: a script finds the files beside it by its
+own `$0`. An agent's session gets no such `PATH`. The project root, a pack too, has no `bin/` of this kind: its scripts
+are reached by a path from the run's workdir, and a `bin/` of the repository shadows no command.
 
 Formulas belong to a project. One daemon serves many projects, and a project sees only the formulas of its own packs
 (its root included); two projects that use one pack each have their own formulas, and neither affects the other. A
@@ -775,7 +783,9 @@ step's, else the project's `[exec]`, else the orchestrator's; default false); th
 ([tracker-br](tracker-br.md#one-database-per-project)); the `env` of the orchestrator's `[exec]`, the project's `[exec]`
 and the step, merged by key (see "Environment values"), and over it the `env` of `run.preparing` hooks; then the
 variables of loop-manager: the tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and
-`LOOP_MANAGER_STEP_*` below), so an `env` key cannot replace them. A rig has no `[exec]`.
+`LOOP_MANAGER_STEP_*` below), so an `env` key cannot replace them. A rig has no `[exec]`. The `bin/` of the pack of the
+run's formula (see "Pack"; of a run a `drain` or `formula` step started, its own formula's pack) then goes ahead of the
+`PATH` that came out, the daemon's or the one an `env` gave.
 
 A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read of
 the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root owns
@@ -895,7 +905,8 @@ as `infrastructure`. The script runs after the step has run on its own and its h
 and the script is not started. It gets the environment of an `exec` step — its own step's, when that is an `exec` step,
 else the one of the orchestrator's and the project's `[exec]`, without the `env` of `run.preparing` hooks, which goes to
 the agent's session; never the agent's `env` — plus `LOOP_MANAGER_STEP_<NAME>_RESULT`, `_SUMMARY` and `_DATA` of its own
-step, in the run's workdir under the step timeout. A reference to a variable the daemon does not have keeps the script
+step, with the `bin/` of the formula's pack ahead of `PATH` as for an `exec` step, in the run's workdir under the step
+timeout. A reference to a variable the daemon does not have keeps the script
 from starting and fails the run at once with reason `config_error: …` (see "Environment values"). A repeat of an `ai`
 step starts a new session and gets the script's output as a remark: through `{{ remarks }}`, or appended to the prompt
 when the template has none. A repeat of a `drain` step is a new entry. The count is within a round: a round back to the

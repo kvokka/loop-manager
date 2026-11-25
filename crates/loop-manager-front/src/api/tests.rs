@@ -184,3 +184,40 @@ async fn beads_are_filed_listed_and_closed_through_the_tracker_of_their_project(
     assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
     assert_eq!(shut("b-none").await.map_err(code), Err(404));
 }
+
+/// `explain --formula` of a formula of a pack with `bin/` says what its commands' `PATH` starts with
+/// (docs/design/config.md).
+#[test]
+fn a_formula_of_a_pack_with_bin_is_explained_with_its_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let flow = "name = \"flow\"\n[[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"gate\"]\n";
+    let files = [
+        ("config.toml", "projects = [\"shop\"]\n"),
+        ("shop/loop-manager.toml", "packs = [\"../kit\"]\n"),
+        ("shop/bin/gate", ""),
+        ("shop/formulas/flow.toml", flow),
+        ("kit/pack.toml", "name = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("kit/bin/gate", ""),
+        ("kit/formulas/flow.toml", flow),
+    ];
+    for (path, text) in files {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let config = loop_manager_core::config::load(&dir.path().join("config.toml")).unwrap();
+    let text = |formula: &str| {
+        let of = super::config::Explain::Formula(formula.into());
+        super::config::explained(&config, "shop", &of, None).unwrap()["text"].clone()
+    };
+    let line = format!(
+        "# `PATH` of the exec steps and check scripts starts with {}  # pack kit\n",
+        dir.path().join("kit/bin").display()
+    );
+    assert!(
+        text("kit.flow").as_str().unwrap().contains(&line),
+        "{}",
+        text("kit.flow")
+    );
+    assert!(!text("flow").as_str().unwrap().contains("`PATH`"), "the root has none");
+}

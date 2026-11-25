@@ -90,7 +90,8 @@ impl RunHandler {
         };
         let payload = json!({
             "op": "exec", "run": row.id, "attempt": row.attempt, "command": command, "check": check,
-            "cwd": row.workdir, "env": env, "inherit_env": exec["inherit_env"] == true, "context": context,
+            "cwd": row.workdir, "env": env, "inherit_env": exec["inherit_env"] == true, "bin": exec["bin"],
+            "context": context,
             "timeout_ms": timeout_ms, "marker": format!("x-{}", &token[..16]),
         });
         // Its own key: a `stop_exec` on the run's key must not queue behind the running command.
@@ -198,6 +199,15 @@ pub(super) async fn run(running: &Running, payload: &Value, socket: Option<&Path
         match crate::config::env_value(&value, |n| std::env::var(n).ok()) {
             Ok(value) => env.push((name, value)),
             Err(e) => return refused(payload, format!("env `{name}`: {e}")),
+        }
+    }
+    // The `bin/` of the formula's pack goes ahead of whatever `PATH` came out of the above.
+    if let Some(bin) = payload["bin"].as_str() {
+        let path = env.iter().rev().find(|(name, _)| name == "PATH");
+        let dirs = std::iter::once(bin.into()).chain(path.iter().flat_map(|(_, p)| std::env::split_paths(p)));
+        match std::env::join_paths(dirs) {
+            Ok(path) => env.push(("PATH".to_owned(), path.to_string_lossy().into_owned())),
+            Err(e) => return refused(payload, format!("the pack's `{bin}` in `PATH`: {e}")),
         }
     }
     let context: Vec<(String, String)> = serde_json::from_value(payload["context"].clone()).unwrap_or_default();

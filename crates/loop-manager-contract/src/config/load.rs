@@ -353,6 +353,7 @@ impl Loader {
         let root = root.to_owned();
         Pack {
             name,
+            bin: (!project).then(|| root.join("bin")).filter(|b| b.is_dir()),
             root,
             version: None,
             requires_addons: Vec::new(),
