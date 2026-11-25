@@ -6,12 +6,12 @@ use crate::common;
 use common::{FILES, POLICY, World, hollow_turn, last, world};
 use loop_manager_core::{
     driver::{Normalized, Tokens},
-    run::{Decision, Reader},
+    run::{Create, Decision, Msg, Reader},
     usd::Usd,
 };
 use loop_manager_testkit::Step;
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 /// A running total of counter `m1` (input, cache read, cache write 5m, output) with a harness cost in micro-USD.
 fn total(tokens: [u64; 4], micro_usd: Option<i64>) -> Normalized {
@@ -170,4 +170,125 @@ async fn a_total_on_a_service_tier_is_priced_by_the_entry_of_its_tier_else_by_th
     w.events(&run, Duration::from_millis(200)).await;
     // m1 on its tier: (1000 * 4 + 100 * 20) / 1M USD; m2, with no entry of the tier: (1000 * 1 + 100 * 5) / 1M USD.
     assert_eq!(view(&w, &run)["usage"], usage(2000, 0, 0, 200, "0.0075"));
+}
+
+const NOTE: (&str, &str) = (
+    "shop/formulas/note.toml",
+    "name = \"note\"\n[[step]]\nkind = \"ai\"\nagent = \"dev\"\n",
+);
+
+/// A `build` run follows every failed `note` run: a run a trigger starts on an event of another run.
+const AFTER_NOTE: (&str, &str) = (
+    "shop/loop-manager.toml",
+    "[rigs.web]\npath = \"web\"\n[[trigger]]\nname = \"after-note\"\non = \"run.failed\"\n\
+     where = { \"run.formula\" = \"shop.note\" }\nrun = \"build\"\nrig = \"web\"\n",
+);
+
+/// A turn that reports `spent` and ends after `wait`.
+fn spending(spent: Normalized, wait: Duration) -> Vec<Step> {
+    let mut steps = hollow_turn();
+    steps.splice(1..1, [Step::Emit(spent), Step::Wait(wait)]);
+    steps
+}
+
+/// A run spends with its subtree, the runs its sessions start; a run a trigger starts on an event of one of them is
+/// an invocation of its own and counts in neither.
+#[tokio::test(start_paused = true)]
+async fn a_runs_usage_includes_its_childs_and_not_a_triggered_runs() {
+    let w = world(&[NOTE, AFTER_NOTE]);
+    w.driver.script(spending(
+        total([100, 0, 0, 10], Some(1_000_000)),
+        Duration::from_secs(60),
+    ));
+    let parent = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let token = w.driver.token(&parent, 1).unwrap();
+    w.driver
+        .script(spending(total([20, 0, 0, 2], Some(200_000)), Duration::ZERO));
+    w.driver
+        .script(spending(total([5, 0, 0, 1], Some(50_000)), Duration::ZERO));
+    let child = Create {
+        project: "shop".into(),
+        rig: Some("web".into()),
+        formula: "note".into(),
+        inputs: serde_json::Map::new(),
+        correlation: None,
+        depth: 0,
+        parent_run: Some(parent.clone()),
+        token: Some(token),
+        continue_from: None,
+    };
+    let reply = w.core.send(None, Msg::Create(child)).await.unwrap();
+    let child = reply["run"].as_str().unwrap().to_owned();
+    let child_events = w.events(&child, Duration::from_secs(5)).await;
+    assert_eq!(last(&child_events, "run.failed")["usage"], usage(20, 0, 0, 2, "0.2"));
+    let fired = w.until(None, "trigger.fired", 0).await;
+    let triggered = fired["new_run"].as_str().unwrap().to_owned();
+    w.events(&triggered, Duration::from_secs(5)).await;
+    assert_eq!(view(&w, &triggered)["usage"], usage(5, 0, 0, 1, "0.05"));
+    assert_eq!(view(&w, &triggered)["parent_run"], json!(child));
+    let events = w.events(&parent, Duration::from_secs(60)).await;
+    let both = usage(120, 0, 0, 12, "1.2");
+    assert_eq!(last(&events, "run.failed")["usage"], both);
+    assert_eq!(view(&w, &parent)["usage"], both);
+    assert_eq!(view(&w, &child)["usage"], usage(20, 0, 0, 2, "0.2"));
+}
+
+/// The `price` of each ledger row of `run`, by the model of the row, in the order they were first charged.
+fn prices(w: &World, run: &str) -> Vec<(String, Value, String)> {
+    let db = rusqlite::Connection::open(w.dir.path().join("state.db")).unwrap();
+    let mut stmt = db
+        .prepare("SELECT model, price, cost FROM spend WHERE run = ?1 ORDER BY rowid")
+        .unwrap();
+    let rows = stmt.query_map([run], |r| {
+        let price: String = r.get(1)?;
+        Ok((
+            r.get(0)?,
+            serde_json::from_str(&price).unwrap(),
+            Usd(r.get(2)?).to_string(),
+        ))
+    });
+    rows.unwrap().map(Result::unwrap).collect()
+}
+
+/// Each charge keeps the price it was made at: a reload of the user's rates prices only the charges after it, and a
+/// catalog price names the catalog's date.
+#[tokio::test(start_paused = true)]
+async fn each_charge_keeps_the_price_it_was_made_at_across_a_reload() {
+    let entry = |input: u32| {
+        format!(
+            "{}[[pricing]]\nprovider = \"proxy\"\nmodel = \"m1\"\ninput = {input}\noutput = 10\n",
+            FILES[0].1
+        )
+    };
+    let w = world(&[("config.toml", entry(2).as_str())]);
+    let mut steps = hollow_turn();
+    let mid = [
+        Step::Emit(total_of("proxy", "m1", None, [1000, 0, 0, 0], None)),
+        Step::Emit(total_of("anthropic", "claude-haiku-4-5", None, [1000, 0, 0, 100], None)),
+        Step::Wait(Duration::from_secs(60)),
+        Step::Emit(total_of("proxy", "m1", None, [3000, 0, 0, 0], None)),
+    ];
+    steps.splice(1..1, mid);
+    w.driver.script(steps);
+    let run = w.create().await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let path = w.dir.path().join("config.toml");
+    std::fs::write(&path, entry(3)).unwrap();
+    let config = Arc::new(loop_manager_core::config::load(&path).unwrap());
+    w.core.send(None, Msg::Reload(config)).await.unwrap();
+    w.events(&run, Duration::from_secs(61)).await;
+    let rates = |input: &str| {
+        json!({ "source": "user", "input": input, "cache_read": input,
+        "cache_write": input, "cache_write_1h": input, "output": "10" })
+    };
+    let catalog = json!({ "source": "catalog", "date": "2026-11-25", "input": "1", "cache_read": "0.1",
+        "cache_write": "1.25", "cache_write_1h": "2", "output": "5" });
+    // m1: 1000 * 2 / 1M USD before the reload, 2000 * 3 / 1M after; haiku: (1000 * 1 + 100 * 5) / 1M.
+    let expected = [
+        ("m1".to_owned(), rates("2"), "0.002".to_owned()),
+        ("claude-haiku-4-5".to_owned(), catalog, "0.0015".to_owned()),
+        ("m1".to_owned(), rates("3"), "0.006".to_owned()),
+    ];
+    assert_eq!(prices(&w, &run), expected);
 }
