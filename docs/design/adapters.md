@@ -149,7 +149,8 @@ Made for the two harnesses there are; none is changed before a harness needs it.
 Everything known of one tracker — its calls, where a project keeps it, the environment its tools need in a session, the
 files its own tools read, its `doctor` checks — lives in its adapter crate; the rest of the build names none of it.
 `scripts/core-boundary.sh` checks this for br ([tracker-br](tracker-br.md)): outside `crates/loop-manager-br`, its tests
-and the test crates, no Rust code names br, bv, `.beads`, `BEADS_DIR` or a `BR_`/`BD_` variable.
+and the test crates, no Rust code names br, bv, beads_rust, beads_viewer, `.beads`, `beads.db` or a `BR_`/`BD_`/`BEADS_`
+variable.
 
 1. A crate `crates/loop-manager-<name>` that depends on `loop-manager-contract` and implements `Tracker`.
 2. In it, one exported description of itself:

@@ -33,8 +33,8 @@ These are checked by the build, not kept by agreement.
 - So is a tracker. Everything of br ([tracker-br](design/tracker-br.md)) — where a project keeps it, its session
   environment, its `doctor` checks, the bv workspace file — lives in `loop-manager-br`; the root holds the one table of
   tracker adapters (`crates/loop-manager/src/tracker.rs`), and `scripts/core-boundary.sh` checks that no other Rust code
-  outside tests names br, bv, `.beads`, `BEADS_DIR` or a `BR_`/`BD_` variable. Adding a tracker is adding a crate and
-  its row ([adapters](design/adapters.md#adding-a-tracker)).
+  outside tests names br, bv, beads_rust, beads_viewer, `.beads`, `beads.db` or a `BR_`/`BD_`/`BEADS_` variable. Adding
+  a tracker is adding a crate and its row ([adapters](design/adapters.md#adding-a-tracker)).
 - Adapters and frontends only translate protocols.
 - Policy (retry, park, refuse) lives in addons and config, judgement ("is the work done well") in prompts and the
   checks of addons; the core keeps only mechanisms

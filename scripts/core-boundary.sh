@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Decision 43: the core knows no harness and no tracker by name; what it needs comes through the driver
 # capabilities and the tracker interface, in any letter case. And every br detail lives in its adapter crate: outside
-# `loop-manager-br` no Rust code names br, bv, `.beads`, `BEADS_DIR` or a BR_/BD_ variable, and only the tracker table
+# `loop-manager-br` no Rust code names br, bv, beads_rust, beads_viewer, `.beads`, `beads.db` or a BR_/BD_/BEADS_
+# variable (a bead itself is the product's term, decision 161), and only the tracker table
 # of the root (`crates/loop-manager/src/tracker.rs`) names the crate. Both check code outside its tests: `tests/` of a
 # crate, `src/tests/`, every `tests.rs` and `*_tests.rs` (the tests of a module, in a file of their own) and the
 # top-level item under a `#[cfg(test)]` or `#[test]` (up to its closing `}` at column 0 when it opens a block).
@@ -36,8 +37,12 @@ fi
 # of a test; the acceptance scenarios set br up on purpose.
 others=$(find crates -mindepth 1 -maxdepth 1 -type d -not -name loop-manager-br -not -name loop-manager-testkit -not -name loop-manager-acceptance | sort)
 # shellcheck disable=SC2086 # one crate directory per word
-found=$(code $others |
-  grep -iE '\b(br|bv|beads_dir)\b|\.beads\b|\b(br|bd)_[a-z]|loop_manager_br' |
+lines=$(code $others)
+# `BEADS_` is matched in capitals only: `beads_are_filed` is a name of the product.
+found=$({
+  grep -iE '\b(br|bv|beads_rust|beads_viewer)\b|\.beads\b|beads\.db|\b(br|bd)_[a-z]|loop_manager_br' <<<"$lines"
+  grep -E '\bBEADS_[A-Z]' <<<"$lines"
+} | sort -u |
   grep -vE '^crates/loop-manager/src/tracker\.rs:[0-9]+: .*&loop_manager_br::ADAPTER\]' || true)
 if [[ -n $found ]]; then
   echo "br outside its adapter crate loop-manager-br:"
