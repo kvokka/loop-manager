@@ -94,6 +94,7 @@ impl Codex {
             next: AtomicU64::new(1),
             pending: Mutex::default(),
             acks: Mutex::default(),
+            reads: Mutex::default(),
             stream: Mutex::new(Stream::new(Some(part::account(p)))),
             turns: Mutex::default(),
             live: Mutex::default(),

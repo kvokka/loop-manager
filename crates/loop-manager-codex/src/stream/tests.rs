@@ -161,6 +161,84 @@ fn a_thread_tells_its_usage_on_its_service_tier() {
     assert_eq!(tiers, [Some("priority"), Some("priority")]);
 }
 
+/// The usage of a child thread of a subagent (codex 0.171): no `thread/started` tells the child, its own
+/// `thread/tokenUsage/updated` comes on the connection under its thread id, and `thread/read` tells its
+/// `parentThreadId`, `agentRole`, `model` and `modelProvider`. Its usage is held until the chain to the root is told,
+/// then charged to the root's session under the child's own counter; a grandchild with no role is an unknown owner on
+/// the root's model; a thread `thread/read` failed for keeps its own usage.
+#[test]
+fn a_child_thread_charges_its_usage_to_the_root_of_its_chain_under_its_role() {
+    let mut stream = Stream::new(None);
+    stream.bind(
+        "t",
+        Some("gpt-fake".into()),
+        Some("fake".into()),
+        Some("priority".into()),
+    );
+    let usage = |thread: &str, output: u64| {
+        let total = json!({ "inputTokens": 10, "outputTokens": output });
+        note(
+            "thread/tokenUsage/updated",
+            json!({ "threadId": thread, "tokenUsage": { "last": total, "total": total } }),
+        )
+    };
+    let charged = |root: &str, counter: &str, owner: Owner, model: &str, output: u64| {
+        let event = Normalized::UsageTotal {
+            counter: counter.into(),
+            owner,
+            provider: "fake".into(),
+            model: model.into(),
+            service_tier: Some("priority".into()),
+            tokens: Tokens {
+                input: 10,
+                output,
+                ..Tokens::default()
+            },
+            cost: None,
+        };
+        vec![(Some(root.to_owned()), event)]
+    };
+    assert!(!stream.ask("t") && stream.ask("c") && !stream.ask("c") && stream.ask("g"));
+    let now = Instant::now();
+    let status = note(
+        "thread/status/changed",
+        json!({ "threadId": "c", "status": { "type": "idle" } }),
+    );
+    assert_eq!(
+        stream.message(&status, now),
+        [(
+            Some("c".to_owned()),
+            Normalized::State {
+                state: SessionState::Idle,
+                background: false,
+            }
+        )]
+    );
+    assert!(
+        stream.message(&usage("c", 3), now).is_empty(),
+        "held until the parent is told"
+    );
+    assert!(stream.message(&usage("g", 4), now).is_empty());
+    let child = json!({ "parentThreadId": "t", "agentRole": "kit.qa", "model": "gpt-role", "modelProvider": "fake" });
+    let role = || Owner::Subagent("kit.qa".into());
+    let mut told = stream.told("c", Some(&child));
+    assert_eq!(told, charged("t", "c", role(), "gpt-role", 3));
+    assert!(stream.told("c", Some(&child)).is_empty(), "told once");
+    told = stream.told("g", Some(&json!({ "parentThreadId": "c", "agentRole": null })));
+    assert_eq!(told, charged("t", "g", Owner::Unknown, "gpt-fake", 4));
+    assert_eq!(
+        stream.message(&usage("c", 5), now),
+        charged("t", "c", role(), "gpt-role", 5)
+    );
+    assert!(stream.ask("x") && stream.told("x", None).is_empty());
+    let own = stream.message(&usage("x", 6), now);
+    assert!(
+        matches!(&own[..], [(Some(x), Normalized::UsageTotal { owner: Owner::Session, counter, .. })]
+            if x == "x" && counter == "x"),
+        "{own:?}"
+    );
+}
+
 #[test]
 fn a_usage_limit_is_a_quota_with_the_reset_of_the_exhausted_window() {
     let mut stream = Stream::new(Some("acct".into()));

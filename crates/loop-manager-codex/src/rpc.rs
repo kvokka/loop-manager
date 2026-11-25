@@ -37,6 +37,8 @@ pub(crate) struct Instance {
     pub(crate) pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
     /// The `turn/start` requests in flight: their answer acknowledges the prompt of the thread.
     pub(crate) acks: Mutex<HashMap<u64, (String, PromptKey)>>,
+    /// The `thread/read` requests in flight for threads codex spawned (child threads of subagents), by request id.
+    pub(crate) reads: Mutex<HashMap<u64, String>>,
     pub(crate) stream: Mutex<Stream>,
     /// The turn in flight of each thread, for `turn/interrupt`.
     pub(crate) turns: Mutex<HashMap<String, String>>,
@@ -146,6 +148,14 @@ pub(crate) async fn read(
                 Some(error) => Err(error.clone()),
                 None => Ok(msg["result"].clone()),
             };
+            if let Some(thread) = lock(&instance.reads).remove(&id) {
+                let read = reply.as_ref().ok().map(|r| &r["thread"]);
+                let events = lock(&instance.stream).told(&thread, read);
+                for (thread, event) in events {
+                    send(thread, event);
+                }
+                continue;
+            }
             if let (Some((thread, key)), Ok(result)) = (lock(&instance.acks).remove(&id), &reply) {
                 let turn = result["turn"]["id"].as_str().unwrap_or_default().to_owned();
                 lock(&instance.turns).insert(thread.clone(), turn);
@@ -167,6 +177,14 @@ pub(crate) async fn read(
             continue;
         };
         let thread = msg["params"]["threadId"].as_str().unwrap_or_default();
+        // A thread we did not start or resume is a child codex spawned: `thread/read` tells its parent and role. The
+        // reader only writes the request, its answer comes as a later line.
+        if lock(&instance.stream).ask(thread) {
+            let id = instance.next.fetch_add(1, Ordering::Relaxed);
+            lock(&instance.reads).insert(id, thread.to_owned());
+            let read = json!({ "id": id, "method": "thread/read", "params": { "threadId": thread } });
+            let _ = instance.write(&read).await;
+        }
         if let Some(live) = lock(&instance.live).get(thread) {
             let _ = live.messages.send(msg.clone());
         }

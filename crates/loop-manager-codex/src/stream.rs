@@ -26,9 +26,29 @@ const RAW_MAX: usize = 4096;
 /// The normalized events of one message, each with the thread it belongs to (`None`: instance-wide).
 pub(crate) type Events = Vec<(Option<String>, Normalized)>;
 
+/// Where a thread comes from.
+#[derive(Default)]
+enum Origin {
+    /// Not known yet: a thread neither started nor resumed by us is one codex spawned (a child thread of a subagent).
+    #[default]
+    Unknown,
+    /// Started or resumed by us.
+    Ours,
+    /// A child thread whose `thread/read` is in flight.
+    Asked,
+    /// A child thread as `thread/read` told it: the thread that spawned it and the role it runs, when told.
+    Child {
+        parent: Option<String>,
+        role: Option<String>,
+    },
+}
+
 /// What is known of one thread between messages.
 #[derive(Default)]
 struct Thread {
+    origin: Origin,
+    /// The last usage total of a child thread told before the thread of its chain of parents is known.
+    total: Option<Value>,
     model: Option<String>,
     /// `modelProvider` of the thread's start or resume: the provider its usage names.
     provider: Option<String>,
@@ -71,9 +91,59 @@ impl Stream {
     /// three.
     pub(crate) fn bind(&mut self, thread: &str, model: Option<String>, provider: Option<String>, tier: Option<String>) {
         let known = self.threads.entry(thread.to_owned()).or_default();
+        known.origin = Origin::Ours;
         known.model = model;
         known.provider = provider;
         known.tier = tier;
+    }
+
+    /// A message of `thread` is seen: true at the first message of a thread neither started nor resumed by us, which
+    /// the caller asks about with `thread/read` and tells by `told`.
+    pub(crate) fn ask(&mut self, thread: &str) -> bool {
+        if thread.is_empty() {
+            return false;
+        }
+        let known = self.threads.entry(thread.to_owned()).or_default();
+        let unknown = matches!(known.origin, Origin::Unknown);
+        if unknown {
+            known.origin = Origin::Asked;
+        }
+        unknown
+    }
+
+    /// The answer of `thread/read` for an asked thread (`None`: an error answer): its parent, role, model and
+    /// provider. The usage totals of child threads held for it are told now.
+    pub(crate) fn told(&mut self, thread: &str, read: Option<&Value>) -> Events {
+        let Some(known) = self
+            .threads
+            .get_mut(thread)
+            .filter(|t| matches!(t.origin, Origin::Asked))
+        else {
+            return vec![];
+        };
+        let text = |key: &str| read.and_then(|r| r[key].as_str()).map(str::to_owned);
+        known.origin = Origin::Child {
+            parent: text("parentThreadId"),
+            role: text("agentRole"),
+        };
+        known.model = text("model");
+        known.provider = text("modelProvider");
+        let held: Vec<String> = self
+            .threads
+            .iter()
+            .filter(|(_, t)| t.total.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        held.into_iter()
+            .flat_map(|id| {
+                let total = self
+                    .threads
+                    .get_mut(&id)
+                    .and_then(|t| t.total.take())
+                    .unwrap_or_default();
+                self.usage(&id, total)
+            })
+            .collect()
     }
 
     /// `turn/start` was accepted: the turn is open before its `turn/started` arrives.
@@ -178,7 +248,7 @@ impl Stream {
                 thread.error = Some(params["error"].clone());
                 vec![]
             }
-            "thread/tokenUsage/updated" => vec![usage(&id, thread, &params["tokenUsage"]["total"])],
+            "thread/tokenUsage/updated" => return self.usage(&id, params["tokenUsage"]["total"].clone()),
             "item/started" | "item/completed" => {
                 item_activity(thread, now, &params["item"], method == "item/completed")
             }
@@ -232,6 +302,8 @@ impl Stream {
         });
         // The commands of a turn outlive it (a background command): they stay known to the thread.
         let rest = Thread {
+            origin: thread.origin,
+            total: thread.total,
             model: thread.model,
             provider: thread.provider,
             tier: thread.tier,
@@ -240,6 +312,44 @@ impl Stream {
         };
         self.threads.insert(id.to_owned(), rest);
         out.into_iter().map(|e| (Some(id.to_owned()), e)).collect()
+    }
+
+    /// The running total of thread `id`. A child thread's goes to the root of its chain of parents, the thread we
+    /// started or resumed, under its own counter, the role it runs and its model; it is held while a thread of the
+    /// chain is not told yet. A child whose chain reaches no thread of ours keeps its own.
+    fn usage(&mut self, id: &str, total: Value) -> Events {
+        let (mut at, mut role) = (id, None);
+        let mut root = None;
+        // A chain longer than the known threads is a loop: it has no root.
+        for _ in 0..=self.threads.len() {
+            match self.threads.get(at).map(|t| &t.origin) {
+                Some(Origin::Asked) => {
+                    self.threads.get_mut(id).expect("the thread is known").total = Some(total);
+                    return vec![];
+                }
+                Some(Origin::Child {
+                    parent: Some(parent),
+                    role: told,
+                }) => {
+                    role.get_or_insert_with(|| told.clone());
+                    at = parent;
+                }
+                Some(Origin::Ours) => {
+                    root = Some(at);
+                    break;
+                }
+                _ => break,
+            }
+        }
+        let thread = &self.threads[id];
+        let (Some(root), Some(role)) = (root, role) else {
+            return vec![(Some(id.to_owned()), usage(id, Owner::Session, thread, thread, &total))];
+        };
+        let owner = role.map_or(Owner::Unknown, Owner::Subagent);
+        vec![(
+            Some(root.to_owned()),
+            usage(id, owner, thread, &self.threads[root], &total),
+        )]
     }
 
     /// The kind of a turn's final error by its `codexErrorInfo` (variant and HTTP status); the variants are those of
@@ -347,18 +457,29 @@ fn info(error: &Value) -> (&str, Option<u64>) {
     }
 }
 
-/// The thread's running total, `tokenUsage.total`: a resumed thread tells it again as it was, where `last` would count
-/// the last turn twice. codex counts the cached and the cache-written input inside `inputTokens` and the reasoning
+/// The running total of thread `id`, `tokenUsage.total`, for `owner` of `root`: a resumed thread tells it again as it
+/// was, where `last` would count the last turn twice. The model and provider are the thread's, else the root's; the
+/// tier is the root's. codex counts the cached and the cache-written input inside `inputTokens` and the reasoning
 /// inside `outputTokens`; it prices nothing.
-fn usage(id: &str, thread: &Thread, total: &Value) -> Normalized {
+fn usage(id: &str, owner: Owner, thread: &Thread, root: &Thread, total: &Value) -> Normalized {
     let count = |key: &str| total[key].as_u64().unwrap_or_default();
     let (cache_read, cache_write) = (count("cachedInputTokens"), count("cacheWriteInputTokens"));
     Normalized::UsageTotal {
         counter: id.to_owned(),
-        owner: Owner::Session,
-        provider: thread.provider.clone().unwrap_or_default(),
-        model: thread.model.clone().unwrap_or_default(),
-        service_tier: thread.tier.clone(),
+        owner,
+        provider: thread
+            .provider
+            .as_ref()
+            .or(root.provider.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        model: thread
+            .model
+            .as_ref()
+            .or(root.model.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        service_tier: root.tier.clone(),
         tokens: Tokens {
             input: count("inputTokens")
                 .saturating_sub(cache_read)

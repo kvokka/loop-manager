@@ -537,7 +537,21 @@ threads in one process, roles per thread as in experiment 9, three skills linked
 | Multi-agent v2 (`features.multi_agent_v2 = true` on the thread or as a `-c` flag) | Tools in the namespace `collaboration`; `spawn_agent{task_name, message, agent_type, fork_turns}` returns `{task_name: "/root/<name>"}`. With `fork_turns` unset the child's request is the parent's history, then developer messages: "You are now a newly spawned child agent…", the role's `developer_instructions` alone, the team text, the child's own skill list; with `"none"` it is as in v1. The task is an `agent_message` item whose `encrypted_content` a fake provider gets as plain text. The role's model and effort apply. The child had no `collaboration` tools, with `agents.max_depth = 3` too. `codex features list`: `multi_agent_v2` stable and off by default, `multi_agent` deprecated and on. |
 | Notifications of a child thread | They come on the same connection with the child's thread id (`turn/started`, `item/*`, `turn/completed`, `warning`); the end of a child started no turn of the parent. |
 
-### Subagent definitions and nesting
+### codex usage of child threads
+
+Code: the adapter tests `a_spawn_of_a_target_runs_its_role_and_charges_the_session_in_multi_agent_v1` and `…_v2` in
+`crates/loop-manager-codex/tests/harness/subagents.rs` pin the result; they run on every `mise run ci`. codex 0.171.0
+runs as the adapter starts it, against the fake Responses API of `loop-manager-testkit`; the session spawns one child
+of a role (`kit.qa`) and the raw app-server lines were logged once.
+
+<!-- MEASURE id=codex-child-usage date=2026-11-25 ver=codex-0.171.0 env=linux-arm64-orbstack src=crates/loop-manager-codex/tests/harness/subagents.rs note="fake Responses API, one child per run, multi-agent v1 and v2, n=1 each; a grandchild was not spawned" -->
+
+| Question | Answer on 0.171.0 |
+|---|---|
+| How a child is announced | No `thread/started` for it. The parent's turn shows the spawn as an item: v1 `collabAgentToolCall{tool: "spawnAgent", senderThreadId, receiverThreadIds, model}`, v2 `subAgentActivity{kind: "started", agentThreadId, agentPath: "/root/<task_name>", model}`; neither names the role. The child's own messages then come under its thread id, the first a `thread/status/changed`. |
+| Link to the parent | The child's `turn/started` has `turn.rootTurnId` = the parent's turn. `thread/read` of the child answers a thread with `parentThreadId`, `agentRole` (`kit.qa`), `agentNickname`, `model`, `modelProvider`, `threadSource: "subagent"` and `source.subAgent.thread_spawn{parent_thread_id, depth, agent_path, agent_nickname, agent_role}`; its rollout's `session_meta` says the same. |
+| The child's usage | Its `thread/tokenUsage/updated` comes on the same connection under the child's thread id, with its own running total; in these runs after the parent's `turn/completed`. |
+
 
 From the owner's research session (claude on a fake provider and on haiku, codex on `gpt-6-luna`; scripts not kept),
 not run again here:

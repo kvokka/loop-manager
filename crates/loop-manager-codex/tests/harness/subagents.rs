@@ -1,9 +1,12 @@
 //! The subagent targets of a session as agent roles of its thread, on the real codex and the fake Responses API
 //! (docs/design/contracts.md 4.6): a spawn of a target's type runs a child with the role's instructions, model and
-//! skills.
+//! skills, and the child's usage is the session's (docs/design/experiments.md, experiment 9).
 
 use crate::common::{Live, sourced};
-use loop_manager_contract::config::Skill;
+use loop_manager_contract::{
+    config::Skill,
+    driver::{Normalized, Owner},
+};
 use loop_manager_testkit::openai::{Provider, Reply};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
@@ -30,7 +33,7 @@ fn skills_message(request: &Value) -> String {
         .unwrap_or_default()
 }
 
-async fn the_role_reaches_the_child(v2: bool) {
+async fn the_role_reaches_the_child_and_its_usage_the_session(v2: bool) {
     let dir = tempfile::tempdir().unwrap();
     let spawn = json!({ "agent_type": "kit.qa", "message": "Check it.", "task_name": "qa" });
     let plan = vec![Reply::Turn(vec![
@@ -71,17 +74,46 @@ async fn the_role_reaches_the_child(v2: bool) {
     assert!(child.to_string().contains("ROLE-QA-zz"), "{child}");
     let skills = skills_message(&child);
     assert!(skills.contains("zq-qa") && !skills.contains("zq-own"), "{skills}");
+    // The child's usage is the session's, under the child's own counter, its role and its model.
+    let mut live = live;
+    let charged = loop {
+        let event = tokio::time::timeout_at(deadline, live.events.recv()).await;
+        let event = event.ok().flatten().expect("no usage of the child");
+        if let Normalized::UsageTotal {
+            owner: Owner::Subagent(_),
+            ..
+        } = &event.event
+        {
+            break event;
+        }
+    };
+    assert_eq!(charged.session.as_ref(), Some(&live.session), "{charged:?}");
+    let Normalized::UsageTotal {
+        counter,
+        owner,
+        model,
+        provider,
+        tokens,
+        ..
+    } = charged.event
+    else {
+        unreachable!()
+    };
+    assert_ne!(live.session.0["thread_id"], counter.as_str());
+    assert_eq!(owner, Owner::Subagent("kit.qa".into()));
+    assert_eq!((model.as_str(), provider.as_str()), ("gpt-role", "fake"));
+    assert_eq!((tokens.input, tokens.output), (10, 3), "the fake's usage of one reply");
     live.stop().await;
 }
 
 #[tokio::test]
-async fn a_spawn_of_a_target_runs_its_role_in_multi_agent_v1() {
-    the_role_reaches_the_child(false).await;
+async fn a_spawn_of_a_target_runs_its_role_and_charges_the_session_in_multi_agent_v1() {
+    the_role_reaches_the_child_and_its_usage_the_session(false).await;
 }
 
 #[tokio::test]
-async fn a_spawn_of_a_target_runs_its_role_in_multi_agent_v2() {
-    the_role_reaches_the_child(true).await;
+async fn a_spawn_of_a_target_runs_its_role_and_charges_the_session_in_multi_agent_v2() {
+    the_role_reaches_the_child_and_its_usage_the_session(true).await;
 }
 
 /// A resume writes the role files its targets name: a target changed since the start has a role file the start did
