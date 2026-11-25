@@ -358,7 +358,7 @@ pub(crate) async fn reload(state: State, headers: HeaderMap) -> Reply {
     let generation = reply["config_generation"].as_u64().unwrap_or_default();
     if generation > *applied {
         *applied = generation;
-        *state.config.write().unwrap_or_else(std::sync::PoisonError::into_inner) = config;
+        state.config.send_replace(config);
     }
     Ok(Json(reply))
 }

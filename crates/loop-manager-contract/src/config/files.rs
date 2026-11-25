@@ -169,8 +169,10 @@ fn yes() -> bool {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct OrchestratorFile {
+    /// The loader checks each remaining key against the registered adapter tables.
+    #[serde(flatten)]
+    pub adapter_tables: toml::Table,
     #[serde(default)]
     pub projects: Vec<PathBuf>,
     pub max_runs: Option<NonZeroU32>,

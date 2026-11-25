@@ -17,6 +17,7 @@ pub const ADAPTER: Adapter = Adapter {
     models: &[],
     minimum: MINIMUM,
     agent_types: &["general-purpose", "Explore", "Plan", "claude"],
+    plugin_hook_updates: None,
     subagents_inherit: false,
     new,
     doctor,

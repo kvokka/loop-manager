@@ -28,7 +28,7 @@ use loop_manager_core::{
     run::{Msg, Reader},
 };
 use serde_json::{Map, Value};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 use tokio::{
     net::{TcpListener, UnixListener},
     sync::watch,
@@ -53,7 +53,7 @@ pub struct Api {
     /// Why the daemon is stopping, from the moment a drain or a restart began.
     pub stopping: std::sync::OnceLock<&'static str>,
     /// The config the daemon runs with; a reload replaces it.
-    pub config: RwLock<Arc<Config>>,
+    pub config: watch::Sender<Arc<Config>>,
     /// The generation `config` is (1 at start); held from reading the file to replacing `config`, so reloads apply
     /// in order and a replayed reload does not replace it.
     pub applied: tokio::sync::Mutex<u64>,
@@ -73,7 +73,7 @@ pub struct Api {
 impl Api {
     /// The config the daemon runs with now.
     fn config(&self) -> Arc<Config> {
-        self.config.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.config.borrow().clone()
     }
 }
 

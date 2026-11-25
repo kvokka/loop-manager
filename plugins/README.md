@@ -35,8 +35,8 @@ For the run card, approve both `PreToolUse` and `PostToolUse`. After Codex updat
 a running LM daemon renews approval for enabled hooks that Codex reports as modified. New hooks still
 need their first approval. Codex manages plugin installation and version updates.
 
-The default selection is the run card. To change it, set the list in
-`$XDG_CONFIG_HOME/loop-manager/preferences.toml` (usually `~/.config/loop-manager/preferences.toml`):
+The default selection is the run card. To change it, set the list in the orchestrator config passed to
+`loop-manager daemon --config` (default `$XDG_CONFIG_HOME/loop-manager/config.toml`, usually `~/.config/loop-manager/config.toml`).
 
 ```toml
 [codex.plugin_hooks]
@@ -44,8 +44,8 @@ auto_trust_updates = ["t3-run-card@loop-manager"]
 ```
 
 The list replaces the default. Use exact Codex plugin IDs such as `name@marketplace`,
-`["*"]` for every plugin, or `[]` to keep update approvals manual. The daemon watches preference
-and plugin changes and uses its operator's `CODEX_HOME` (default `~/.codex`). Point the daemon and
+`["*"]` for every plugin, or `[]` to keep update approvals manual. Use `loop-manager config check` and `loop-manager config reload` to apply the list.
+The daemon watches installed plugins and uses its operator's `CODEX_HOME` (default `~/.codex`). Point the daemon and
 the interactive client at the same home. You can check the result in `/hooks`. LM addon session
 hooks and orchestrator hooks have their own lifecycle.
 

@@ -44,6 +44,7 @@ impl Loader {
             true => self.read::<OrchestratorFile>(file).unwrap_or_default(),
             false => OrchestratorFile::default(),
         };
+        let plugin_hook_updates = self.plugin_hook_updates(file, raw.adapter_tables);
         // A harness of the build needs no section (docs/design/config.md); a section may name one the build lacks, as
         // the scripted harness of the tests.
         let built = self.adapters.iter().map(|a| a.name.to_owned());
@@ -95,6 +96,7 @@ impl Loader {
             super::pricing::catalog()
         });
         let mut config = Config {
+            plugin_hook_updates,
             api_tcp: raw.api_tcp,
             api_token: String::new(),
             timezone,
@@ -125,6 +127,27 @@ impl Loader {
         } else {
             Err(self.errors)
         }
+    }
+
+    fn plugin_hook_updates(&mut self, file: &Path, mut tables: toml::Table) -> BTreeMap<String, Vec<String>> {
+        let mut plugin_hook_updates = BTreeMap::new();
+        for adapter in self.adapters {
+            if let Some(parse) = adapter.plugin_hook_updates {
+                let table = tables
+                    .remove(adapter.name)
+                    .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+                match parse(table) {
+                    Ok(plugins) => {
+                        plugin_hook_updates.insert(adapter.name.to_owned(), plugins);
+                    }
+                    Err(e) => self.fail(file, format!("{}: {e}", adapter.name)),
+                }
+            }
+        }
+        for name in tables.keys() {
+            self.fail(file, super::retired::retired(format!("unknown field `{name}`"), ""));
+        }
+        plugin_hook_updates
     }
 
     pub(super) fn fail(&mut self, file: &Path, message: impl Into<String>) {

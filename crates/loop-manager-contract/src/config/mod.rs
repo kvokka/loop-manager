@@ -42,6 +42,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, time::Duration};
 /// when [`load`] fails (docs/design/config.md).
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Per-adapter selection of plugins whose previously trusted hooks can be renewed on update.
+    pub plugin_hook_updates: BTreeMap<String, Vec<String>>,
     /// Runs started at once across every project (docs/design/contracts.md 6).
     pub max_runs: u32,
     /// Runs of one bead that may end `failed` before the core closes its gate (docs/design/config.md).

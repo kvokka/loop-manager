@@ -1,19 +1,14 @@
 //! Renew previous approvals of installed plugins in the operator's Codex home.
-use loop_manager_contract::orphans;
+use loop_manager_contract::{config::Config, orphans};
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{io, path::Path, process::Stdio, time::Duration};
+use std::{io, path::Path, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{ChildStdin, ChildStdout, Command},
+    sync::watch,
 };
-
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct Preferences {
-    codex: CodexPreferences,
-}
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -35,21 +30,14 @@ impl Default for PluginHooks {
     }
 }
 
-fn selection(path: &Path) -> io::Result<Vec<String>> {
-    let prefs = match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(io::Error::other)?,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Preferences::default(),
-        Err(e) => return Err(e),
-    };
-    Ok(prefs.codex.plugin_hooks.auto_trust_updates)
+pub(crate) fn plugin_hook_updates(table: toml::Value) -> Result<Vec<String>, String> {
+    let prefs: CodexPreferences = table.try_into().map_err(|e: toml::de::Error| e.to_string())?;
+    Ok(prefs.plugin_hooks.auto_trust_updates)
 }
 
 // Watch the nearest existing ancestor as well when a first installation has yet to create a directory.
-fn changes(
-    preferences: &Path,
-    home: &Path,
-) -> notify::Result<(notify::RecommendedWatcher, tokio::sync::mpsc::Receiver<()>)> {
-    let paths = [preferences.to_owned(), home.join("config.toml"), home.join("plugins")];
+fn changes(home: &Path) -> notify::Result<(notify::RecommendedWatcher, tokio::sync::mpsc::Receiver<()>)> {
+    let paths = [home.join("config.toml"), home.join("plugins")];
     let targets = paths.clone();
     let (changed, events) = tokio::sync::mpsc::channel(1);
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -72,24 +60,23 @@ fn changes(
             watcher.watch(parent, RecursiveMode::NonRecursive)?;
         }
     }
-    if paths[2].is_dir() {
-        watcher.watch(&paths[2], RecursiveMode::Recursive)?;
+    if paths[1].is_dir() {
+        watcher.watch(&paths[1], RecursiveMode::Recursive)?;
     }
     Ok((watcher, events))
 }
 
 /// Reconcile on startup and when Codex plugins or the user preference change. A periodic pass
 /// recovers from missed filesystem events and retries a conflicting config write.
-pub async fn watch_plugin_hooks(binary: &Path, preferences: &Path, codex_home: &Path) {
+pub async fn watch_plugin_hooks(binary: &Path, mut configs: watch::Receiver<Arc<Config>>, codex_home: &Path) {
     let mut last_error = None;
     loop {
-        let changes = changes(preferences, codex_home);
-        let result = match selection(preferences) {
-            Ok(selected) if !selected.is_empty() && codex_home.join("config.toml").is_file() => {
-                reconcile(binary, codex_home, &selected).await
-            }
-            Ok(_) => Ok(()),
-            Err(e) => Err(io::Error::other(format!("{}: {e}", preferences.display()))),
+        let changes = changes(codex_home);
+        let selected = configs.borrow_and_update().plugin_hook_updates[crate::ADAPTER.name].clone();
+        let result = if !selected.is_empty() && codex_home.join("config.toml").is_file() {
+            reconcile(binary, codex_home, &selected).await
+        } else {
+            Ok(())
         };
         let error = result.err().map(|e| e.to_string());
         if error != last_error
@@ -98,14 +85,20 @@ pub async fn watch_plugin_hooks(binary: &Path, preferences: &Path, codex_home: &
             eprintln!("loop-manager daemon: Codex plugin hook trust: {message}");
         }
         last_error = error;
-        let resync = Duration::from_secs(600);
-        if let Ok((_watcher, mut events)) = changes {
-            if tokio::time::timeout(resync, events.recv()).await.is_ok() {
-                // Installers rename several files together; coalesce the burst before listing hooks.
-                tokio::time::sleep(Duration::from_millis(500)).await;
+        let files_changed = async {
+            let resync = Duration::from_secs(600);
+            if let Ok((_watcher, mut events)) = changes {
+                if tokio::time::timeout(resync, events.recv()).await.is_ok() {
+                    // Installers rename several files together; coalesce the burst before listing hooks.
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            } else {
+                tokio::time::sleep(Duration::from_secs(60)).await;
             }
-        } else {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+        };
+        tokio::select! {
+            () = files_changed => {},
+            result = configs.changed() => if result.is_err() {return},
         }
     }
 }

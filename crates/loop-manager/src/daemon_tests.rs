@@ -31,3 +31,28 @@ fn the_codex_settings_reach_the_driver_capabilities() {
         "0: an app-server stops once it has no threads"
     );
 }
+
+#[test]
+fn plugin_updates_are_validated_in_the_orchestrator_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config.toml");
+    let load = |text: &str| {
+        std::fs::write(&file, text).unwrap();
+        loop_manager_core::config::load_for(&file, &[&loop_manager_codex::ADAPTER], Default::default())
+    };
+    assert_eq!(
+        load("").unwrap().plugin_hook_updates["codex"],
+        ["t3-run-card@loop-manager"]
+    );
+    for ids in [vec![], vec!["other@catalog"], vec!["*"]] {
+        let config = load(&format!("[codex.plugin_hooks]\nauto_trust_updates = {ids:?}")).unwrap();
+        assert_eq!(config.plugin_hook_updates["codex"], ids);
+    }
+    for bad in [
+        "[codex.plugin_hooks]\nauto_trust_updates = 5",
+        "[codex.plugin_hooks]\ntypo = []",
+        "[codxe]",
+    ] {
+        assert!(load(bad).is_err(), "{bad}");
+    }
+}

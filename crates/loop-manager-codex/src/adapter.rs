@@ -13,6 +13,7 @@ pub const ADAPTER: Adapter = Adapter {
     models: MODELS,
     minimum: MINIMUM,
     agent_types: &["default", "explorer", "worker"],
+    plugin_hook_updates: Some(crate::plugin_hooks::plugin_hook_updates),
     subagents_inherit: true,
     new,
     doctor,

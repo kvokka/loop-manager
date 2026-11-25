@@ -21,7 +21,7 @@ use std::{
     io,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use tokio::{
     net::{TcpListener, UnixListener, UnixStream},
@@ -127,6 +127,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     );
     let watchers = watch_trackers(core.clone(), tracked).await;
     let token = config.api_token.clone();
+    let (config, applied_config) = tokio::sync::watch::channel(config);
     let api = Api {
         core: core.clone(),
         reader: Reader::open(&db).map_err(|e| format!("{}: {e}", db.display()))?,
@@ -139,7 +140,7 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
             "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(),
             "socket": paths.socket, "started_at": loop_manager_core::rfc3339_ms(Clock::system().now_ms()),
         }),
-        config: RwLock::new(config),
+        config,
         applied: tokio::sync::Mutex::new(1),
         load: Box::new({
             let paths = paths.clone();
@@ -156,11 +157,10 @@ pub(crate) async fn run(paths: Paths) -> Result<bool, String> {
     let stop = stop_signal().map_err(|e| format!("signals: {e}"))?;
     eprintln!("loop-manager daemon listening on {}", paths.socket.display());
     // A core that stopped leaves an API that can only fail: the daemon exits with an error, for a supervisor to see.
-    let preferences = dirs::xdg("XDG_CONFIG_HOME", ".config")?.join("loop-manager/preferences.toml");
     let codex_home = dirs::xdg("CODEX_HOME", ".codex")?;
     let codex = binary("codex", None).0;
     let served = tokio::select! {
-        () = loop_manager_codex::watch_plugin_hooks(&codex, &preferences, &codex_home) => unreachable!(),
+        () = loop_manager_codex::watch_plugin_hooks(&codex, applied_config, &codex_home) => unreachable!(),
         served = api::serve(listener, tcp, api, stop) => served,
         died = &mut task => {
             let _ = std::fs::remove_file(&paths.socket);

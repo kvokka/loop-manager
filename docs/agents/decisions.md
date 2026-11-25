@@ -17,6 +17,7 @@ behaviour itself is described in the document named under each heading; this fil
 | 5 | No tmux: a terminal screen is never a control channel |
 | 22 | The event journal is JSONL, rotated at 10 MB × 5 files |
 | 28 | A human joining a live session and handover of control are a later release: no operations, states or stubs now |
+| 162 | LM has one global configuration file per daemon, the orchestrator config. Keep global settings there. Creating another global configuration file requires an explicit user decision. |
 | 43 | The core, `loop-manager-contract` and `loop-manager-core`, names no harness and no br, and the adapters (`loop-manager-claude`, `loop-manager-codex`, `loop-manager-br`, `loop-manager-addons`) do not depend on `loop-manager-core`; CI checks both |
 | 61 | Everything an adapter reports reaches the policy and the observer; the core drops nothing of it |
 | 62 | Safety timers are allowed; polling as a way to wait for a unit of work is forbidden |

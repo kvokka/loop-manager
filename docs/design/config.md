@@ -32,10 +32,9 @@ error in every file.
 
 ## Operator preferences
 
-`$XDG_CONFIG_HOME/loop-manager/preferences.toml` holds per-user settings shared by the user's daemons.
-In `[codex.plugin_hooks]`, `auto_trust_updates` lists installed plugins whose previously approved hooks
-receive renewed trust after an update. It defaults to `["t3-run-card@loop-manager"]`. The daemon watches
-this file independently of orchestrator config reloads. See [initial approval and selection examples](../../plugins/README.md#codex-plugin-hook-updates).
+The orchestrator config holds the global settings of the daemon. In `[codex.plugin_hooks]`, `auto_trust_updates` lists installed plugins whose previously approved hooks
+receive renewed trust after an update. It defaults to `["t3-run-card@loop-manager"]`. Use `loop-manager config check` and
+`loop-manager config reload` to validate and apply a change to the list. See [initial approval and selection examples](../../plugins/README.md#codex-plugin-hook-updates).
 
 ## Settings (any layer)
 

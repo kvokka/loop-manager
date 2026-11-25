@@ -42,6 +42,8 @@ impl Check {
 /// `None` where it does not assemble.
 pub type DoctorAgents<'a> = &'a [(String, Option<EffectiveConfig>)];
 
+type PluginHookUpdates = fn(toml::Value) -> Result<Vec<String>, String>;
+
 /// One harness adapter.
 #[derive(Debug)]
 pub struct Adapter {
@@ -57,6 +59,8 @@ pub struct Adapter {
     /// A subagent of the harness has the MCP servers and hooks of its session, none of its own: a target with ones
     /// the session has not is no subagent of it.
     pub subagents_inherit: bool,
+    /// Reads the orchestrator table named for this adapter, returning the plugins whose hook approvals it renews.
+    pub plugin_hook_updates: Option<PluginHookUpdates>,
     /// The driver on `setup`; the error names the key of the adapter's settings that is wrong.
     pub new: fn(&Setup) -> Result<Arc<dyn Driver>, String>,
     /// The host checks of `loop-manager doctor` for the harness and its agents: whether a session the daemon starts can log

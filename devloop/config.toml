@@ -5,3 +5,6 @@ projects = ["."]
 # A run that failed is not started again by itself: the gate of its epic closes and waits for the owner
 # (README.md, "When a run fails").
 bead_failed_runs = 1
+
+[codex.plugin_hooks]
+auto_trust_updates = ["t3-run-card@loop-manager"]
