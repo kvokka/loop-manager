@@ -1,5 +1,5 @@
 #!/bin/sh
-# Exercise finalization with real br and a private git remote.
+# Exercise finalization with real br and a private git remote: the tracker in the repository of the run, then outside it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -39,5 +39,21 @@ export LOOP_MANAGER_INPUT_ARCHIVE_DIR=archive/runs
 git -C "$tmp/origin.git" show HEAD:proj/.beads/issues.jsonl |
   jq -e '.status == "closed" and .assignee == "loop-manager:run_test" and .comments[0].text == "CODER: done"' >/dev/null
 cmp scratch/runs/run_test/ci.log archive/runs/run_test/ci.log
+[ -z "$(git status --porcelain)" ]
+
+# A tracker outside the repository of the run is not its content: the epic closes there, nothing of it is committed,
+# and the work is pushed.
+mkdir "$tmp/proj"
+(unset BEADS_DIR && cd "$tmp/proj" && br init --prefix out -q)
+export BEADS_DIR="$tmp/proj/.beads"
+bead=$(br create 'Close the epic of another directory' --json | jq -er .id)
+export LOOP_MANAGER_BEAD="$bead"
+echo work >work.txt
+git add work.txt && git commit -qm work
+work=$(git rev-parse HEAD)
+"$here/../bin/epic-close"
+[ "$(br show "$bead" --json | jq -er '.[0].status')" = closed ]
+[ "$(git rev-parse HEAD)" = "$work" ]
+[ "$(git -C "$tmp/origin.git" rev-parse HEAD)" = "$work" ]
 [ -z "$(git status --porcelain)" ]
 echo "review-loop close selftest: ok"

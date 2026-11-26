@@ -1,16 +1,16 @@
 #!/bin/sh
-# Commit the round's tracker state locally. The close step publishes the completed epic. The tracker's directory
-# lies in the repository of the run; its commits take the name of the project's directory as their scope.
+# Decide whether the review closes the epic, and commit the round's tracker state locally when the tracker is content
+# of the run's repository (epic-tracker); its commits take the name of the project's directory as their scope. The
+# close step publishes the completed epic.
 set -eu
 bead=${LOOP_MANAGER_BEAD:?}
-tracker=${BEADS_DIR:?}
-scope=$(basename "$(dirname "$tracker")")
+tracker=$("$(dirname "$0")/epic-tracker")
 head=$(git rev-parse HEAD)
 ci=$(printf '%s\n' "${LOOP_MANAGER_STEP_CI_REPORT_DATA:-null}" | jq -ec '.stdout | fromjson' || echo null)
 review=${LOOP_MANAGER_STEP_REVIEW_DATA:-null}
 score=$(printf '%s\n' "$review" | jq -r '.score? | tonumber?' || true)
 verdict=$(printf '%s\n' "$review" | jq -r '.verdict? | strings' || true)
-changes=$(git status --porcelain -- . ":(exclude)$tracker")
+changes=$(git status --porcelain -- . ${tracker:+":(exclude)$tracker"})
 pass=false
 if [ -z "$changes" ] && jq -en --argjson ci "$ci" --argjson review "$review" --arg head "$head" \
   '($ci.exit_code == 0 and $ci.uncommitted == 0 and $ci.head == $head)
@@ -19,8 +19,11 @@ if [ -z "$changes" ] && jq -en --argjson ci "$ci" --argjson review "$review" --a
 fi
 if [ "$pass" = false ]; then br update "$bead" -s rework -q; fi
 br sync --flush-only -q
-git add -- "$tracker"
-git diff --cached --quiet -- "$tracker" || git commit -q -m "chore($scope): record tracker state [$bead]" -- "$tracker"
+if [ -n "$tracker" ]; then
+  scope=$(basename "$(dirname "$tracker")")
+  git add -- "$tracker"
+  git diff --cached --quiet -- "$tracker" || git commit -q -m "chore($scope): record tracker state [$bead]" -- "$tracker"
+fi
 
 echo "gate: SCORE ${score:-none}/10, VERDICT ${verdict:-none}"
 if [ "$pass" = true ]; then exit 0; fi

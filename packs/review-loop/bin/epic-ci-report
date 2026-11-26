@@ -6,7 +6,7 @@ set -eu
 run=${LOOP_MANAGER_RUN:?}
 command=${LOOP_MANAGER_INPUT_CI_COMMAND:?}
 scratch=${LOOP_MANAGER_INPUT_SCRATCH_DIR:?}
-tracker=${BEADS_DIR:?}
+tracker=$("$(dirname "$0")/epic-tracker")
 case "$run" in *[!a-zA-Z0-9_-]*) echo "epic-ci-report: invalid run id" >&2; exit 1;; esac
 mkdir -p "$scratch/$run"
 dir=$(mktemp -d "$scratch/$run/tests.$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
@@ -17,7 +17,7 @@ start=$(date +%s)
 rc=0
 REVIEW_LOOP_CI_REPORT="$checks" sh -c "$command" >"$log" 2>&1 || rc=$?
 duration=$(($(date +%s) - start))
-changes=$(git status --porcelain -- . ":(exclude)$tracker")
+changes=$(git status --porcelain -- . ${tracker:+":(exclude)$tracker"})
 uncommitted=0
 if [ -n "$changes" ]; then uncommitted=$(printf '%s\n' "$changes" | wc -l); fi
 failed='[]'

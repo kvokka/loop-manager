@@ -75,7 +75,8 @@ command = ["epic-owner-answer", "review"]
 if = { "steps.review.data.needs_owner" = true }
 back_to = "code"
 
-# Commit the tracker locally. Green CI on the current revision and an accepted review allow the epic to close.
+# Commit the tracker locally, when it is the repository's. Green CI on the current revision and an accepted review
+# allow the epic to close.
 [[step]]
 name = "gate"
 kind = "exec"
@@ -84,7 +85,7 @@ timeout = "10m"
 inherit_env = true
 back_to = "code"
 
-# Close and publish the tracker after the gate passes.
+# Close the epic and publish the work, with the tracker when it is the repository's, after the gate passes.
 [[step]]
 name = "close"
 kind = "exec"

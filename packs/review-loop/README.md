@@ -10,7 +10,8 @@ review-loop/
   pack.toml             the name, the version and the one addon the pack's agents attach (`context-budget`)
   formulas/epic.toml    code -> ci_report -> ci_route -> review -> gate -> close, with conditional owner waits
   agents/               coder and reviewer (steps of the formula); helper, subcoder, expert (subagents of the coder)
-  bin/                  the commands of the exec steps, ahead of `PATH` for them
+  bin/                  the commands of the exec steps, ahead of `PATH` for them, and `epic-tracker`, which they ask
+                        whether the tracker is the repository's
   tests/                the self-tests of those commands
 ```
 
@@ -20,8 +21,10 @@ List the pack in the project's `loop-manager.toml`, from git or from a checkout 
 and start runs with a trigger or by hand:
 
 ```toml
-packs = [{ git = "https://github.com/kvokka/loop-manager.git", rev = "<tag or full commit id>", dir = "packs/review-loop" }]
-# or: packs = ["<path to this directory>"]
+packs = [
+  { git = "https://github.com/kvokka/loop-manager.git", rev = "<tag or full commit id>", dir = "packs/review-loop" },
+]
+# or, from a checkout: packs = ["<path to this directory>"]
 
 [inputs]
 ci_command = "make ci"
@@ -74,10 +77,14 @@ the log, and the agents read the log.
 
 ### What a project must supply
 
-- A tracker: the formula takes a bead, and the commands call `br`. The project's `.beads` directory lies inside the
-  repository the run works in and is committed with it: `gate` and `close` commit it there, as
-  `chore(<name of the project's directory>): record tracker state [<bead>]` and `... close epic [<bead>]`. The
-  commands find it by the `BEADS_DIR` every exec step gets.
+- A tracker: the formula takes a bead, and the commands call `br`. They find the project's `.beads` directory by the
+  `BEADS_DIR` every exec step gets, and where it lies decides who keeps it:
+  - Inside the repository the run works in, and not ignored by git: the tracker is committed with the work. `gate`
+    and `close` commit it there, as `chore(<name of the project's directory>): record tracker state [<bead>]` and
+    `... close epic [<bead>]`, and its changes do not make the tree dirty for the gate.
+  - Outside that repository, as in a project whose rig is another directory, or ignored by git: the tracker is not
+    the repository's content. The commands write the round's state and the closed epic to it and commit nothing of
+    it; `close` still pushes the work. Keeping the tracker is then the project's own business.
 - The statuses `rework` and `closed` in the tracker's policy: `gate` sets `rework` when it sends an epic back.
 - A checkout whose branch has an upstream that `git push` reaches without a prompt: `close` pushes the whole epic.
 - On the daemon's `PATH`: `sh`, `git`, `jq`, `br` and `loop-manager`. The exec steps that run the CI, the gate and
@@ -113,11 +120,12 @@ needs its own rules in one replaces the role prompt whole with `system_prompt` i
 - `review`: the reviewer leaves a comment `REVIEW` with `SCORE: x/10`, `VERDICT:` and `HEAD:`, and gives the score
   and the verdict as the data of its `finish`. A review that fails or is stopped is written once more by a new
   session; a second failure fails the run. A blocking owner question takes the equivalent `review_owner` wait.
-- `gate` (`epic-gate`): commits the round's tracker state locally. It accepts a review scored at least 9 with verdict
-  `complete` and green CI on the current clean revision. Otherwise it marks the epic `rework` and returns it to the
-  coder.
-- `close` (`epic-close`): archives the run's scratch directory when `archive_dir` is set, closes the epic, then
-  commits and pushes the tracker. A failed push is retried as an attempt and reuses the local commit.
+- `gate` (`epic-gate`): commits the round's tracker state locally, when the tracker is in the repository. It accepts
+  a review scored at least 9 with verdict `complete` and green CI on the current clean revision. Otherwise it marks
+  the epic `rework` and returns it to the coder.
+- `close` (`epic-close`): archives the run's scratch directory when `archive_dir` is set, closes the epic, commits
+  the tracker when it is in the repository, then pushes. A failed push is retried as an attempt and reuses the local
+  commit.
 - `code_answer`, `review_answer` (`epic-owner-answer`): after an owner wait, record the resolution on the epic as an
   `ANSWER: <id>` comment and return to a new coder round.
 
@@ -143,5 +151,5 @@ reviewer's wait): `pass` hands the answer to a new coder round, `fail` ends the 
 
 ## Self-tests
 
-`tests/selftest.sh` exercises the commands of `bin/` in throwaway repositories, with stubs for the CI command and,
-but for the close step, for `br`. It needs `sh`, `git`, `jq`, `br` and `loop-manager` on `PATH`.
+`tests/selftest.sh` exercises the commands of `bin/` in throwaway repositories, with the tracker inside the
+repository, outside it and ignored by it, and with stubs for the CI command and, but for the close step, for `br`. It needs `sh`, `git`, `jq`, `br` and `loop-manager` on `PATH`.

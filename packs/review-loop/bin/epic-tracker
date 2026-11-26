@@ -1,0 +1,9 @@
+#!/bin/sh
+# Print the tracker's directory when it is content of the repository of the run: `BEADS_DIR` lies in its work tree and
+# git does not ignore it. Print nothing when the tracker is kept elsewhere, as in a project whose rig is another
+# directory: the steps then neither leave it out of the tree they check nor commit it.
+set -eu
+tracker=${BEADS_DIR:?}
+top=$(git rev-parse --show-toplevel)
+[ "$(git -C "$tracker" rev-parse --show-toplevel 2>/dev/null)" = "$top" ] || exit 0
+git check-ignore -q -- "$tracker" || printf '%s\n' "$tracker"

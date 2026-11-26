@@ -32,16 +32,18 @@ chmod +x "$tmp/bin/br" "$tmp/bin/ci"
 # The commands are found as a step of the formula finds them: by name, the pack's `bin/` ahead of `PATH`.
 export PATH="$here/../bin:$tmp/bin:$PATH"
 
-# A repository with a remote to push to, one commit, and the tracker's directory in the project `proj`.
+# A repository with a remote to push to, one commit, and the tracker's directory in the project `proj`: in the
+# repository, or where the argument says from its root.
 fresh() {
   r=$(mktemp -d "$tmp/r.XXXXXX")
   : >"$tmp/br.log"
   git init -q --bare "$r/origin.git"
   git init -q "$r/work" && cd "$r/work"
   git remote add origin "$r/origin.git"
-  mkdir -p proj/.beads src
-  export BEADS_DIR="$r/work/proj/.beads"
-  : >proj/.beads/issues.jsonl
+  project=${1:-proj}
+  mkdir -p "$project/.beads" src
+  export BEADS_DIR="$r/work/$project/.beads"
+  : >"$BEADS_DIR/issues.jsonl"
   echo one >src/a
   printf 'scratch/\n' >.gitignore
   git add -A && git commit -q -m init && git push -q -u origin HEAD
@@ -64,6 +66,7 @@ local_only() {
   [ "$(git -C ../origin.git rev-parse HEAD)" = "$remote_head" ] &&
     [ "$(git rev-parse HEAD)" != "$remote_head" ] || { echo "selftest: expected a local tracker commit"; exit 1; }
 }
+no_commit() { [ "$(git rev-parse HEAD)" = "$remote_head" ] || { echo "selftest: $1: a commit of a tracker that is not the repository's"; exit 1; }; }
 rework() { grep -q "^update dev-1 -s rework" "$tmp/br.log" || { echo "selftest: epic-gate: $1: no status rework"; exit 1; }; }
 no_rework() { ! grep -q rework "$tmp/br.log" || { echo "selftest: epic-gate: $1: status rework on a pass"; exit 1; }; }
 
@@ -87,6 +90,17 @@ fresh; review '{"score":9,"verdict":"complete"}'; ci_data 101; expect 1 epic-gat
 fresh; review '{"score":9,"verdict":"complete"}'; ci_data 0 deadbeef; expect 1 epic-gate "stale CI"; rework "stale CI"
 fresh; review '{"score":9,"verdict":"complete"}'; echo dirty >>src/a; expect 1 epic-gate "review left a dirty tree"
 fresh; review '{"score":9,"verdict":"complete"}'; git remote set-url origin "$r/gone.git"; expect 0 epic-gate "close step owns the push"
+# A tracker outside the repository of the run (a project whose rig is another directory) or ignored by it is not its
+# content: the bar and the status are the same, and the commands commit nothing and leave nothing out of the tree.
+for project in ../proj scratch/proj; do
+  fresh "$project"; review '{"score":9,"verdict":"complete"}'; expect 0 epic-gate "tracker at $project"; no_commit "$project"; no_rework "$project"
+  [ -s "$BEADS_DIR/issues.jsonl" ]
+  [ -z "$(git status --porcelain)" ]
+  fresh "$project"; review '{"score":8,"verdict":"continue"}'; expect 1 epic-gate "tracker at $project, 8"; no_commit "$project"; rework "$project"
+  fresh "$project"; review '{"score":9,"verdict":"complete"}'; echo two >src/a; expect 1 epic-gate "tracker at $project, dirty tree"
+  fresh "$project"; echo two >src/a; CI_RC=0 expect 0 epic-ci-report "tracker at $project"
+  jq -e '.exit_code == 0 and .uncommitted == 1' "$tmp/out" >/dev/null
+done
 
 fresh; echo note >>proj/.beads/issues.jsonl
 CI_RC=0 expect 0 epic-ci-report "green"; jq -e '.exit_code == 0 and .uncommitted == 0 and .failed == []' "$tmp/out" >/dev/null
