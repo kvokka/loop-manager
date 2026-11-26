@@ -17,8 +17,10 @@ use std::{path::Path, sync::Arc, time::Duration};
 const WITHIN: Duration = Duration::from_secs(60);
 /// The left command runs 20 s, then marks that it finished.
 const LEFT: &str = "sh -c 'echo $$ > bg.pid; exec sleep 20'; touch bg-done";
-/// A command that detaches itself: no background of the harness, it would outlive the run.
-const DETACHED: &str = "setsid sh -c 'echo $$ > det.pid; exec sleep 300' >/dev/null 2>&1 &";
+/// A command that detaches itself: no background of the harness, it would outlive the run. Its shell waits for the
+/// pid: codex kills what is still in the command's process group once the shell exits, the child before its `setsid`.
+const DETACHED: &str = "setsid sh -c 'echo $$ > det.pid; exec sleep 300' >/dev/null 2>&1 & \
+    until [ -s det.pid ]; do sleep 0.1; done";
 
 /// Declares `pass` only where the rig has the file `declare`.
 fn declare(env: &Env) -> String {

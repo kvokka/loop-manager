@@ -326,7 +326,7 @@ async fn the_commands_a_thread_left_are_stopped_and_other_threads_keep_theirs() 
 /// the attempt's token, while the shared app-server lives on.
 #[tokio::test]
 async fn a_detached_command_goes_with_its_thread() {
-    // The shell waits for the pid: codex ends what is still in the command's process group once the shell exits,
+    // The shell waits for the pid: codex kills what is still in the command's process group once the shell exits,
     // and under load that is the child before its `setsid`.
     let start = "setsid sh -c 'echo $$ > det.pid; exec sleep 300' >/dev/null 2>&1 &";
     let detached = Reply::Command(format!("{start} until [ -s det.pid ]; do sleep 0.1; done"));
