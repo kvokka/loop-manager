@@ -3,7 +3,7 @@
 A loop-manager pack with one formula, `epic`. The owner of a project files an epic as a bead. A run has a coder work
 on it, runs the project's full CI, has a reviewer review the result, and sends the work back to the coder until the
 review scores 9 or more with the verdict `complete` on green CI. The pack knows nothing of the project: its CI
-command, its directories and its rules come from the project.
+command, its directories and its rules come from the project, and until it names them the inputs have defaults.
 
 ```text
 review-loop/
@@ -17,8 +17,8 @@ review-loop/
 
 ## Use it in a project
 
-List the pack in the project's `loop-manager.toml`, from git or from a checkout by path, give the formula its inputs
-and start runs with a trigger or by hand:
+List the pack in the project's `loop-manager.toml`, from git or from a checkout by path, and start runs with a
+trigger or by hand. The inputs all have defaults, so a project may give none; a real one names at least its CI:
 
 ```toml
 packs = [
@@ -27,10 +27,10 @@ packs = [
 # `rev` is a release tag, `packs/review-loop/<version>` (CHANGELOG.md), or the full id of any commit
 # or, from a checkout: packs = ["<path to this directory>"]
 
-[inputs]
+[inputs]                            # each optional (see "Inputs")
 ci_command = "make ci"
-scratch_dir = ".runs"
-archive_dir = "artifacts/runs"      # optional
+scratch_dir = ".runs"               # in the repository: ignored by git
+archive_dir = "artifacts/runs"
 
 [[trigger]]
 name = "epic-ready"
@@ -53,15 +53,20 @@ path = "<path to a copy of context-budget>"   # or `git`, `rev` and `dir`
 
 ### Inputs
 
-| Input | Type | What it is |
-|---|---|---|
-| `epic` | task, required | the bead of the epic; a trigger or the start gives it |
-| `ci_command` | string, required | the project's full CI: a shell command, run with `sh -c` from the workdir of the run. It bounds its own time; the step stops it after 45 minutes |
-| `scratch_dir` | string, required | a directory git ignores, from the workdir or absolute. A run keeps its CI logs, the files of its comments and the notes of its subagents in `<scratch_dir>/<run>`. A directory git does not ignore makes the tree dirty, and the gate refuses a dirty tree |
-| `archive_dir` | string, optional | `close` copies `<scratch_dir>/<run>` to `<archive_dir>/<run>`. It is ignored by git too, or the copy is left uncommitted |
+| Input | Type | Default | What it is |
+|---|---|---|---|
+| `epic` | task, required | none | the bead of the epic; a trigger or the start gives it |
+| `ci_command` | string | `echo 'TODO: replace me with tests command'` | the project's full CI: a shell command, run with `sh -c` from the workdir of the run. It bounds its own time; the step stops it after 45 minutes. The default runs no check and always passes, so the gate then rests on the review alone: a project replaces it with its real CI |
+| `scratch_dir` | string | `/tmp/review-loop/runs` | a directory from the workdir or absolute. A run keeps its CI logs, the files of its comments and the notes of its subagents in `<scratch_dir>/<run>`. Outside the repository, as the default is, git need not ignore it. Inside the repository git must ignore it: otherwise it makes the tree dirty, and the gate refuses a dirty tree |
+| `archive_dir` | string | `/tmp/review-loop/archive` | `close` copies `<scratch_dir>/<run>` to `<archive_dir>/<run>`. Inside the repository it is ignored by git too, or the copy is left uncommitted. An empty value keeps no copy |
 
-The project gives all but `epic` once, in `[inputs]`. An exec step reads them as `LOOP_MANAGER_INPUT_<NAME>`, a prompt
-as `{{ inputs.<name> }}`.
+A project replaces a default once, in `[inputs]`; an empty `ci_command` or `scratch_dir` fails the step that reads
+it. An exec step reads the inputs as `LOOP_MANAGER_INPUT_<NAME>`, a prompt as `{{ inputs.<name> }}`.
+
+The default directories are shared: a run id is unique within one daemon only, so `<scratch_dir>/<run>` and
+`<archive_dir>/<run>` under the defaults belong to every daemon of the machine that uses them, and a run of one
+would write over the files of a run of another. A machine with several daemons gives each project directories of
+its own. Files under `/tmp` do not outlive what clears it: a project that keeps its archives names another place.
 
 ### The report of the CI checks
 
@@ -131,7 +136,7 @@ prints as `system_prompt`. The same table changes the agent's `description`, `mo
 - `gate` (`epic-gate`): commits the round's tracker state locally, when the tracker is in the repository. It accepts
   a review scored at least 9 with verdict `complete` and green CI on the current clean revision. Otherwise it marks
   the epic `rework` and returns it to the coder.
-- `close` (`epic-close`): archives the run's scratch directory when `archive_dir` is set, closes the epic, commits
+- `close` (`epic-close`): archives the run's scratch directory unless `archive_dir` is empty, closes the epic, commits
   the tracker when it is in the repository, then pushes. A failed push is retried as an attempt and reuses the local
   commit.
 - `code_answer`, `review_answer` (`epic-owner-answer`): after an owner wait, record the resolution on the epic as an

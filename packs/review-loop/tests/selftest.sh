@@ -114,6 +114,21 @@ jq -e '.exit_code == 0 and .uncommitted == 0 and .failed == []' "$tmp/out" >/dev
 CI_REPORT=none CI_RC=3 expect 0 epic-ci-report "red without a report of the checks"
 jq -e '.exit_code == 3 and .failed == []' "$tmp/out" >/dev/null
 grep -q "ci says run all" "$(jq -r .log "$tmp/out")"
+# A scratch directory outside the repository, as the default one is, is no part of the tree: git need not ignore it.
+fresh; : >.gitignore; git commit -q -am "ignore nothing"
+export LOOP_MANAGER_INPUT_SCRATCH_DIR="$r/elsewhere/runs"
+CI_RC=0 expect 0 epic-ci-report "scratch outside the repository"
+jq -e '.exit_code == 0 and .uncommitted == 0' "$tmp/out" >/dev/null
+[ "$(jq -r .log "$tmp/out")" = "$(find "$r/elsewhere/runs/run_1" -name ci.log)" ]
+[ -z "$(git status --porcelain)" ]
+# An input always has a value, the default at least: an empty one is refused, not read as a path or a command.
+for input in SCRATCH_DIR CI_COMMAND; do
+  if env "LOOP_MANAGER_INPUT_$input=" epic-ci-report >"$tmp/out" 2>&1; then
+    echo "selftest: epic-ci-report: an empty LOOP_MANAGER_INPUT_$input is accepted"; exit 1
+  fi
+  [ -z "$(git status --porcelain)" ]
+done
+export LOOP_MANAGER_INPUT_SCRATCH_DIR=scratch/runs
 fresh; echo two >src/a; CI_RC=101 expect 0 epic-ci-report "red report"
 jq -e '.exit_code == 101 and .uncommitted == 1 and .failed == [{"name":"ci:fmt","status":"failed","exit_code":101}]' "$tmp/out" >/dev/null
 log=$(jq -r .log "$tmp/out")

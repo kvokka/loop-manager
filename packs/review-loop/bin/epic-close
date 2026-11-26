@@ -1,7 +1,7 @@
 #!/bin/sh
-# Archive the run's scratch directory when the project names an archive, close the epic, commit the tracker when it
-# is content of the run's repository (epic-tracker), then push. A failed push is exit 75: the repeat reuses the local
-# commit.
+# Archive the run's scratch directory unless the project gives an empty archive, close the epic, commit the tracker
+# when it is content of the run's repository (epic-tracker), then push. A failed push is exit 75: the repeat reuses
+# the local commit.
 set -eu
 [ "$#" -eq 0 ] || { echo "usage: epic-close" >&2; exit 2; }
 run=${LOOP_MANAGER_RUN:?}

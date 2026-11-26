@@ -4,15 +4,16 @@ description = "One epic of a project: rounds of a coder, the project's full CI a
 # round. A run still sent back after the last round fails.
 rounds = 50
 
-# The project gives all but `epic` once, in `[inputs]` of its `loop-manager.toml` (README.md, "Inputs").
+# A project replaces a default once, in `[inputs]` of its `loop-manager.toml` (README.md, "Inputs").
 [inputs]
 epic = { type = "task", required = true }            # the bead of the epic
-# The project's full CI: a shell command, run from the workdir of the run.
-ci_command = { type = "string", required = true }
-# A directory git ignores: a run keeps its logs and notes in `<scratch_dir>/<run>`.
-scratch_dir = { type = "string", required = true }
-# Optional: `close` copies the run's scratch directory to `<archive_dir>/<run>`.
-archive_dir = { type = "string" }
+# The project's full CI: a shell command, run from the workdir of the run. The default always passes: a project
+# names its real CI.
+ci_command = { type = "string", default = "echo 'TODO: replace me with tests command'" }
+# A run keeps its logs and notes in `<scratch_dir>/<run>`. Inside the repository, it is a directory git ignores.
+scratch_dir = { type = "string", default = "/tmp/review-loop/runs" }
+# `close` copies the run's scratch directory to `<archive_dir>/<run>`; an empty value keeps no copy.
+archive_dir = { type = "string", default = "/tmp/review-loop/archive" }
 
 # The coder of the round: a new session each round, with the epic, its last comments and what the gate said. It hands
 # over whatever it reached; a session stopped at its context limit hands over too (`cut = "pass"` in agent.toml).
