@@ -34,7 +34,8 @@ run = """
 mkdir -p target/ci
 report=${REVIEW_LOOP_CI_REPORT:-$(mktemp target/ci/checks.XXXXXX)}
 rc=0
-mise run --jobs 1 --continue-on-error --timeout 5m --report-file "$report" 'ci:*' || rc=$?
+# Five minutes for all checks (decision 154); a slower machine sets its own limit in `CI_TIMEOUT`.
+mise run --jobs 1 --continue-on-error --timeout "${CI_TIMEOUT:-5m}" --report-file "$report" 'ci:*' || rc=$?
 echo "CI report: $report"
 exit "$rc"
 """
