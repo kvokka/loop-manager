@@ -22,8 +22,9 @@ and start runs with a trigger or by hand:
 
 ```toml
 packs = [
-  { git = "https://github.com/kvokka/loop-manager.git", rev = "<tag or full commit id>", dir = "packs/review-loop" },
+  { git = "https://github.com/kvokka/loop-manager.git", rev = "packs/review-loop/0.1.0", dir = "packs/review-loop" },
 ]
+# `rev` is a release tag, `packs/review-loop/<version>` (CHANGELOG.md), or the full id of any commit
 # or, from a checkout: packs = ["<path to this directory>"]
 
 [inputs]
