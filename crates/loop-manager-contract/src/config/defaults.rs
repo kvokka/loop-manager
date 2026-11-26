@@ -16,9 +16,9 @@ pub(super) struct Given<'a> {
 }
 
 impl Loader {
-    /// Applies `layers`, weakest first, to each formula of `packs`: a stronger layer replaces what a weaker gave, and
-    /// a formula's own `rounds` beats them all. A value for an input of type `task`, or of the wrong type, is an error
-    /// of the file that gives it.
+    /// Applies `layers`, weakest first, to each formula of `packs`: a stronger layer replaces what a weaker gave, the
+    /// `default` of an input among it, and a formula's own `rounds` beats them all. A value for an input of type
+    /// `task`, or of the wrong type, is an error of the file that gives it.
     pub(super) fn formula_defaults(&mut self, packs: &mut [Pack], layers: [&Given<'_>; 2]) {
         for pack in packs {
             for (name, formula) in &mut pack.formulas {

@@ -50,6 +50,43 @@ fn a_formula_is_explained_with_the_layers_of_its_rounds_and_input_values() {
     assert_eq!(text.matches("# runs only if").count(), 1, "{text}");
 }
 
+/// An input's `default` is explained as the formula's value until a config gives another, and the catalog shows it
+/// with the input (docs/design/config.md).
+#[test]
+fn an_input_default_is_explained_and_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = [
+        ("config.toml", "projects = [\"shop\"]\n"),
+        ("shop/loop-manager.toml", "[inputs]\nn = 4\n"),
+        (
+            "shop/formulas/flow.toml",
+            "name = \"flow\"\n[inputs]\nfocus = { type = \"string\", default = \"all of it\" }\n\
+             n = { type = \"integer\", default = 1 }\nquick = { type = \"boolean\" }\n\
+             [[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"true\"]\n",
+        ),
+    ];
+    for (path, text) in files {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let config = loop_manager_core::config::load(&dir.path().join("config.toml")).unwrap();
+    let of = super::config::Explain::Formula("flow".into());
+    let reply = super::config::explained(&config, "shop", &of, None).unwrap();
+    let text = reply["text"].as_str().unwrap();
+    let head = "rounds = 3  # default\ninputs.focus = \"all of it\"  # formula flow\ninputs.n = 4  # project\n";
+    assert!(text.starts_with(head), "{text}");
+    let listed = super::mcp::formulas(&config, None);
+    assert_eq!(
+        listed[0]["inputs"],
+        serde_json::json!({
+            "focus": { "type": "string", "required": false, "default": "all of it" },
+            "n": { "type": "integer", "required": false, "default": 1 },
+            "quick": { "type": "boolean", "required": false },
+        })
+    );
+}
+
 /// `explain --formula` on a rig that sets `max_writers` names it after `rounds`; on the root there is none.
 #[test]
 fn a_formula_on_a_rig_is_explained_with_its_max_writers() {

@@ -3914,6 +3914,9 @@
           "required"
         ],
         "properties": {
+          "default": {
+            "description": "The value of the input nobody gives, of the input's type; absent when the formula sets none."
+          },
           "required": {
             "type": "boolean"
           },

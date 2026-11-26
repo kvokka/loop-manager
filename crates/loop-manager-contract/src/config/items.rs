@@ -104,7 +104,7 @@ impl Loader {
     }
 
     pub(super) fn formula(&mut self, file: &Path) -> Option<(String, Formula)> {
-        let raw: FormulaFile = self.read(file)?;
+        let mut raw: FormulaFile = self.read(file)?;
         self.name(file, "formula", &raw.name);
         if raw.step.is_empty() {
             return self.none(file, "a formula has at least one `[[step]]`");
@@ -190,6 +190,7 @@ impl Loader {
         let own = raw.rounds.map(|n| (n.get(), super::Layer::Formula(raw.name.clone())));
         let (value, from) = own.unwrap_or((3, super::Layer::Default));
         let budget = self.budget(file, raw.budget.as_ref());
+        let defaults = self.input_defaults(file, &raw.name, &mut raw.inputs);
         Some((
             raw.name,
             Formula {
@@ -199,10 +200,39 @@ impl Loader {
                 internal: raw.internal,
                 rounds: super::Sourced { value, from },
                 budget,
-                defaults: BTreeMap::new(),
+                defaults,
                 steps,
             },
         ))
+    }
+
+    /// The `default` of each input of formula `name`, as a value of the input's type: the weakest source of the
+    /// input's value (docs/design/config.md "Formula"). One for a `task` input, or of another type, is an error.
+    fn input_defaults(
+        &mut self,
+        file: &Path,
+        name: &str,
+        inputs: &mut BTreeMap<String, super::formula_file::Input>,
+    ) -> BTreeMap<String, super::Sourced<Value>> {
+        let mut defaults = BTreeMap::new();
+        for (key, input) in inputs {
+            let Some(default) = &mut input.default else {
+                continue;
+            };
+            let taken = match input.kind {
+                InputType::Task => Err("a `task` input takes no `default`".to_owned()),
+                kind => (kind.take(default)).map_err(|want| format!("`default` must be {want}, not {default}")),
+            };
+            match taken {
+                Ok(value) => {
+                    default.clone_from(&value);
+                    let from = super::Layer::Formula(name.to_owned());
+                    defaults.insert(key.clone(), super::Sourced { value, from });
+                }
+                Err(e) => self.fail(file, format!("input `{key}`: {e}")),
+            }
+        }
+        defaults
     }
 
     /// A formula's `budget`: a positive amount of USD with at most twelve decimals (docs/design/formula-budgets.md).

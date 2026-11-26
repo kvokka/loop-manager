@@ -254,8 +254,9 @@ line for the host: inherited by the harness and invisible to loop-manager, or of
 daemon holds; with `--config <file>`, on that file with no daemon). The pack, formula and variant layers count only for
 a run, so they show with `--formula <f> --rig <r>` in place of `--agent`. The formula's `rounds` comes first with its
 layer (`rounds = 2  # project`; `formula <f>` when the formula sets it, `default` when no layer does), then
-`max_writers` of the rig when it sets one (`max_writers = 1  # rig`), then one line per input value the config gives
-(`inputs.focus = "security"  # orchestrator`), then, for a formula with an exec step or a check script whose pack has
+`max_writers` of the rig when it sets one (`max_writers = 1  # rig`), then one line per input value the config or the
+input's `default` gives (`inputs.focus = "security"  # orchestrator`; `formula <f>` for a default), then, for a
+formula with an exec step or a check script whose pack has
 `bin/`, ``# `PATH` of the exec steps and check scripts starts with <dir>  # pack <pack>``, then the steps one by one: for an ai step a header
 ``# step `<s>` of `<f>` on `<r>`: agent <a>`` (the rig's variant if it maps one) and its effective config, for an exec
 step one line ``# step `<s>` of `<f>`: exec `<command>` ``, for a drain step
@@ -442,7 +443,7 @@ packs = [
 ]
 rounds = 2                          # over the orchestrator's `rounds`, under a formula's own
 
-[inputs]                            # over the orchestrator's `[inputs]`, value by value
+[inputs]                            # over the orchestrator's `[inputs]`, value by value; both over an input's `default`
 focus = "performance"
 
 [[addon]]
@@ -766,6 +767,7 @@ budget = 10                         # optional: the spend limit of a run in USD,
 
 [inputs]
 task = { type = "task", required = true }   # task | string | integer | boolean
+focus = { type = "string", default = "all of it" }  # optional `default`: the value when nobody gives one
 
 [[step]]
 name = "implement"                  # optional (default: the position, "1", "2", ..)
@@ -981,11 +983,17 @@ session (`continue_from`) continues it in its first step only, so a formula whos
 
 An input a start does not give, or gives `null`, takes the value of `[inputs]` of the project's `loop-manager.toml`,
 else that of the orchestrator config: a table of values by input name, for any formula of the project that declares an
-input of that name; a formula that declares none ignores it. What the caller gives — the start, a trigger, the
-`inputs` of a `formula` step and what such a step's child inherits — beats both. A value is checked at load as a
-start checks it, for every formula it applies to; a value for an input of type `task`, or of the wrong type, is an
-error of the file that gives it (`` `inputs.n` for formula `kit.flow`: must be an integer, not "many" ``). A
-`required` input the config gives counts as given: a trigger, a `formula` step or a `drain` step need not give it.
+input of that name; a formula that declares none ignores it. An input neither config gives a value takes its own
+`default`, the weakest source: `default = <value>` in the input's declaration. What the caller gives — the start, a
+trigger, the `inputs` of a `formula` step and what such a step's child inherits, a default of its parent's too —
+beats all three. A value is checked at load as a start checks it, for every formula it applies to; a value for an
+input of type `task`, or of the wrong type, is an error of the file that gives it (`` `inputs.n` for formula
+`kit.flow`: must be an integer, not "many" ``; of the formula file for a default: ``input `n`: `default` must be an
+integer, not "many" ``, ``input `task`: a `task` input takes no `default` ``). An input filled so is a given one
+from then on: the run stores it with its inputs, and its steps, templates, `if` tables and children see it as any
+other. A `required` input the config gives, or one with a default, counts as given: a trigger, a `formula` step or a
+`drain` step need not give it. `GET /v1/formulas` and `loop-manager formula list` show an input's `default` beside
+its `type` and `required`.
 
 A run start checks the inputs: no undeclared one, every `required` one present (`null` is no value), an `integer` input
 a JSON integer or its text, a `boolean` one a JSON boolean or `true`/`false` as text, a `string` one a string (the CLI

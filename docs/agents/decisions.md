@@ -97,6 +97,7 @@ behaviour itself is described in the document named under each heading; this fil
 | 148 | An agent sees the comments of its task in its prompt and, where the formula needs them, the comments and the fields of the task's parents: the whole picture and the place of the task in it. Data that goes into an agent's context is given as TOON, not JSON (fewer tokens); wherever else data reaches a context, TOON is preferred where that is reasonable (2026-11-19) |
 | 163 | A pack carries the executables of its formulas in `bin/`: the directory is ahead of `PATH` for the `exec` steps and the check scripts of the pack's formulas, and for nothing else. The project root has no such `bin/`, and no variable names the pack's directory (2026-11-25) |
 | 166 | A project gives an agent of a pack its text as a file: `prompt_append = "<file>"` in `[agents.<agent>]` names it, and its text is appended to the role prompt. An agent's own files are named in its `agent.toml`: `prompt` (the role) and `template` (the prompt of its steps) (2026-11-26) |
+| 167 | A formula input may carry a default: `default = <value>` in its declaration, of the input's type. It is the weakest source of the input's value: the orchestrator config, the project config and the caller each beat it, so a project may run a pack's formula with no `[inputs]` at all. A `task` input takes none (2026-11-26) |
 
 ## Runs — [contracts 6](../design/contracts.md#6-run), [invariants](../design/invariants.md)
 

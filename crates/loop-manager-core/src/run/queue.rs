@@ -364,7 +364,8 @@ impl Create {
         if let Some(extra) = self.inputs.keys().find(|k| !formula.inputs.contains_key(*k)) {
             return Err(rejected(format!("`{name}` has no input `{extra}`")));
         }
-        // A null is no value; an input given no value takes the one the config gives (docs/design/config.md).
+        // A null is no value; an input given no value takes the one the config gives, else its `default`
+        // (docs/design/config.md).
         self.inputs.retain(|_, value| !value.is_null());
         for (key, given) in &formula.defaults {
             self.inputs.entry(key.clone()).or_insert_with(|| given.value.clone());

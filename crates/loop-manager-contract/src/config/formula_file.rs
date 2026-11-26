@@ -65,13 +65,15 @@ impl InputType {
 }
 
 /// A declared formula input (docs/design/config.md).
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Input {
     #[serde(rename = "type")]
     pub kind: InputType,
     #[serde(default)]
     pub required: bool,
+    /// The value of the input nobody gives, of the input's type; a `task` input has none.
+    pub default: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,15 +197,15 @@ pub struct Formula {
     pub rounds: Sourced<u32>,
     /// `budget`: the spend limit of a run of the formula a start does not replace (docs/design/formula-budgets.md).
     pub budget: Option<crate::usd::Usd>,
-    /// The values of its inputs the project and the orchestrator config give, the project's first; a start fills an
-    /// input it is not given from here (docs/design/config.md "Formula").
+    /// The values of its inputs no caller need give: the project config's, else the orchestrator config's, else the
+    /// input's own `default`; a start fills an input it is not given from here (docs/design/config.md "Formula").
     pub defaults: BTreeMap<String, Sourced<Value>>,
     /// At least one; a run goes through them in order (docs/design/config.md).
     pub steps: Vec<Step>,
 }
 
 impl Formula {
-    /// Whether a start must give input `name`: it is required and the config gives it no value.
+    /// Whether a start must give input `name`: it is required, has no default and the config gives it no value.
     pub fn needs(&self, name: &str) -> bool {
         self.inputs.get(name).is_some_and(|i| i.required) && !self.defaults.contains_key(name)
     }

@@ -464,6 +464,8 @@ pub(crate) struct FormulaInput {
     #[schema(rename = "type")]
     kind: String,
     required: bool,
+    /// The value of the input nobody gives, of the input's type; absent when the formula sets none.
+    default: Option<Value>,
 }
 
 /// A pack; the project's own pack has no version.
