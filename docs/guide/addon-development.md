@@ -8,7 +8,7 @@ An addon is a directory with an `addon.toml`. It has two independent sides:
   observe them or decide what happens next (veto a pass, retry a failed attempt, remark on a turn...).
 
 An addon is not a pack: a pack brings agents and formulas, an addon extends the agents that attach it; a pack may
-declare the addons its agents attach, and that is all it does with one. It is a
+declare the addons its agents attach, each by its name, and that is all it does with one. It is a
 directory, not a library: hooks are any executables, in any language. How an addon is declared and attached is in
 [using addons](addons.md); every rule of the manifest is in
 [the config reference](../design/config.md#addon-addonaddontoml).

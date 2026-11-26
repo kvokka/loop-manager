@@ -2,7 +2,7 @@
 //! the config downloads each source first and passes the directory it went to, as [`Checkouts`].
 
 use super::{
-    files::{AddonDecl, OrchestratorFile, PackFile, ProjectFile, Source},
+    files::{AddonDecl, AddonFile, OrchestratorFile, PackFile, ProjectFile, Source},
     items::{parent, resolve},
     load::Loader,
 };
@@ -41,8 +41,10 @@ pub fn commit_id(text: &str) -> bool {
 }
 
 /// The git sources the orchestrator file, its projects and their packs declare. A pack from git declares its addons
-/// in a manifest that is read where `checkouts` has the pack: whoever downloads asks again once the packs are there.
-/// Only the files are parsed; their errors are left to the load that follows, which reports them all.
+/// in a manifest that is read where `checkouts` has the pack, and an addon of a pack is no source when the
+/// orchestrator file or the project's declares its name, which is known where `checkouts` has their addons: whoever
+/// downloads asks again once those are there. Only the files are parsed; their errors are left to the load that
+/// follows, which reports them all.
 pub fn git_sources(orchestrator_file: &Path, checkouts: &Checkouts) -> BTreeSet<GitSource> {
     let mut loader = Loader {
         checkouts: checkouts.clone(),
@@ -54,17 +56,22 @@ pub fn git_sources(orchestrator_file: &Path, checkouts: &Checkouts) -> BTreeSet<
         false => OrchestratorFile::default(),
     };
     let mut found = loader.git(orchestrator_file, &raw.addon);
+    let outer = loader.names(orchestrator_file, &base, &raw.addon);
     for dir in raw.projects.iter().map(|d| resolve(&base, d)) {
         let file = dir.join("loop-manager.toml");
         let Some(project) = loader.read::<ProjectFile>(&file) else {
             continue;
         };
         found.extend(loader.git(&file, &project.addon));
+        let own = loader.names(&file, &dir, &project.addon);
         for source in project.packs {
             let manifest = loader.root(&file, &dir, &source).map(|root| root.join("pack.toml"));
-            if let Some(manifest) = manifest
-                && let Some(pack) = loader.read::<PackFile>(&manifest)
+            if let (Some(outer), Some(own)) = (&outer, &own)
+                && let Some(manifest) = manifest
+                && let Some(mut pack) = loader.read::<PackFile>(&manifest)
             {
+                let replaced = |d: &AddonDecl| d.name.as_ref().is_some_and(|n| outer.contains(n) || own.contains(n));
+                pack.addon.retain(|d| !replaced(d));
                 found.extend(loader.git(&manifest, &pack.addon));
             }
             found.extend(source.git());
@@ -78,6 +85,23 @@ impl Loader {
     fn git(&mut self, file: &Path, decls: &[AddonDecl]) -> BTreeSet<GitSource> {
         let sources: Vec<Source> = decls.iter().filter_map(|d| self.addon_source(file, d)).collect();
         sources.iter().filter_map(Source::git).collect()
+    }
+
+    /// The names of the addons `file` declares, those a pack's declaration is replaced by; none while one of them
+    /// from git is not in the checkouts, its name not known yet.
+    fn names(&mut self, file: &Path, base: &Path, decls: &[AddonDecl]) -> Option<BTreeSet<String>> {
+        let mut names = BTreeSet::new();
+        for decl in decls {
+            let Some(source) = self.addon_source(file, decl) else {
+                continue;
+            };
+            if source.git().is_some_and(|git| !self.checkouts.contains_key(&git)) {
+                return None;
+            }
+            let manifest = self.root(file, base, &source).map(|root| root.join("addon.toml"));
+            names.extend(manifest.and_then(|m| self.read::<AddonFile>(&m)).map(|a| a.name));
+        }
+        Some(names)
     }
 
     /// Where a declared addon is: exactly one of `path` and `git`, and `git` with `rev` (and `dir`, if any).

@@ -111,6 +111,12 @@ impl Loader {
     pub(super) fn addons(&mut self, file: &Path, base: &Path, decls: Vec<AddonDecl>, outer: &[Addon]) -> Vec<Addon> {
         let mut addons: Vec<Addon> = Vec::new();
         for decl in decls {
+            if decl.name.is_some() {
+                self.fail(
+                    file,
+                    "`name` is for an `[[addon]]` of a `pack.toml`: here the addon's `addon.toml` names it",
+                );
+            }
             let Some(root) = self.addon_source(file, &decl).and_then(|s| self.root(file, base, &s)) else {
                 continue;
             };
@@ -195,9 +201,10 @@ impl Loader {
         addons
     }
 
-    /// Adds to `addons`, those of a project, the ones its pack `pack` declares in `manifest`. A declaration of the
-    /// same name in the orchestrator file (`outer`) or the project's own replaces the pack's, whatever is wrong with
-    /// that one; two packs may declare one addon only from one place, else `file`, the project's, has to say which.
+    /// Adds to `addons`, those of a project, the ones its pack `pack` declares by name in `manifest`. A declaration
+    /// of the same name in the orchestrator file (`outer`) or the project's own replaces the pack's, whose source is
+    /// then not looked at; two packs may declare one addon only from one place, else `file`, the project's, has to
+    /// say which.
     pub(super) fn pack_addons(
         &mut self,
         file: &Path,
@@ -206,25 +213,47 @@ impl Loader {
         decls: Vec<AddonDecl>,
         addons: &mut Vec<Addon>,
     ) {
-        for decl in decls {
-            let checked = self.errors.len();
+        for mut decl in decls {
+            let Some(name) = decl.name.take() else {
+                self.fail(manifest, "an `[[addon]]` of a pack needs `name`, the addon's own name");
+                continue;
+            };
+            let other = match outer.iter().chain(addons.iter()).find(|a| a.name == name) {
+                None => None,
+                Some(Addon { pack: None, .. }) => continue,
+                Some(Addon { pack: Some(other), .. }) if other == pack => {
+                    self.fail(manifest, format!("addon `{name}` is declared twice"));
+                    continue;
+                }
+                Some(Addon {
+                    pack: Some(other),
+                    root,
+                    ..
+                }) => Some((other.clone(), root.clone())),
+            };
             let loaded = self.addons(manifest, &super::items::parent(manifest), vec![decl], &[]);
             let Some(mut addon) = loaded.into_iter().next() else {
                 continue;
             };
-            let name = &addon.name;
-            let declared = outer.iter().chain(addons.iter()).find(|a| a.name == *name);
-            match declared.map(|a| (a.pack.as_deref(), a.root == addon.root)) {
+            if addon.name != name {
+                let found = addon.root.join("addon.toml");
+                self.fail(
+                    manifest,
+                    format!(
+                        "addon `{name}` is declared, but `{}` is the addon `{}`",
+                        found.display(),
+                        addon.name
+                    ),
+                );
+                continue;
+            }
+            match other {
                 None => {
                     addon.pack = Some(pack.to_owned());
                     addons.push(addon);
                 }
-                Some((None, _)) => self.errors.truncate(checked),
-                Some((Some(other), _)) if other == pack => {
-                    self.fail(manifest, format!("addon `{name}` is declared twice"));
-                }
-                Some((Some(_), true)) => {}
-                Some((Some(other), false)) => self.fail(
+                Some((_, root)) if root == addon.root => {}
+                Some((other, _)) => self.fail(
                     file,
                     format!(
                         "packs `{other}` and `{pack}` declare addon `{name}` from different sources: declare it \

@@ -229,6 +229,8 @@ pub(super) struct AddonDecl {
     pub rev: Option<String>,
     /// The addon's directory inside the repository.
     pub dir: Option<PathBuf>,
+    /// The addon's own name, in a `pack.toml` only: what replaces the declaration is known without its source.
+    pub name: Option<String>,
 }
 
 /// Where a pack or addon lives: a directory, or a git repository at a tag, a commit or its latest revision, and
@@ -312,7 +314,8 @@ pub(super) struct PackFile {
     #[serde(default)]
     pub requires_addons: Vec<String>,
     pub min_loop_manager: Option<String>,
-    /// The addons it declares for every project that lists it; `path` is relative to the pack's directory.
+    /// The addons it declares, each by `name`, for every project that lists it; `path` is relative to the pack's
+    /// directory.
     #[serde(default)]
     pub addon: Vec<AddonDecl>,
     #[serde(default)]

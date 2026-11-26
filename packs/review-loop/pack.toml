@@ -4,4 +4,5 @@ version = "0.1.0"
 
 # The one addon the pack's own agents attach: the context budget of the coder's and the reviewer's sessions.
 [[addon]]
+name = "context-budget"
 path = "../../addons/context-budget"

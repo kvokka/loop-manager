@@ -127,7 +127,7 @@ fn the_addons_of_a_pack_from_git_are_sources_once_the_pack_is_downloaded() {
     let d = dir.path();
     write(d, &format!(r#"packs = [{{ git = "{KIT}" }}]"#));
     let manifest = d.join("dl/kit/pack.toml");
-    let declared = format!("[[addon]]\ngit = \"{NOTES}\"\nrev = \"v2\"\ndir = \"notes\"\n");
+    let declared = format!("[[addon]]\nname = \"notes\"\ngit = \"{NOTES}\"\nrev = \"v2\"\ndir = \"notes\"\n");
     fs::write(&manifest, fs::read_to_string(&manifest).unwrap() + &declared).unwrap();
     fs::create_dir_all(d.join("dl/all/notes")).unwrap();
     fs::write(
@@ -150,6 +150,43 @@ fn the_addons_of_a_pack_from_git_are_sources_once_the_pack_is_downloaded() {
         (addon.name.as_str(), addon.pack.as_deref(), &addon.root),
         ("notes", Some("kit"), &d.join("dl/all/notes"))
     );
+}
+
+/// An addon of a pack that the orchestrator file or the project's declares is no source, so it is never downloaded;
+/// what replaces it is known once the addons of those two files are downloaded, and a pack's wait until then.
+#[test]
+fn a_replaced_addon_of_a_pack_is_no_source() {
+    const AWAY: &str = "https://example.com/away.git";
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let file = d.join("config.toml");
+    let (mail, away) = (source(MAIL, Some("v1")), source(AWAY, Some("v2")));
+    let downloaded = Checkouts::from([(mail.clone(), Ok(d.join("dl/mail")))]);
+    let manifest = d.join("dl/kit/pack.toml");
+    let declare = |name: &str| {
+        write(d, r#"packs = ["../dl/kit"]"#);
+        let declared = format!("[[addon]]\nname = \"{name}\"\ngit = \"{AWAY}\"\nrev = \"v2\"\n");
+        fs::write(&manifest, fs::read_to_string(&manifest).unwrap() + &declared).unwrap();
+    };
+    // The orchestrator's `mail` comes from git: before it is there its name is not known, and the pack's addon waits.
+    declare("mail");
+    assert_eq!(git_sources(&file, &Checkouts::new()), [mail.clone()].into());
+    assert_eq!(git_sources(&file, &downloaded), [mail.clone()].into());
+    load_for(&file, &[], downloaded.clone()).unwrap();
+
+    declare("notes");
+    assert_eq!(git_sources(&file, &Checkouts::new()), [mail.clone()].into());
+    assert_eq!(git_sources(&file, &downloaded), [mail.clone(), away].into());
+    // The project's own declaration, from a directory, replaces it.
+    fs::create_dir_all(d.join("notes")).unwrap();
+    fs::write(d.join("notes/addon.toml"), "name = \"notes\"\nversion = \"1.0.0\"\n").unwrap();
+    let project = d.join("shop/loop-manager.toml");
+    let own = "[[addon]]\npath = \"../notes\"\n";
+    fs::write(&project, fs::read_to_string(&project).unwrap() + own).unwrap();
+    assert_eq!(git_sources(&file, &downloaded), [mail].into());
+    let config = load_for(&file, &[], downloaded).unwrap();
+    let addon = &config.projects[0].addons[0];
+    assert_eq!((addon.name.as_str(), addon.pack.as_deref()), ("notes", None));
 }
 
 #[test]

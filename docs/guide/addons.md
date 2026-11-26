@@ -19,8 +19,8 @@ git ls-remote --tags --refs https://github.com/kvokka/loop-manager.git 'refs/tag
 ## Declare it
 
 A declaration only says where the addon is. It goes in the orchestrator config or in a project's `loop-manager.toml`.
-A pack may declare the addons its agents attach in its own `pack.toml`; a project that lists the pack then writes
-nothing for them ([config: pack](../design/config.md#pack-packpacktoml)):
+A pack may declare the addons its agents attach in its own `pack.toml`, each with its `name`; a project that lists
+the pack then writes nothing for them ([config: pack](../design/config.md#pack-packpacktoml)):
 
 ```toml
 # ~/.config/loop-manager/config.toml
@@ -47,7 +47,8 @@ dir = "addons/context-budget"
 `loop-manager` downloads it into its cache when it loads the config and runs it only at that tag or commit
 ([packs and addons from git](../design/config.md#packs-and-addons-from-git)). Addon names are unique across the
 orchestrator and the project. To use another version of an addon a pack declares, declare the addon of that name in the
-project or the orchestrator config: that declaration replaces the pack's. `loop-manager addon list` lists the declared
+project or the orchestrator config: that declaration replaces the pack's, which is then not downloaded.
+`loop-manager addon list` lists the declared
 addons and the bundled ones; `pack` names the pack that declares one.
 
 ## Attach it

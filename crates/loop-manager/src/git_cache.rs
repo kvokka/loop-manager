@@ -26,7 +26,8 @@ pub(crate) fn checkouts(cache: &Path, config: &Path) -> Checkouts {
     static LOCK: Mutex<()> = Mutex::new(());
     let _held = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let mut found = Checkouts::new();
-    // A pack from git declares its addons in its own `pack.toml`: their sources show once the pack is downloaded.
+    // A pack from git declares its addons in its own `pack.toml`: their sources show once the pack is downloaded,
+    // and once the addons of the orchestrator's and the project's files are, whose names say which of them to skip.
     loop {
         let sources = git_sources(config, &found);
         let new: Vec<GitSource> = sources.into_iter().filter(|s| !found.contains_key(s)).collect();

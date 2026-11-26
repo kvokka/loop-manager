@@ -6,7 +6,9 @@ use crate::config::{Config, Name};
 
 const NOTES: &str = "name = \"notes\"\nversion = \"0.1.0\"\n";
 const PINNED: &str = "name = \"notes\"\nversion = \"0.2.0\"\n";
-const MORE: &str = "name = \"more\"\nversion = \"0.1.0\"\n[[addon]]\n";
+const MORE: &str = "name = \"more\"\nversion = \"0.1.0\"\n[[addon]]\nname = \"notes\"\n";
+/// The addon `notes` as a pack declares it, from its own directory.
+const DECL: &str = "[[addon]]\nname = \"notes\"\npath = \"addons/notes\"\n";
 
 fn base(path: &str) -> &'static str {
     BASE.iter().find(|(p, _)| *p == path).unwrap().1
@@ -37,7 +39,7 @@ fn declared(config: &Config) -> Vec<(&str, Option<&str>, &str)> {
 
 #[test]
 fn a_pack_declares_addons_for_the_projects_that_list_it() {
-    let pack = kit("[[addon]]\npath = \"addons/notes\"\n");
+    let pack = kit(DECL);
     let agent = base("kit/agents/implementer/agent.toml").replace("}]", "}, { name = \"notes\" }]");
     // The project attaches it too, with no declaration of its own.
     let project = format!(
@@ -67,32 +69,67 @@ fn a_pack_declares_addons_for_the_projects_that_list_it() {
 
 #[test]
 fn a_declaration_of_the_project_or_the_orchestrator_replaces_a_packs() {
-    let pack = kit("[[addon]]\npath = \"addons/notes\"\n");
-    // The pack's own addon does not load; replaced, only its name is taken from it.
-    let broken = format!("{NOTES}[[hook]]\non = \"no.such\"\ncommand = [\"true\"]\n");
-    let files = [
-        ("kit/pack.toml", pack.as_str()),
-        ("kit/addons/notes/addon.toml", broken.as_str()),
-        ("pinned/addon.toml", PINNED),
-    ];
-    fails(&files, "hook on unknown event type `no.such`");
-
     let project = format!("{}[[addon]]\npath = \"../pinned\"\n", base("shop/loop-manager.toml"));
-    let config = load(&over(&files, &[("shop/loop-manager.toml", &project)]));
-    assert_eq!(declared(&config), [("notes", None, "0.2.0")]);
-
     let top = format!("{}[[addon]]\npath = \"pinned\"\n", base("config.toml"));
-    let config = load(&over(&files, &[("config.toml", &top)]));
-    assert_eq!(declared(&config), []);
-    assert_eq!(
-        (config.addons[1].name.as_str(), config.addons[1].pack.as_deref()),
-        ("notes", None)
+    // Replaced, the pack's own source is not looked at: a directory that is not there, a repository nobody
+    // downloaded, a manifest that does not load.
+    let broken = format!("{NOTES}[[hook]]\non = \"no.such\"\ncommand = [\"true\"]\n");
+    for (decl, error) in [
+        ("path = \"addons/gone\"", "addons/gone/addon.toml"),
+        (
+            "git = \"https://example.com/away.git\"\nrev = \"v1\"",
+            "`https://example.com/away.git` is not downloaded",
+        ),
+        ("path = \"addons/notes\"", "hook on unknown event type `no.such`"),
+    ] {
+        let pack = kit(&format!("[[addon]]\nname = \"notes\"\n{decl}\n"));
+        let files = [
+            ("kit/pack.toml", pack.as_str()),
+            ("kit/addons/notes/addon.toml", broken.as_str()),
+            ("pinned/addon.toml", PINNED),
+        ];
+        let errors = load_with(&files).expect_err(decl);
+        assert!(errors.iter().any(|e| e.to_string().contains(error)), "{errors:?}");
+
+        let config = load(&over(&files, &[("shop/loop-manager.toml", &project)]));
+        assert_eq!(declared(&config), [("notes", None, "0.2.0")], "{decl}");
+
+        let config = load(&over(&files, &[("config.toml", &top)]));
+        assert_eq!(declared(&config), [], "{decl}");
+        assert_eq!(
+            (config.addons[1].name.as_str(), config.addons[1].pack.as_deref()),
+            ("notes", None)
+        );
+    }
+}
+
+#[test]
+fn a_pack_names_the_addon_it_declares() {
+    let files = [("kit/addons/notes/addon.toml", NOTES)];
+    let unnamed = kit("[[addon]]\npath = \"addons/notes\"\n");
+    fails(
+        &over(&files, &[("kit/pack.toml", &unnamed)]),
+        "an `[[addon]]` of a pack needs `name`, the addon's own name",
+    );
+    let other = kit(&DECL.replace("\"notes\"", "\"memo\""));
+    let errors = load_with(&over(&files, &[("kit/pack.toml", &other)])).expect_err("another name");
+    let said = errors.iter().any(|e| {
+        e.file.ends_with("kit/pack.toml")
+            && e.message.starts_with("addon `memo` is declared, but `")
+            && e.message.ends_with("kit/addons/notes/addon.toml` is the addon `notes`")
+    });
+    assert!(said, "{errors:?}");
+    // The orchestrator's and the project's declarations name only a source.
+    let named = base("config.toml").replace("[[addon]]", "[[addon]]\nname = \"mail\"");
+    fails(
+        &[("config.toml", &named)],
+        "`name` is for an `[[addon]]` of a `pack.toml`",
     );
 }
 
 #[test]
 fn two_packs_declare_one_addon_only_from_one_source() {
-    let pack = kit("[[addon]]\npath = \"addons/notes\"\n");
+    let pack = kit(DECL);
     let project = base("shop/loop-manager.toml").replace("[\"../kit\"]", "[\"../kit\", \"../more\"]");
     let same = format!("{MORE}path = \"../kit/addons/notes\"\n");
     let other = format!("{MORE}path = \"notes\"\n");
@@ -122,7 +159,9 @@ fn two_packs_declare_one_addon_only_from_one_source() {
     ));
     assert_eq!(declared(&config), [("notes", None, "0.2.0")]);
 
-    let twice = kit("[[addon]]\npath = \"addons/notes\"\n[[addon]]\npath = \"../more/notes\"\n");
+    let twice = kit(&format!(
+        "{DECL}[[addon]]\nname = \"notes\"\npath = \"../more/notes\"\n"
+    ));
     fails(
         &over(&files[..3], &[("kit/pack.toml", &twice)]),
         "addon `notes` is declared twice",

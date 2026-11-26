@@ -305,7 +305,8 @@ fn the_addon_a_pack_from_git_declares_is_downloaded_after_the_pack() {
     let addon = repo(d, "addons", &files);
     git(d, &d.join("remote/addons"), &["tag", "v1"]);
     let manifest = format!(
-        "name = \"remote\"\nversion = \"0.1.0\"\n[[addon]]\ngit = \"{}\"\nrev = \"v1\"\ndir = \"sub/mail\"\n",
+        "name = \"remote\"\nversion = \"0.1.0\"\n\
+         [[addon]]\nname = \"mail\"\ngit = \"{}\"\nrev = \"v1\"\ndir = \"sub/mail\"\n",
         d.join("remote/addons").display()
     );
     let agent = "harness = \"claude\"\naddons = [{ name = \"mail\" }]\n";
@@ -328,4 +329,36 @@ fn the_addon_a_pack_from_git_declares_is_downloaded_after_the_pack() {
     assert!(ok, "{out}{err}");
     assert_eq!(cached(d), [pack, addon.clone()].into());
     assert!(out.contains(&format!("{addon}/sub/mail/skills/mail")), "{out}");
+}
+
+/// A pack pins an addon to a repository that cannot be reached; the project declares the addon of that name from a
+/// directory. The pack's declaration is replaced without a download: the load asks git for nothing.
+#[test]
+fn a_replaced_addon_of_a_pack_is_not_downloaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let config = d.join("config/loop-manager");
+    let away = d.join("remote/away");
+    let pack = format!(
+        "name = \"kit\"\nversion = \"0.1.0\"\n[[addon]]\nname = \"mail\"\ngit = \"{}\"\nrev = \"v1\"\n",
+        away.display()
+    );
+    write(&config.join("addons/mail"), MAIL);
+    write(
+        &config,
+        &[
+            ("config.toml", "projects = [\"shop\"]\n"),
+            ("shop/loop-manager.toml", "packs = [\"../kit\"]\n"),
+            ("kit/pack.toml", &pack),
+        ],
+    );
+    let (ok, out) = check(d);
+    assert!(!ok && out.contains(&*away.to_string_lossy()), "{out}");
+    assert!(loop_manager(d, &["cache", "clear"]).0);
+
+    let own = "packs = [\"../kit\"]\n[[addon]]\npath = \"../addons/mail\"\n";
+    write(&config, &[("shop/loop-manager.toml", own)]);
+    let (ok, out) = check(d);
+    assert!(ok, "{out}");
+    assert!(!d.join("cache/loop-manager/git").exists(), "nothing was asked of git");
 }
