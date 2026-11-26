@@ -65,6 +65,32 @@ fn a_git_source_loads_from_the_directory_it_was_downloaded_to() {
 }
 
 #[test]
+fn a_pack_from_git_may_live_in_a_directory_of_the_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let file = d.join("config.toml");
+    let load = |rev: Option<&str>, sub: &str| {
+        let pin = rev.map(|r| format!(r#"rev = "{r}", "#)).unwrap_or_default();
+        write(d, &format!(r#"packs = [{{ git = "{KIT}", {pin}dir = "{sub}" }}]"#));
+        let (kit, mail) = (source(KIT, rev), source(MAIL, Some("v1")));
+        assert_eq!(
+            git_sources(&file, &Checkouts::new()),
+            [kit.clone(), mail.clone()].into()
+        );
+        let checkouts = [(kit, Ok(d.join("dl"))), (mail, Ok(d.join("dl/mail")))];
+        load_for(&file, &[], checkouts.into())
+    };
+    for rev in [None, Some("v1")] {
+        let config = load(rev, "kit").unwrap();
+        let pack = &config.projects[0].packs[1];
+        assert_eq!((pack.name.as_str(), &pack.root), ("kit", &d.join("dl/kit")));
+    }
+    let errors = load(None, "../dl/kit").expect_err("outside the repository");
+    let outside = "`dir = \"../dl/kit\"` is not a path inside the repository";
+    assert!(errors.iter().any(|e| e.message == outside), "{errors:?}");
+}
+
+#[test]
 fn a_addon_from_git_must_be_pinned() {
     fails(
         &[("config.toml", "[[addon]]\ngit = \"x\"\n")],
@@ -150,6 +176,6 @@ fn a_pack_with_an_unknown_key_says_what_a_pack_is() {
     );
     fails(
         &[("shop/loop-manager.toml", &project)],
-        "a pack is a path or `{ git, rev }`",
+        "a pack is a path or `{ git, rev, dir }`",
     );
 }

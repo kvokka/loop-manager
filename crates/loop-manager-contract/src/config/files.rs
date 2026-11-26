@@ -231,12 +231,17 @@ pub(super) struct AddonDecl {
     pub dir: Option<PathBuf>,
 }
 
-/// Where a pack or addon lives: a directory, or a git repository at a tag, a commit or its latest revision.
+/// Where a pack or addon lives: a directory, or a git repository at a tag, a commit or its latest revision, and
+/// the directory inside it when that is not its root.
 #[derive(Debug, Deserialize)]
-#[serde(untagged, expecting = "a pack is a path or `{ git, rev }`")]
+#[serde(untagged, deny_unknown_fields, expecting = "a pack is a path or `{ git, rev, dir }`")]
 pub(super) enum Source {
     Path(PathBuf),
-    Git(super::GitSource),
+    Git {
+        git: String,
+        rev: Option<String>,
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Deserialize)]

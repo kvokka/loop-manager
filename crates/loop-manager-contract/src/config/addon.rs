@@ -114,17 +114,6 @@ impl Loader {
             let Some(root) = self.addon_source(file, &decl).and_then(|s| self.root(file, base, &s)) else {
                 continue;
             };
-            let root = match &decl.dir {
-                None => root,
-                Some(dir) if dir.components().all(|c| matches!(c, std::path::Component::Normal(_))) => root.join(dir),
-                Some(dir) => {
-                    self.fail(
-                        file,
-                        format!("`dir = \"{}\"` is not a path inside the repository", dir.display()),
-                    );
-                    continue;
-                }
-            };
             let manifest = root.join("addon.toml");
             let Some(raw) = self.read::<AddonFile>(&manifest) else {
                 continue;

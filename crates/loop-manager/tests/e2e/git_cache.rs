@@ -177,6 +177,30 @@ fn without_a_pin_the_cache_serves_when_the_remote_is_away() {
     assert!(!check(d).0, "nothing to load from");
 }
 
+/// A pack in a directory of a repository whose root is no pack, at a tag and at the latest revision.
+#[test]
+fn a_pack_from_git_may_live_in_a_directory_of_the_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let files: Vec<(String, &str)> = PACK.iter().map(|(p, t)| (format!("packs/remote/{p}"), *t)).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+    let commit = repo(d, "all", &files);
+    git(d, &d.join("remote/all"), &["tag", "v1"]);
+    config(d, &[("all", Some("v1"))]);
+    let (ok, out) = check(d);
+    assert!(!ok && out.contains("pack.toml"), "the root is no pack: {out}");
+    for rev in ["rev = \"v1\", ", ""] {
+        let pack = format!(
+            "packs = [{{ git = \"{}\", {rev}dir = \"packs/remote\" }}]\n",
+            d.join("remote/all").display()
+        );
+        fs::write(d.join("config/loop-manager/shop/loop-manager.toml"), pack).unwrap();
+        let (ok, out) = check(d);
+        assert!(ok, "{rev}: {out}");
+    }
+    assert_eq!(cached(d), [commit].into());
+}
+
 #[test]
 fn cache_clear_needs_no_daemon_and_no_cache() {
     let tmp = tempfile::tempdir().unwrap();

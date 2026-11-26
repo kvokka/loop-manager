@@ -433,6 +433,7 @@ packs = [
   "../packs/kit",                    # a local pack directory
   { git = "https://github.com/acme/loop-manager-pack-review", rev = "v1.2.0" },  # pinned to a tag or a full commit id
   { git = "https://github.com/acme/loop-manager-pack-tools" },  # no pin: the latest revision of the default branch
+  { git = "https://github.com/acme/tools", rev = "v2.0.0", dir = "packs/qa" },  # a directory of the repository
 ]
 rounds = 2                          # over the orchestrator's `rounds`, under a formula's own
 
@@ -515,9 +516,9 @@ are the root's, and a project `[[trigger]]` that names no `rig` fires in the roo
 
 A pack in `packs` and an `[[addon]]` (in the orchestrator file, a project's or a pack's `pack.toml`) is a local
 directory, or a git repository with `pack.toml` / `addon.toml` at its root: `{ git = "<url>", rev = "<tag or commit>" }` for a pack,
-`git = ".."` and `rev = ".."` instead of `path` for an addon (exactly one of `path` and `git`). An addon from git
-may live in a directory of the repository: `dir = "addons/mail"` (relative, inside the repository; `dir` goes with
-`git` only).
+`git = ".."` and `rev = ".."` instead of `path` for an addon (exactly one of `path` and `git`). Either may live in a
+directory of the repository instead: `dir = "packs/qa"` in the pack's table, `dir = "addons/mail"` in the
+`[[addon]]` (relative, inside the repository; `dir` goes with `git` only).
 
 - `rev` is a full commit id (40 or 64 lowercase hex digits) or the name of a tag, looked up only as
   `refs/tags/<rev>`: a branch or a short commit id is a config error ("no tag ... in the repository").

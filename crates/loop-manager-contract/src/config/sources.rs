@@ -6,19 +6,30 @@ use super::{
     items::{parent, resolve},
     load::Loader,
 };
-use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 /// A git repository as a config file writes it: pinned by `rev` to a tag or a full commit id; without it, the
 /// latest revision.
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct GitSource {
     pub git: String,
     pub rev: Option<String>,
+}
+
+impl Source {
+    /// The repository of a source from git.
+    fn git(&self) -> Option<GitSource> {
+        match self {
+            Source::Path(_) => None,
+            Source::Git { git, rev, .. } => Some(GitSource {
+                git: git.clone(),
+                rev: rev.clone(),
+            }),
+        }
+    }
 }
 
 /// Where each git source was downloaded to, or why it was not.
@@ -56,9 +67,7 @@ pub fn git_sources(orchestrator_file: &Path, checkouts: &Checkouts) -> BTreeSet<
             {
                 found.extend(loader.git(&manifest, &pack.addon));
             }
-            if let Source::Git(git) = source {
-                found.insert(git);
-            }
+            found.extend(source.git());
         }
     }
     found
@@ -68,13 +77,7 @@ impl Loader {
     /// The git sources among the addons `file` declares.
     fn git(&mut self, file: &Path, decls: &[AddonDecl]) -> BTreeSet<GitSource> {
         let sources: Vec<Source> = decls.iter().filter_map(|d| self.addon_source(file, d)).collect();
-        sources
-            .into_iter()
-            .filter_map(|s| match s {
-                Source::Git(git) => Some(git),
-                Source::Path(_) => None,
-            })
-            .collect()
+        sources.iter().filter_map(Source::git).collect()
     }
 
     /// Where a declared addon is: exactly one of `path` and `git`, and `git` with `rev` (and `dir`, if any).
@@ -85,10 +88,11 @@ impl Loader {
                 "`dir` is for an addon from git: a `path` names the addon's directory itself",
             ),
             (Some(path), None, None) => Some(Source::Path(path.clone())),
-            (None, Some(git), Some(rev)) => Some(Source::Git(GitSource {
+            (None, Some(git), Some(rev)) => Some(Source::Git {
                 git: git.clone(),
                 rev: Some(rev.clone()),
-            })),
+                dir: decl.dir.clone(),
+            }),
             (None, Some(_), None) => self.none(
                 file,
                 "an addon from git needs `rev`, a tag or a full commit id: only a pack may follow the latest revision",
@@ -98,16 +102,24 @@ impl Loader {
     }
 
     /// The directory of a pack or addon that `file` in `base` declares: a path as is, a git source where it was
-    /// downloaded to.
+    /// downloaded to, or its `dir` there.
     pub(super) fn root(&mut self, file: &Path, base: &Path, source: &Source) -> Option<PathBuf> {
-        let git = match source {
+        let (repository, dir) = match source {
             Source::Path(path) => return Some(resolve(base, path)),
-            Source::Git(git) => git,
+            Source::Git { dir, .. } => (source.git()?, dir),
         };
-        match self.checkouts.get(git) {
-            Some(Ok(dir)) => Some(dir.clone()),
-            Some(Err(why)) => self.none(file, format!("`{}`: {why}", git.git)),
-            None => self.none(file, format!("`{}` is not downloaded", git.git)),
+        let root = match self.checkouts.get(&repository) {
+            Some(Ok(root)) => root.clone(),
+            Some(Err(why)) => return self.none(file, format!("`{}`: {why}", repository.git)),
+            None => return self.none(file, format!("`{}` is not downloaded", repository.git)),
+        };
+        match dir {
+            None => Some(root),
+            Some(dir) if dir.components().all(|c| matches!(c, Component::Normal(_))) => Some(root.join(dir)),
+            Some(dir) => self.none(
+                file,
+                format!("`dir = \"{}\"` is not a path inside the repository", dir.display()),
+            ),
         }
     }
 }
