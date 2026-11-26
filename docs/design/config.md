@@ -646,22 +646,23 @@ rig's layer, so "explain config" of it is the same with a rig or without; `expla
 rig's `agents` that edits it, edits a variant of it or maps it to a variant is a config error, its edits go in the
 project's `[agents]`), `prompt` (role prompt file, default `prompt.md` when it exists; its text is the agent layer's
 `system_prompt`, so an `[agents.<agent>]` edit may still replace it, and setting `system_prompt` in `agent.toml`
-too is an error), `description` and `subagents` (see "Subagents"), `max_runs` (optional positive integer: runs of this agent
+too is an error), `template` (prompt template file, below), `description` and `subagents` (see "Subagents"), `max_runs` (optional positive integer: runs of this agent
 started at once in its project; the orchestrator's `max_runs` still applies; a run whose next step is of an agent
 at its limit parks until a run of that agent ends or leaves its step), then the settings keys above. Its
 `harness`, `model` and `effort` are the defaults of the role: a pack, a formula, a variant or an `[agents]` edit may change
 any of them, and an agent that names no `harness` needs a layer that does.
 A role prompt file that is empty or only whitespace is a load error naming the file.
 
-`prompt.template.md` is the template of the agent's prompt, in the agent's own directory, so the agent is
-self-contained: an `ai` step names the agent and its run gets
+`template` names the file of the agent's prompt template, in the agent's own directory (default
+`prompt.template.md`), so the agent is self-contained: an `ai` step names the agent and its run gets
 this template, rendered (contracts 2.3); the step has no prompt file of its own. A run whose agent a variant or a
-bead's `agent:` label gives renders that agent's template (a variant's is its base agent's). An agent that an `ai` step
+bead's `agent:` label gives renders that agent's template (a variant's is its base agent's). A `template` that names
+a file the directory has not is a load error naming the file. An agent that an `ai` step
 names and that has no template is a config error naming the path to put it at. The template is checked against every
 formula whose steps name the agent, with that formula's inputs and earlier steps.
 
 A project rewrites an agent of its packs with files, without forking the pack: `.loop-manager/agents/<agent>/` next to
-`loop-manager.toml` lays over the agent's directory. Its `prompt.template.md` replaces the pack's. `{{ agent.<name> }}`
+`loop-manager.toml` lays over the agent's directory. Its file of the template's name replaces the pack's. `{{ agent.<name> }}`
 in the template is the text of `<name>.md`, the project's file over the pack agent's: text the project gives an agent
 (the conditions `qa` checks, say `.loop-manager/agents/qa/checks.md`) is a file of that agent, not a string in
 `loop-manager.toml`. A `{{ agent.<name> }}` with neither file is a config error naming where to put it; so is a
@@ -721,8 +722,8 @@ matches a target unfit so is the same error.
 ## Agent variants
 
 `[agents.<name>]` of the orchestrator or a project declares a pack agent under another name with settings of its own:
-`base = "<pack>.<agent>"` and any keys of `agent.toml` but `prompt` (the role prompt, skills and directory are the
-base agent's). A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
+`base = "<pack>.<agent>"` and any keys of `agent.toml` but `prompt` and `template` (the role prompt, the prompt
+template, skills and directory are the base agent's). A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
 "<variant>" }`. A run of the variant is of the variant's name: `max_runs` (its own, else the base agent's), the gate
 `agent:<variant>`, the events and `explain` count it as an agent of its own. The formulas of the pack still name the
 base agent; the other way to the same change, without a new name, is an edit (`[rigs.<r>.agents.<agent>]`).

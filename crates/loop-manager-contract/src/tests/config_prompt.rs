@@ -43,6 +43,40 @@ fn a_project_template_replaces_the_packs_and_a_file_of_the_project_fills_it() {
 }
 
 #[test]
+fn agent_toml_names_the_file_of_its_template() {
+    // With no `template` the file is `prompt.template.md`.
+    assert!(prompt(&[]).from.ends_with(TEMPLATE));
+    let agent = "kit/agents/implementer/agent.toml";
+    let named = format!("template = \"task.md\"\n{}", BASE[6].1);
+    let task = ("kit/agents/implementer/task.md", "Do {{ bead.title }}.");
+    let pack = prompt(&[(agent, named.as_str()), task]);
+    assert!(pack.from.ends_with(task.0), "{}", pack.from.display());
+    assert_eq!(
+        pack.template.render(&json!({ "bead": { "title": "T" } })).unwrap(),
+        "Do T."
+    );
+    // The project's file of that name lies over the agent's.
+    let own = "shop/.loop-manager/agents/implementer/task.md";
+    let laid = prompt(&[(agent, named.as_str()), task, (own, "Mine.")]);
+    assert!(laid.from.ends_with(own), "{}", laid.from.display());
+
+    let errors = load_with(&[(agent, named.as_str())]).unwrap_err();
+    let error = (errors.iter())
+        .find(|e| e.message.starts_with("`template`: no file `"))
+        .unwrap_or_else(|| panic!("{errors:?}"));
+    assert!(
+        error.message.ends_with("kit/agents/implementer/task.md`"),
+        "{}",
+        error.message
+    );
+    assert!(error.file.ends_with(agent));
+    fails(
+        &[(agent, "harness = \"claude\"\ntemplate = 1\n")],
+        "`template` must be a string",
+    );
+}
+
+#[test]
 fn a_missing_template_or_named_file_is_an_error_that_names_where_it_goes() {
     // An agent no step names needs no template.
     let idle = ("kit/agents/reviewer/agent.toml", "harness = \"claude\"\n");

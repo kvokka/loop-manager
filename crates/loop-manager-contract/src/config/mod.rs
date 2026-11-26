@@ -237,8 +237,10 @@ pub struct Pack {
 
 #[derive(Clone, Debug)]
 pub struct Agent {
-    /// Its directory in the pack: `agent.toml`, the role prompt, `prompt.template.md` and the files it names.
+    /// Its directory in the pack: `agent.toml`, the role prompt, the prompt template and the files it names.
     pub dir: PathBuf,
+    /// The file of its prompt template in `dir`: `template` of `agent.toml`, else `prompt.template.md`.
+    pub template: String,
     /// The harness `agent.toml` names, part of the agent layer.
     pub harness: Option<String>,
     /// Where it works; an agent of the root takes no rig's layer, edits or variant.
