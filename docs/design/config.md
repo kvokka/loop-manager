@@ -537,13 +537,13 @@ reads only the finished directories and never runs git. The cache is one per use
 - `<cache>/<url>/head` names the commit of the latest revision last seen.
 
 The url and the tag are written as one file name: letters, digits, `_`, `-` and `.` (not first) as they are, any
-other byte as `%XX`. Something not in the cache is cloned in full into a temporary directory next to its place,
-checked out detached at its commit and renamed into place. The network:
+other byte as `%XX`. Something not in the cache is fetched into a temporary directory next to its place: only its
+commit, without the history (`git fetch --depth 1`), checked out detached and renamed into place. The network:
 
 - a commit whose checkout is in the cache: git is not run at all;
 - a tag the cache names, with its checkout there: git is not run either. Tags are taken as immutable: a tag moved on
   the remote is not seen until the cache is cleared;
-- no pin: `git ls-remote <url> HEAD` at every load; a commit already in the cache is used as is, any other is cloned.
+- no pin: `git ls-remote <url> HEAD` at every load; a commit already in the cache is used as is, any other is fetched.
   When the remote cannot be asked (any failure of `ls-remote`) and the cache names a last seen revision, that
   checkout is used with a warning on the stderr of the process that loaded the config (the daemon's log, the output
   of `loop-manager config check`); with none, it is a config error.

@@ -117,13 +117,22 @@ fn a_rev_that_is_no_tag_and_no_commit_is_a_config_error() {
     let d = tmp.path();
     repo(d, "pack", PACK);
     let missing = "0123456789abcdef0123456789abcdef01234567";
-    for (name, rev) in [("pack", Some("main")), ("pack", Some(missing)), ("away", None)] {
+    let cases = [
+        ("pack", Some("main"), "no tag `main` in the repository"),
+        (
+            "pack",
+            Some(missing),
+            "no commit `0123456789abcdef0123456789abcdef01234567` in the repository",
+        ),
+        ("away", None, "git ls-remote"),
+    ];
+    for (name, rev, why) in cases {
         config(d, &[(name, rev)]);
         let (ok, out) = check(d);
         assert!(!ok, "{name} {rev:?}: {out}");
         let url = d.join("remote").join(name);
         assert!(
-            out.contains("loop-manager.toml") && out.contains(&*url.to_string_lossy()),
+            out.contains("loop-manager.toml") && out.contains(&*url.to_string_lossy()) && out.contains(why),
             "{out}"
         );
     }

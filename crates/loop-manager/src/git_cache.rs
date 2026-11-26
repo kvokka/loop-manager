@@ -125,14 +125,22 @@ fn latest(url: &str) -> Result<String, String> {
     }
 }
 
-/// Clones `url` into `temp` and checks out the commit `want` names there; `missing` is the error when none.
+/// Fetches into `temp` the one commit `want` names at `url` and checks it out; `missing` is the error when none.
 fn clone(temp: &Path, url: &str, want: &str, missing: String) -> Result<String, String> {
     if temp.exists() {
         fs::remove_dir_all(temp).map_err(|e| format!("{}: {e}", temp.display()))?;
     }
     let path = temp.to_string_lossy();
-    git(&["clone", "--quiet", "--no-checkout", "--", url, &path])?;
-    let resolve = format!("{want}^{{commit}}");
+    git(&["init", "--quiet", "--", &path])?;
+    // Only that commit, without its history: a full clone of a large repository does not fit the deadline.
+    let fetch = ["-C", &path, "fetch", "--quiet", "--depth", "1", "--", url, want];
+    git(&fetch).map_err(
+        |e| match e.contains("couldn't find remote ref") || e.contains("not our ref") {
+            true => missing.clone(),
+            false => e,
+        },
+    )?;
+    let resolve = "FETCH_HEAD^{commit}";
     let args = [
         "-C",
         &path,
@@ -140,7 +148,7 @@ fn clone(temp: &Path, url: &str, want: &str, missing: String) -> Result<String, 
         "--verify",
         "--quiet",
         "--end-of-options",
-        &resolve,
+        resolve,
     ];
     let commit = git(&args).map_err(|_| missing)?;
     if !commit_id(&commit) {
@@ -160,6 +168,8 @@ fn git(args: &[&str]) -> Result<String, String> {
         Command::new("git")
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
+            // The errors of a missing revision are told by their English text.
+            .env("LC_ALL", "C")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
