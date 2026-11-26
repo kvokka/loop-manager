@@ -2,7 +2,10 @@
 name = "review-loop"
 version = "0.1.0"
 
-# The one addon the pack's own agents attach: the context budget of the coder's and the reviewer's sessions.
+# The one addon the pack's own agents attach: the context budget of the coder's and the reviewer's sessions, pinned
+# to a release. A project that declares `context-budget` itself replaces this (README.md, "Use it in a project").
 [[addon]]
 name = "context-budget"
-path = "../../addons/context-budget"
+git = "https://github.com/kvokka/loop-manager.git"
+rev = "addons/context-budget/0.7.0"
+dir = "addons/context-budget"

@@ -35,8 +35,9 @@ devloop/                the project
   build, lint and test commands, what the review checks here, the language of the product and of the comments. The
   subcoder and the expert have no template, so `[agents.subcoder]` and `[agents.expert]` of `loop-manager.toml`
   replace their role prompts.
-- **Addons**: the pack declares and attaches `context-budget`; the project declares the rest and attaches them in
-  `[agents.coder]` and `[agents.reviewer]` (see "The addons").
+- **Addons**: the pack attaches `context-budget` and pins it to a release from git; the project declares it again
+  from this checkout, which replaces the pin. The project declares the rest and attaches them in `[agents.coder]`
+  and `[agents.reviewer]` (see "The addons").
 - **The report of the CI checks**: the `ci` task of `mise.toml` writes it to the file the pack names in
   `REVIEW_LOOP_CI_REPORT`.
 
@@ -272,9 +273,11 @@ The project attaches [t3-notify](../addons/t3-notify/README.md) in `[settings]`.
 T3 Code thread tells that thread when its run starts, enters `code_owner` or `review_owner`, and ends. The daemon needs
 `t3` on its `PATH`, and the thread's harness the `t3-run-card` plugin with auto-open on.
 
-The project and the pack use repository-relative declarations (`path = "../addons/<name>"` here,
-`path = "../../addons/context-budget"` in the pack) so the agents and CI
-exercise the addons from the same checkout, including changes under development. External projects
+The project declares its addons by repository-relative paths (`path = "../addons/<name>"`) so the agents and CI
+exercise them from the same checkout, including changes under development. That holds for `context-budget` too:
+the pack pins it to a release from git for the projects that list the pack, and the project's own declaration
+replaces the pin, so loading this config downloads nothing. The pack itself is listed by path
+(`packs = ["../packs/review-loop"]`), the working directory. External projects list the pack from git and
 can [pin a published addon](../docs/guide/addons.md#declare-it).
 
 ## Changing the pack and the project

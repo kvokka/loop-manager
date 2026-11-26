@@ -16,14 +16,12 @@ review-loop/
 
 ## Use it in a project
 
-`pack.toml` declares `context-budget` by the path `../../addons/context-budget`: the pack works from a checkout of
-this repository, with `addons/` beside `packs/`.
-
-List the pack in the project's `loop-manager.toml`, give the formula its inputs and start runs with a trigger or by
-hand:
+List the pack in the project's `loop-manager.toml`, from git or from a checkout by path, give the formula its inputs
+and start runs with a trigger or by hand:
 
 ```toml
-packs = ["<path to this directory>"]
+packs = [{ git = "https://github.com/kvokka/loop-manager.git", rev = "<tag or full commit id>", dir = "packs/review-loop" }]
+# or: packs = ["<path to this directory>"]
 
 [inputs]
 ci_command = "make ci"
@@ -39,6 +37,15 @@ inputs = { epic = "{{ event.bead.id }}" }
 ```
 
 By hand: `loop-manager run start <project> <rig> epic --input epic=<bead id>`.
+
+The pack brings its addon itself: `pack.toml` pins `context-budget` to a release in git, which `loop-manager`
+downloads with the pack. A project that wants another version or a local copy declares the addon itself, and the
+pack's pin is then not downloaded:
+
+```toml
+[[addon]]
+path = "<path to a copy of context-budget>"   # or `git`, `rev` and `dir`
+```
 
 ### Inputs
 

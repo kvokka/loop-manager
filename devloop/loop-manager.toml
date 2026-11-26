@@ -15,10 +15,14 @@ scratch_dir = "target/devloop/runs"
 # `close` copies them to `devloop/artifacts/<run>`, local and ignored by git (.gitignore).
 archive_dir = "devloop/artifacts"
 
-# The addons of this repository, from this checkout by relative path (README.md, "The addons"); the pack declares
-# `context-budget` itself. The agents attach them in the `[agents.*]` edits below.
+# The addons of this repository, from this checkout by relative path (README.md, "The addons"). The agents attach
+# them in the `[agents.*]` edits below.
 [[addon]]
 path = "../addons/code-search"
+
+# The pack pins `context-budget` to a release from git. This replaces that with this checkout's, as the others are.
+[[addon]]
+path = "../addons/context-budget"
 
 [[addon]]
 path = "../addons/dcg"
