@@ -1,7 +1,7 @@
 //! The effective config of one (project, rig, agent): the layers of docs/design/config.md merged, every value with the
 //! layer it came from, so that "explain config" can show it.
 
-use super::{Hook, Mcp, Service, Settings, Skill};
+use super::{Hook, Mcp, PromptAppend, Service, Settings, Skill};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, fmt, fmt::Write as _, path::PathBuf};
@@ -97,6 +97,10 @@ pub struct EffectiveConfig {
     pub model_given: Option<String>,
     pub effort: Option<Sourced<String>>,
     pub system_prompt: Option<Sourced<String>>,
+    /// The `prompt_append` files whose text follows the role prompt in `system_prompt`, as written, in the order
+    /// they apply.
+    #[serde(default)]
+    pub prompt_append: Vec<Sourced<String>>,
     /// `None`: no layer says, and host inheritance is on by default (docs/design/config.md).
     pub inherit_host: Option<Sourced<bool>>,
     pub env: BTreeMap<String, Sourced<String>>,
@@ -147,6 +151,7 @@ impl EffectiveConfig {
             model_given: None,
             effort: None,
             system_prompt: None,
+            prompt_append: Vec::new(),
             inherit_host: None,
             env: BTreeMap::new(),
             mcp: BTreeMap::new(),
@@ -228,6 +233,26 @@ impl EffectiveConfig {
         by_key(&mut self.services, &settings.services, from, |_| true);
     }
 
+    /// The text of the `prompt_append` file of layer `from` after the role prompt the layers gave, a blank line
+    /// between; alone, it is the role prompt (docs/design/config.md "Agent").
+    pub(super) fn append_prompt(&mut self, append: &PromptAppend, from: &Layer) {
+        let text = append.text.trim();
+        self.system_prompt = Some(match self.system_prompt.take() {
+            Some(role) => Sourced {
+                value: format!("{}\n\n{text}", role.value.trim_end()),
+                from: role.from.and(from),
+            },
+            None => Sourced {
+                value: text.to_owned(),
+                from: from.clone(),
+            },
+        });
+        self.prompt_append.push(Sourced {
+            value: append.file.clone(),
+            from: from.clone(),
+        });
+    }
+
     /// What attached addons add beyond a settings layer (docs/guide/addon-development.md): their prompt fragments
     /// after the system prompt and their `bin/` directories ahead of `PATH` (the daemon's when no layer sets it), in
     /// attachment order.
@@ -287,6 +312,10 @@ impl EffectiveConfig {
         for (key, slot) in scalars {
             if let Some(s) = slot {
                 line(key, quoted(&s.value), &s.from);
+            }
+            // The files whose text the system prompt ends with, under it.
+            for s in self.prompt_append.iter().filter(|_| key == "system_prompt") {
+                line("prompt_append", quoted(&s.value), &s.from);
             }
         }
         if let Some(s) = &self.subagents {

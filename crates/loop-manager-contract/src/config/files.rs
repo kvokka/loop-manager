@@ -37,6 +37,16 @@ pub struct Settings {
     /// of an agent, a variant and an edit only.
     #[serde(skip)]
     pub subagents: Option<Vec<String>>,
+    /// `prompt_append` of an `[agents.<name>]` table: a file whose text follows the agent's role prompt.
+    #[serde(skip)]
+    pub prompt_append: Option<PromptAppend>,
+}
+
+/// The file an `[agents.<name>]` table appends to the role prompt: its path as written, and its text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PromptAppend {
+    pub file: String,
+    pub text: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]

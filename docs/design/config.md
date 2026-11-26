@@ -57,6 +57,7 @@ policy, with different values, so it is set in the harness's own block (`[settin
 | `skills.<name>` | `{path}` (must exist) or `{enabled = false}` | named list |
 | `addons` | array of `{name, params = {..}, enabled = true}`: attaches a declared addon (see "Addon") | by name: an attachment keeps the place of its first mention, `params` merge by key, the strongest `enabled` decides |
 | `description`, `subagents` | string; array of agent and variant names and patterns: keys of an agent only — `agent.toml`, a variant and an edit take them, any `[settings]` table does not (see "Subagents") | scalar; the list is replaced whole by the strongest layer that sets it |
+| `prompt_append` | string: a file whose text follows the agent's role prompt, relative to the directory of the config file that names it — a key of `[agents.<name>]` only: an edit and a variant take it, `agent.toml` and any `[settings]` table do not (see "Agent") | every level appends, in the order of the layers |
 | `native.<harness>` | any table, passed to the adapter as is; `native.claude` is a table of claude settings keys, delivered with `--settings` together with the hooks, except `permission_mode`, which goes as `--permission-mode`; `native.codex` is a table of codex `config.toml` keys (`approval_policy` is the thread's approval policy), delivered to the app-server as `-c key=value` flags (so it is part of the process fingerprint) | by key |
 
 A harness hook (`hooks.<name>`) delivered to claude also fires inside every subagent of the session (its input carries
@@ -225,7 +226,9 @@ What the user says for the agent (9, 10) is stronger than what the pack and the 
 
 A scalar takes the strongest layer's value; a table (`env`, `mcp`, `native`) merges by key, an entry replaced whole;
 a named list (`hooks`, `skills`, `addons`) is the union, and a stronger layer turns an element off by name;
-`subagents` is replaced whole by the strongest layer that sets it. The host
+`subagents` is replaced whole by the strongest layer that sets it; `prompt_append` replaces nothing: the file of
+every layer that names one follows the role prompt (the `system_prompt` the layers came to), in the order of the
+layers, and the fragments of the addons come after them. The host
 layer is the exception: the harness merges it itself, loop-manager neither reads nor parses it, and it is turned off
 only as a whole (`inherit_host = false`), never one element by name. The harness config inside the rig (`CLAUDE.md`,
 `.claude/`, `.mcp.json`, `AGENTS.md`) belongs to the repository, not the host: it applies with inheritance off too
@@ -239,7 +242,9 @@ variant layers too; a run keeps the one of its current step. Addons attach first
 a stronger layer can detach an addon and its whole contribution; an attached addon prints as `addons.<name> =
 "attached"`, then each of its params as `addons.<name>.params.<key> = <value>`, each with its layer. An edit applies when its key resolves (see Names)
 to the agent. Every value keeps its layer; a value several layers make together (`native` tables merged by key, a system
-prompt with addon fragments, `PATH` with addon `bin/` directories) names them all in order (`# agent + addon mail`),
+prompt with appended files and addon fragments, `PATH` with addon `bin/` directories) names them all in order
+(`# agent + project [agents] + addon mail`), an appended file prints as written under the `system_prompt` it joined,
+one line per layer (`prompt_append = "prompts/coder.md"  # project [agents]`),
 and a model the adapter expanded keeps the short name it was given
 (`model = "gpt-6-luna"  # rig [agents], given as "luna"`). The new layers print as `pack <name>`,
 `formula <pack>.<name> step <step>` and `variant <name>`. `subagents` prints resolved, the agent itself in it
@@ -653,6 +658,22 @@ at its limit parks until a run of that agent ends or leaves its step), then the 
 any of them, and an agent that names no `harness` needs a layer that does.
 A role prompt file that is empty or only whitespace is a load error naming the file.
 
+The role prompt reaches the harness as an addition to its own system prompt, never in place of it, and a user adds
+to the role prompt the same way. `prompt_append = "<file>"` in `[agents.<agent>]` of the orchestrator, a project or a
+rig, or in a variant's table, names a file relative to the directory of the config file that names it; its text
+follows the role prompt after a blank line:
+
+```toml
+[agents.coder]
+prompt_append = "prompts/coder.md"
+```
+
+The role prompt it follows is the `system_prompt` the layers came to; with none, the text is the role prompt. Several
+levels append in the order of the layers: the variant, then the orchestrator, the project and the rig. The result is
+the agent's `system_prompt` wherever it goes: the session of a step, the definition of a subagent, the run's snapshot.
+A file that is missing, empty or only whitespace is a load error naming the key and the file. `agent.toml` does not
+take the key: the agent's own text is its `prompt`.
+
 `template` names the file of the agent's prompt template, in the agent's own directory (default
 `prompt.template.md`), so the agent is self-contained: an `ai` step names the agent and its run gets
 this template, rendered (contracts 2.3); the step has no prompt file of its own. A run whose agent a variant or a
@@ -723,7 +744,7 @@ matches a target unfit so is the same error.
 
 `[agents.<name>]` of the orchestrator or a project declares a pack agent under another name with settings of its own:
 `base = "<pack>.<agent>"` and any keys of `agent.toml` but `prompt` and `template` (the role prompt, the prompt
-template, skills and directory are the base agent's). A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
+template, skills and directory are the base agent's), with `prompt_append` as in an edit. A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
 "<variant>" }`. A run of the variant is of the variant's name: `max_runs` (its own, else the base agent's), the gate
 `agent:<variant>`, the events and `explain` count it as an agent of its own. The formulas of the pack still name the
 base agent; the other way to the same change, without a new name, is an edit (`[rigs.<r>.agents.<agent>]`).

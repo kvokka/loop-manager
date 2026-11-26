@@ -20,6 +20,7 @@ fn config(native: Option<Value>) -> EffectiveConfig {
         model: None,
         effort: None,
         system_prompt: None,
+        prompt_append: Vec::new(),
         inherit_host: None,
         env: Default::default(),
         mcp: Default::default(),

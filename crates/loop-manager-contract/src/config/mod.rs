@@ -29,7 +29,7 @@ use crate::{
 pub use assemble::{Attached, EffectiveConfig, Layer, Sourced};
 pub use dependency::{Dependency, DependencyScope};
 pub use env::{ExecEnv, env_literal, env_value};
-pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, Settings, Skill};
+pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, PromptAppend, Settings, Skill};
 pub use formula_file::{Formula, Input, InputType, OnItemFailure, Step, StepKind};
 pub use places::Scope;
 pub use pricing::{Price, Pricing, Rates, Source as PriceSource, catalog};

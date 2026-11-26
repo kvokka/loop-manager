@@ -20,6 +20,7 @@ pub(crate) fn config() -> EffectiveConfig {
         model: Some(agent("gpt-fake".into())),
         effort: Some(agent("low".into())),
         system_prompt: None,
+        prompt_append: Vec::new(),
         inherit_host: Some(agent(false)),
         env: [("OPENAI_API_KEY".to_owned(), agent("sk-fake".to_owned()))].into(),
         mcp: Default::default(),

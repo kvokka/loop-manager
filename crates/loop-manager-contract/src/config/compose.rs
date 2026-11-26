@@ -254,6 +254,12 @@ impl Config {
         for (layer, settings) in &layers {
             config.apply(settings, layer);
         }
+        // What the user appends follows the role prompt the layers came to, whichever of them gave it.
+        for (layer, settings) in &layers {
+            if let Some(append) = &settings.prompt_append {
+                config.append_prompt(append, layer);
+            }
+        }
         config.contribute(&attached.iter().map(|(d, _)| *d).collect::<Vec<_>>());
         for (name, service) in &config.services {
             service.value.bind_address(name)?;

@@ -38,6 +38,7 @@ pub(super) fn config(provider: &Provider) -> EffectiveConfig {
         model: Some(sourced("claude-haiku-5-5")),
         effort: None,
         system_prompt: None,
+        prompt_append: Vec::new(),
         inherit_host: Some(Sourced {
             value: false,
             from: Layer::Agent,

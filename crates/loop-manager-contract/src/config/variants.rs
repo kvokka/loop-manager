@@ -2,12 +2,13 @@
 //! rigs that run a variant in place of a pack agent (`[rigs.<r>.agents]`): docs/design/config.md "Agent variants".
 
 use super::{
-    Name, Pack, Project, Scope, Settings, Variant,
+    Name, Pack, Project, PromptAppend, Scope, Settings, Variant,
     check::resolve,
+    items::resolve as resolve_path,
     load::{Loader, reference},
     retired::retired,
 };
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 impl Loader {
     /// The `[agents.<name>]` tables of one file: the edits of agents by name, and the variants (those with `base`).
@@ -21,8 +22,9 @@ impl Loader {
         let (mut edits, mut variants) = (BTreeMap::new(), BTreeMap::new());
         for (name, mut table) in tables {
             let what = format!("agents.{name}");
+            let prompt_append = self.prompt_append(file, base, &format!("`{what}`"), &mut table);
             let parsed = string(&mut table, "base").and_then(|b| Ok((b, agent_keys(table)?)));
-            match parsed {
+            match parsed.map(|(b, (s, max_runs))| (b, (Settings { prompt_append, ..s }, max_runs))) {
                 Ok((None, (_, Some(_)))) => self.fail(
                     file,
                     format!("`{what}`: `max_runs` is the agent's own; a variant (with `base`) may set its own"),
@@ -59,10 +61,17 @@ impl Loader {
             match value {
                 // Resolved by `check` once the packs are loaded.
                 toml::Value::String(variant) => drop(agents.insert(reference(&agent), variant)),
-                toml::Value::Table(table) => match agent_settings(table) {
-                    Ok(s) => drop(edits.insert(agent, self.settings(file, dir, s, addons))),
-                    Err(e) => self.fail(file, format!("rig `{rig}`: `agents.{agent}`: {e}")),
-                },
+                toml::Value::Table(mut table) => {
+                    let what = format!("rig `{rig}`: `agents.{agent}`");
+                    let prompt_append = self.prompt_append(file, dir, &what, &mut table);
+                    match agent_settings(table) {
+                        Ok(s) => {
+                            let s = Settings { prompt_append, ..s };
+                            edits.insert(agent, self.settings(file, dir, s, addons));
+                        }
+                        Err(e) => self.fail(file, format!("{what}: {e}")),
+                    }
+                }
                 _ => self.fail(
                     file,
                     format!("rig `{rig}`: `agents.{agent}` is a table of settings or the name of a variant"),
@@ -70,6 +79,23 @@ impl Loader {
             }
         }
         (edits, agents)
+    }
+
+    /// `prompt_append` of the `[agents.<name>]` table `what` of `file`, taken out of it: the file it names, relative
+    /// to `dir`, and its text, which is never empty (docs/design/config.md "Agent").
+    fn prompt_append(&mut self, file: &Path, dir: &Path, what: &str, table: &mut toml::Table) -> Option<PromptAppend> {
+        let named = match string(table, "prompt_append") {
+            Ok(named) => named?,
+            Err(e) => return self.none(file, format!("{what}: {e}")),
+        };
+        let path = resolve_path(dir, Path::new(&named));
+        match fs::read_to_string(&path) {
+            Ok(text) if text.trim().is_empty() => {
+                self.none(file, format!("{what}: `prompt_append`: `{}` is empty", path.display()))
+            }
+            Ok(text) => Some(PromptAppend { file: named, text }),
+            Err(e) => self.none(file, format!("{what}: `prompt_append`: `{}`: {e}", path.display())),
+        }
     }
 }
 

@@ -8,6 +8,7 @@ mod config_launch;
 mod config_layers;
 mod config_pack_addons;
 mod config_prompt;
+mod config_prompt_append;
 mod config_root;
 mod config_services;
 mod config_sources;

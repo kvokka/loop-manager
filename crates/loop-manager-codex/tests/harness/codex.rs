@@ -33,6 +33,7 @@ fn config(provider: &Provider) -> EffectiveConfig {
         model: Some(agent("gpt-fake".into())),
         effort: None,
         system_prompt: None,
+        prompt_append: Vec::new(),
         inherit_host: Some(agent(false)),
         env: Default::default(),
         mcp: Default::default(),
