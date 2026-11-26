@@ -31,9 +31,10 @@ impl Loader {
             return self.none(&file, "`scope` is `rig` or `root`".to_owned());
         };
         let (harness, prompt) = (string(&mut table, "harness"), string(&mut table, "prompt"));
-        let (harness, prompt, (settings, max_runs)) = match (harness, prompt, agent_keys(table)) {
-            (Ok(h), Ok(p), Ok(rest)) => (h, p, rest),
-            (Err(e), ..) | (_, Err(e), _) | (.., Err(e)) => return self.none(&file, e),
+        let template = string(&mut table, "template");
+        let (harness, prompt, template, (settings, max_runs)) = match (harness, prompt, template, agent_keys(table)) {
+            (Ok(h), Ok(p), Ok(t), Ok(rest)) => (h, p, t, rest),
+            (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => return self.none(&file, e),
         };
         if let Some(h) = harness.as_ref().filter(|h| !self.harnesses.contains(*h)) {
             self.fail(
@@ -46,6 +47,9 @@ impl Loader {
             None if !dir.join("prompt.md").exists() => None,
             None => self.text(&file, &dir.join("prompt.md")),
         };
+        if let Some(named) = template.as_ref().filter(|t| !dir.join(t).is_file()) {
+            self.fail(&file, format!("`template`: no file `{}`", dir.join(named).display()));
+        }
         let mut settings = self.settings(&file, dir, settings, addons);
         // The role prompt is the agent layer's system prompt (docs/design/config.md): one value, so not both.
         if prompt.is_some() && settings.system_prompt.is_some() {
@@ -54,6 +58,7 @@ impl Loader {
         settings.system_prompt = settings.system_prompt.or(prompt);
         Some(Agent {
             dir: dir.to_path_buf(),
+            template: template.unwrap_or_else(|| super::TEMPLATE.to_owned()),
             harness,
             scope,
             settings,
@@ -99,7 +104,7 @@ impl Loader {
     }
 
     pub(super) fn formula(&mut self, file: &Path) -> Option<(String, Formula)> {
-        let raw: FormulaFile = self.read(file)?;
+        let mut raw: FormulaFile = self.read(file)?;
         self.name(file, "formula", &raw.name);
         if raw.step.is_empty() {
             return self.none(file, "a formula has at least one `[[step]]`");
@@ -185,6 +190,7 @@ impl Loader {
         let own = raw.rounds.map(|n| (n.get(), super::Layer::Formula(raw.name.clone())));
         let (value, from) = own.unwrap_or((3, super::Layer::Default));
         let budget = self.budget(file, raw.budget.as_ref());
+        let defaults = self.input_defaults(file, &raw.name, &mut raw.inputs);
         Some((
             raw.name,
             Formula {
@@ -194,10 +200,39 @@ impl Loader {
                 internal: raw.internal,
                 rounds: super::Sourced { value, from },
                 budget,
-                defaults: BTreeMap::new(),
+                defaults,
                 steps,
             },
         ))
+    }
+
+    /// The `default` of each input of formula `name`, as a value of the input's type: the weakest source of the
+    /// input's value (docs/design/config.md "Formula"). One for a `task` input, or of another type, is an error.
+    fn input_defaults(
+        &mut self,
+        file: &Path,
+        name: &str,
+        inputs: &mut BTreeMap<String, super::formula_file::Input>,
+    ) -> BTreeMap<String, super::Sourced<Value>> {
+        let mut defaults = BTreeMap::new();
+        for (key, input) in inputs {
+            let Some(default) = &mut input.default else {
+                continue;
+            };
+            let taken = match input.kind {
+                InputType::Task => Err("a `task` input takes no `default`".to_owned()),
+                kind => (kind.take(default)).map_err(|want| format!("`default` must be {want}, not {default}")),
+            };
+            match taken {
+                Ok(value) => {
+                    default.clone_from(&value);
+                    let from = super::Layer::Formula(name.to_owned());
+                    defaults.insert(key.clone(), super::Sourced { value, from });
+                }
+                Err(e) => self.fail(file, format!("input `{key}`: {e}")),
+            }
+        }
+        defaults
     }
 
     /// A formula's `budget`: a positive amount of USD with at most twelve decimals (docs/design/formula-budgets.md).

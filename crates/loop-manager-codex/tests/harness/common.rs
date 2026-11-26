@@ -93,6 +93,7 @@ impl Live {
             model: Some(sourced("gpt-fake".to_owned())),
             effort: None,
             system_prompt: None,
+            prompt_append: Vec::new(),
             inherit_host: Some(sourced(false)),
             env: Default::default(),
             mcp: Default::default(),

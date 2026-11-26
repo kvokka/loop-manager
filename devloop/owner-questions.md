@@ -1,8 +1,9 @@
-# Questions in the devloop pack
+# Questions in devloop
 
-Read this for the repository's `devloop` project and `epic` formula. Other packs may use other formats: inspect their
-instructions and step outputs instead of imposing these names on them. All commands below run on the machine that
-holds the project and its checkout; do not create a new tracker if the recorded project directory is unavailable.
+Read this for the repository's `devloop` project and the `epic` formula of its pack `review-loop`. Other packs may
+use other formats: inspect their instructions and step outputs instead of imposing these names on them. All commands
+below run on the machine that holds the project and its checkout; do not create a new tracker if the recorded project
+directory is unavailable.
 
 ## Context and outstanding concerns
 

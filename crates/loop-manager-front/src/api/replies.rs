@@ -464,6 +464,8 @@ pub(crate) struct FormulaInput {
     #[schema(rename = "type")]
     kind: String,
     required: bool,
+    /// The value of the input nobody gives, of the input's type; absent when the formula sets none.
+    default: Option<Value>,
 }
 
 /// A pack; the project's own pack has no version.
@@ -481,6 +483,8 @@ pub(crate) struct Pack {
 pub(crate) struct Addon {
     /// The project whose runs it is on; null for the orchestrator's.
     project: Option<String>,
+    /// The pack of the project whose `pack.toml` declares it; null when the orchestrator's or the project's file does.
+    pack: Option<String>,
     name: String,
     version: Option<String>,
     root: Option<String>,

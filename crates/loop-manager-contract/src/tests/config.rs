@@ -218,6 +218,19 @@ fn a_name_shared_by_two_packs_must_be_qualified() {
     assert_eq!(config.projects[0].packs[0].triggers[0].run, name("kit", "implement"));
 }
 
+/// A declared pack takes its `bin/` directory; the project root, a pack too, takes none (docs/design/config.md
+/// "Pack").
+#[test]
+fn only_a_declared_pack_takes_its_bin_directory() {
+    let config = load_with(&[("kit/bin/gate", ""), ("shop/bin/gate", "")]).unwrap();
+    let packs = &config.projects[0].packs;
+    assert_eq!(
+        (packs[0].bin.as_ref(), packs[1].bin.as_ref()),
+        (None, Some(&packs[1].root.join("bin")))
+    );
+    assert_eq!(load_with(&[]).unwrap().projects[0].packs[1].bin, None, "no `bin/`");
+}
+
 #[test]
 fn a_bare_name_prefers_the_own_pack() {
     // The project root pack has its own `implementer`; the pack's formula still gets the pack's one.

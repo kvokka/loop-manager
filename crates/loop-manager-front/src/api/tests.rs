@@ -50,6 +50,43 @@ fn a_formula_is_explained_with_the_layers_of_its_rounds_and_input_values() {
     assert_eq!(text.matches("# runs only if").count(), 1, "{text}");
 }
 
+/// An input's `default` is explained as the formula's value until a config gives another, and the catalog shows it
+/// with the input (docs/design/config.md).
+#[test]
+fn an_input_default_is_explained_and_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = [
+        ("config.toml", "projects = [\"shop\"]\n"),
+        ("shop/loop-manager.toml", "[inputs]\nn = 4\n"),
+        (
+            "shop/formulas/flow.toml",
+            "name = \"flow\"\n[inputs]\nfocus = { type = \"string\", default = \"all of it\" }\n\
+             n = { type = \"integer\", default = 1 }\nquick = { type = \"boolean\" }\n\
+             [[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"true\"]\n",
+        ),
+    ];
+    for (path, text) in files {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let config = loop_manager_core::config::load(&dir.path().join("config.toml")).unwrap();
+    let of = super::config::Explain::Formula("flow".into());
+    let reply = super::config::explained(&config, "shop", &of, None).unwrap();
+    let text = reply["text"].as_str().unwrap();
+    let head = "rounds = 3  # default\ninputs.focus = \"all of it\"  # formula flow\ninputs.n = 4  # project\n";
+    assert!(text.starts_with(head), "{text}");
+    let listed = super::mcp::formulas(&config, None);
+    assert_eq!(
+        listed[0]["inputs"],
+        serde_json::json!({
+            "focus": { "type": "string", "required": false, "default": "all of it" },
+            "n": { "type": "integer", "required": false, "default": 1 },
+            "quick": { "type": "boolean", "required": false },
+        })
+    );
+}
+
 /// `explain --formula` on a rig that sets `max_writers` names it after `rounds`; on the root there is none.
 #[test]
 fn a_formula_on_a_rig_is_explained_with_its_max_writers() {
@@ -183,4 +220,41 @@ async fn beads_are_filed_listed_and_closed_through_the_tracker_of_their_project(
     assert_eq!(tracker.bead(&id).unwrap().status, "closed");
     assert_eq!(shut(&id).await.map_err(code), Ok(serde_json::Value::Null));
     assert_eq!(shut("b-none").await.map_err(code), Err(404));
+}
+
+/// `explain --formula` of a formula of a pack with `bin/` says what its commands' `PATH` starts with
+/// (docs/design/config.md).
+#[test]
+fn a_formula_of_a_pack_with_bin_is_explained_with_its_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let flow = "name = \"flow\"\n[[step]]\nname = \"work\"\nkind = \"exec\"\ncommand = [\"gate\"]\n";
+    let files = [
+        ("config.toml", "projects = [\"shop\"]\n"),
+        ("shop/loop-manager.toml", "packs = [\"../kit\"]\n"),
+        ("shop/bin/gate", ""),
+        ("shop/formulas/flow.toml", flow),
+        ("kit/pack.toml", "name = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("kit/bin/gate", ""),
+        ("kit/formulas/flow.toml", flow),
+    ];
+    for (path, text) in files {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let config = loop_manager_core::config::load(&dir.path().join("config.toml")).unwrap();
+    let text = |formula: &str| {
+        let of = super::config::Explain::Formula(formula.into());
+        super::config::explained(&config, "shop", &of, None).unwrap()["text"].clone()
+    };
+    let line = format!(
+        "# `PATH` of the exec steps and check scripts starts with {}  # pack kit\n",
+        dir.path().join("kit/bin").display()
+    );
+    assert!(
+        text("kit.flow").as_str().unwrap().contains(&line),
+        "{}",
+        text("kit.flow")
+    );
+    assert!(!text("flow").as_str().unwrap().contains("`PATH`"), "the root has none");
 }

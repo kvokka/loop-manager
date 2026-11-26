@@ -16,3 +16,6 @@ jobs:
       - uses: jdx/mise-action@v5
       - uses: Swatinem/rust-cache@v2
       - run: mise run ci
+        env:
+          # The runner builds the tests anew and runs them slower than the five minutes of a developer's machine.
+          CI_TIMEOUT: 10m

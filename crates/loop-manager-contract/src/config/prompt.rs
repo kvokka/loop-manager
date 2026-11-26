@@ -1,7 +1,8 @@
-//! The prompt template of each agent a project's formulas name (docs/design/config.md): `prompt.template.md` of the
-//! agent's directory in its pack, or the project's own in `.loop-manager/agents/<agent>/`, with the files the template names.
+//! The prompt template of each agent a project's formulas name (docs/design/config.md): the file `template` of its
+//! `agent.toml` names in the agent's directory in its pack (`prompt.template.md` when it names none), or the project's
+//! own of that name in `.loop-manager/agents/<agent>/`, with the files the template names.
 
-use super::{Input, InputType, Name, Project, Step, load::Loader, schema};
+use super::{Agent, Input, InputType, Name, Project, Step, load::Loader, schema};
 use crate::template::{Filter, Inputs, Template};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -9,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The file of an agent's prompt template.
+/// The file of an agent's prompt template when its `agent.toml` names none.
 pub const TEMPLATE: &str = "prompt.template.md";
 
 /// The roots of a prompt template (contracts 2.3).
@@ -60,7 +61,7 @@ pub(super) fn project(loader: &mut Loader, project: &mut Project) {
                 name: name.clone(),
             };
             let required = named.contains(&name);
-            if let Some(prompt) = agent_prompt(loader, &overlay, &name, &agent.dir, required) {
+            if let Some(prompt) = agent_prompt(loader, &overlay, &name, agent, required) {
                 prompts.insert(name, prompt);
             }
         }
@@ -86,11 +87,11 @@ pub(super) fn project(loader: &mut Loader, project: &mut Project) {
     project.prompts = prompts;
 }
 
-/// The prompt of `agent`, whose directory in its pack is `base`; `None` when it has no template, an error when
-/// a step names it (`required`) or after a config error.
-fn agent_prompt(loader: &mut Loader, overlay: &Path, agent: &Name, base: &Path, required: bool) -> Option<Prompt> {
-    let own = overlay.join(&agent.name);
-    let Some(from) = [own.join(TEMPLATE), base.join(TEMPLATE)]
+/// The prompt of `agent`, the pack agent `of`; `None` when it has no template, an error when a step names it
+/// (`required`) or after a config error.
+fn agent_prompt(loader: &mut Loader, overlay: &Path, agent: &Name, of: &Agent, required: bool) -> Option<Prompt> {
+    let (own, base) = (overlay.join(&agent.name), of.dir.as_path());
+    let Some(from) = [own.join(&of.template), base.join(&of.template)]
         .into_iter()
         .find(|p| p.is_file())
     else {
@@ -99,7 +100,7 @@ fn agent_prompt(loader: &mut Loader, overlay: &Path, agent: &Name, base: &Path, 
         }
         let why = format!(
             "agent `{agent}` has no prompt template: put it in `{}`",
-            base.join(TEMPLATE).display()
+            base.join(&of.template).display()
         );
         return loader.none(&base.join("agent.toml"), why);
     };

@@ -15,7 +15,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use loop_manager_core::{
-    config::{Config, InputType},
+    config::{Config, Input, InputType},
     toon,
 };
 use serde_json::{Map, Value, json};
@@ -219,11 +219,14 @@ pub(super) fn formulas(config: &Config, project: Option<&str>) -> Value {
     for p in config.projects.iter().filter(|p| project.is_none_or(|n| n == p.name)) {
         for pack in &p.packs {
             for (name, formula) in &pack.formulas {
-                let inputs: Map<String, Value> = formula
-                    .inputs
-                    .iter()
-                    .map(|(n, i)| (n.clone(), json!({ "type": input_type(i.kind), "required": i.required })))
-                    .collect();
+                let input = |i: &Input| {
+                    let mut input = json!({ "type": input_type(i.kind), "required": i.required });
+                    if let Some(default) = &i.default {
+                        input["default"] = default.clone();
+                    }
+                    input
+                };
+                let inputs: Map<String, Value> = (formula.inputs.iter()).map(|(n, i)| (n.clone(), input(i))).collect();
                 // The project's own pack has no version: its formulas go by their bare name.
                 let formula_ref = match pack.version {
                     Some(_) => format!("{}.{name}", pack.name),

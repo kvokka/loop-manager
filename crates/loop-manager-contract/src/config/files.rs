@@ -37,6 +37,16 @@ pub struct Settings {
     /// of an agent, a variant and an edit only.
     #[serde(skip)]
     pub subagents: Option<Vec<String>>,
+    /// `prompt_append` of an `[agents.<name>]` table: a file whose text follows the agent's role prompt.
+    #[serde(skip)]
+    pub prompt_append: Option<PromptAppend>,
+}
+
+/// The file an `[agents.<name>]` table appends to the role prompt: its path as written, and its text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PromptAppend {
+    pub file: String,
+    pub text: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -229,14 +239,21 @@ pub(super) struct AddonDecl {
     pub rev: Option<String>,
     /// The addon's directory inside the repository.
     pub dir: Option<PathBuf>,
+    /// The addon's own name, in a `pack.toml` only: what replaces the declaration is known without its source.
+    pub name: Option<String>,
 }
 
-/// Where a pack or addon lives: a directory, or a git repository at a tag, a commit or its latest revision.
+/// Where a pack or addon lives: a directory, or a git repository at a tag, a commit or its latest revision, and
+/// the directory inside it when that is not its root.
 #[derive(Debug, Deserialize)]
-#[serde(untagged, expecting = "a pack is a path or `{ git, rev }`")]
+#[serde(untagged, deny_unknown_fields, expecting = "a pack is a path or `{ git, rev, dir }`")]
 pub(super) enum Source {
     Path(PathBuf),
-    Git(super::GitSource),
+    Git {
+        git: String,
+        rev: Option<String>,
+        dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -307,6 +324,10 @@ pub(super) struct PackFile {
     #[serde(default)]
     pub requires_addons: Vec<String>,
     pub min_loop_manager: Option<String>,
+    /// The addons it declares, each by `name`, for every project that lists it; `path` is relative to the pack's
+    /// directory.
+    #[serde(default)]
+    pub addon: Vec<AddonDecl>,
     #[serde(default)]
     pub trigger: Vec<TriggerFile>,
     #[serde(default)]

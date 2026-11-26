@@ -1,0 +1,16 @@
+# The agent's own files, in this directory.
+# The role: appended to the system prompt of the harness in every session of the agent.
+prompt = "prompt.md"
+# The prompt of the step `review`: rendered each round with the epic, its last comments and the report of the CI.
+template = "prompt.template.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.reviewer]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role.
+
+# The defaults of the role; a project changes them in `[agents.reviewer]` of its loop-manager.toml. It calls no
+# subagents.
+harness = "claude"
+model = "opus"
+effort = "high"
+# The addon's default budget; each round's review is a session of its own. A project attaches its own addons in
+# `[agents.reviewer]`.
+addons = [{ name = "context-budget" }]

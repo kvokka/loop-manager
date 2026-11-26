@@ -87,6 +87,10 @@ takes in other files of its agent by name: `{{ agent.style }}` is the text of `s
 `.loop-manager/agents/<agent>/style.md` over the pack's `agents/<agent>/style.md`. That is how a project gives a general
 agent its own text, say the conditions a checker tries; a file found in neither place is a config error naming the path.
 
+A project adds its own rules to the role prompt of a pack's agent with a file: `prompt_append = "prompts/<agent>.md"`
+in `[agents.<agent>]` of its `loop-manager.toml` names it, from the directory of that file, and its text follows the
+role prompt.
+
 ## 3. How a run ends: the finisher
 
 An `ai` step does not pass because the agent stopped talking. It passes when the agent calls `loop-manager finish pass`

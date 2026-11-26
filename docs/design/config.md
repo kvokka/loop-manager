@@ -57,6 +57,7 @@ policy, with different values, so it is set in the harness's own block (`[settin
 | `skills.<name>` | `{path}` (must exist) or `{enabled = false}` | named list |
 | `addons` | array of `{name, params = {..}, enabled = true}`: attaches a declared addon (see "Addon") | by name: an attachment keeps the place of its first mention, `params` merge by key, the strongest `enabled` decides |
 | `description`, `subagents` | string; array of agent and variant names and patterns: keys of an agent only — `agent.toml`, a variant and an edit take them, any `[settings]` table does not (see "Subagents") | scalar; the list is replaced whole by the strongest layer that sets it |
+| `prompt_append` | string: a file whose text follows the agent's role prompt, relative to the directory of the config file that names it — a key of `[agents.<name>]` only: an edit and a variant take it, `agent.toml` and any `[settings]` table do not (see "Agent") | every level appends, in the order of the layers |
 | `native.<harness>` | any table, passed to the adapter as is; `native.claude` is a table of claude settings keys, delivered with `--settings` together with the hooks, except `permission_mode`, which goes as `--permission-mode`; `native.codex` is a table of codex `config.toml` keys (`approval_policy` is the thread's approval policy), delivered to the app-server as `-c key=value` flags (so it is part of the process fingerprint) | by key |
 
 A harness hook (`hooks.<name>`) delivered to claude also fires inside every subagent of the session (its input carries
@@ -225,7 +226,9 @@ What the user says for the agent (9, 10) is stronger than what the pack and the 
 
 A scalar takes the strongest layer's value; a table (`env`, `mcp`, `native`) merges by key, an entry replaced whole;
 a named list (`hooks`, `skills`, `addons`) is the union, and a stronger layer turns an element off by name;
-`subagents` is replaced whole by the strongest layer that sets it. The host
+`subagents` is replaced whole by the strongest layer that sets it; `prompt_append` replaces nothing: the file of
+every layer that names one follows the role prompt (the `system_prompt` the layers came to), in the order of the
+layers, and the fragments of the addons come after them. The host
 layer is the exception: the harness merges it itself, loop-manager neither reads nor parses it, and it is turned off
 only as a whole (`inherit_host = false`), never one element by name. The harness config inside the rig (`CLAUDE.md`,
 `.claude/`, `.mcp.json`, `AGENTS.md`) belongs to the repository, not the host: it applies with inheritance off too
@@ -239,7 +242,9 @@ variant layers too; a run keeps the one of its current step. Addons attach first
 a stronger layer can detach an addon and its whole contribution; an attached addon prints as `addons.<name> =
 "attached"`, then each of its params as `addons.<name>.params.<key> = <value>`, each with its layer. An edit applies when its key resolves (see Names)
 to the agent. Every value keeps its layer; a value several layers make together (`native` tables merged by key, a system
-prompt with addon fragments, `PATH` with addon `bin/` directories) names them all in order (`# agent + addon mail`),
+prompt with appended files and addon fragments, `PATH` with addon `bin/` directories) names them all in order
+(`# agent + project [agents] + addon mail`), an appended file prints as written under the `system_prompt` it joined,
+one line per layer (`prompt_append = "prompts/coder.md"  # project [agents]`),
 and a model the adapter expanded keeps the short name it was given
 (`model = "gpt-6-luna"  # rig [agents], given as "luna"`). The new layers print as `pack <name>`,
 `formula <pack>.<name> step <step>` and `variant <name>`. `subagents` prints resolved, the agent itself in it
@@ -249,8 +254,10 @@ line for the host: inherited by the harness and invisible to loop-manager, or of
 daemon holds; with `--config <file>`, on that file with no daemon). The pack, formula and variant layers count only for
 a run, so they show with `--formula <f> --rig <r>` in place of `--agent`. The formula's `rounds` comes first with its
 layer (`rounds = 2  # project`; `formula <f>` when the formula sets it, `default` when no layer does), then
-`max_writers` of the rig when it sets one (`max_writers = 1  # rig`), then one line per input value the config gives
-(`inputs.focus = "security"  # orchestrator`), then the steps one by one: for an ai step a header
+`max_writers` of the rig when it sets one (`max_writers = 1  # rig`), then one line per input value the config or the
+input's `default` gives (`inputs.focus = "security"  # orchestrator`; `formula <f>` for a default), then, for a
+formula with an exec step or a check script whose pack has
+`bin/`, ``# `PATH` of the exec steps and check scripts starts with <dir>  # pack <pack>``, then the steps one by one: for an ai step a header
 ``# step `<s>` of `<f>` on `<r>`: agent <a>`` (the rig's variant if it maps one) and its effective config, for an exec
 step one line ``# step `<s>` of `<f>`: exec `<command>` ``, for a drain step
 ``# step `<s>` of `<f>`: drain, a run of `<formula>` per bead, <pool> at a time`` (with ``; on a failed bead:
@@ -432,10 +439,11 @@ packs = [
   "../packs/kit",                    # a local pack directory
   { git = "https://github.com/acme/loop-manager-pack-review", rev = "v1.2.0" },  # pinned to a tag or a full commit id
   { git = "https://github.com/acme/loop-manager-pack-tools" },  # no pin: the latest revision of the default branch
+  { git = "https://github.com/acme/tools", rev = "v2.0.0", dir = "packs/qa" },  # a directory of the repository
 ]
 rounds = 2                          # over the orchestrator's `rounds`, under a formula's own
 
-[inputs]                            # over the orchestrator's `[inputs]`, value by value
+[inputs]                            # over the orchestrator's `[inputs]`, value by value; both over an input's `default`
 focus = "performance"
 
 [[addon]]
@@ -512,11 +520,11 @@ are the root's, and a project `[[trigger]]` that names no `rig` fires in the roo
 
 ### Packs and addons from git
 
-A pack in `packs` and an `[[addon]]` (in the orchestrator file or a project's) is a local directory, or a git
-repository with `pack.toml` / `addon.toml` at its root: `{ git = "<url>", rev = "<tag or commit>" }` for a pack,
-`git = ".."` and `rev = ".."` instead of `path` for an addon (exactly one of `path` and `git`). An addon from git
-may live in a directory of the repository: `dir = "addons/mail"` (relative, inside the repository; `dir` goes with
-`git` only).
+A pack in `packs` and an `[[addon]]` (in the orchestrator file, a project's or a pack's `pack.toml`) is a local
+directory, or a git repository with `pack.toml` / `addon.toml` at its root: `{ git = "<url>", rev = "<tag or commit>" }` for a pack,
+`git = ".."` and `rev = ".."` instead of `path` for an addon (exactly one of `path` and `git`). Either may live in a
+directory of the repository instead: `dir = "packs/qa"` in the pack's table, `dir = "addons/mail"` in the
+`[[addon]]` (relative, inside the repository; `dir` goes with `git` only).
 
 - `rev` is a full commit id (40 or 64 lowercase hex digits) or the name of a tag, looked up only as
   `refs/tags/<rev>`: a branch or a short commit id is a config error ("no tag ... in the repository").
@@ -525,7 +533,9 @@ may live in a directory of the repository: `dir = "addons/mail"` (relative, insi
 
 Whoever loads the config downloads first: the daemon at start, at `loop-manager config reload`, `POST /v1/config/check`
 and `GET /v1/doctor`, and the CLI at `loop-manager config check|explain` and `loop-manager doctor` with
-`--config <file>`. The core reads only the finished directories and never runs git. The cache is one per user,
+`--config <file>`. A pack is downloaded before the addons its `pack.toml` declares, which are known only then; one of
+them that the project or the orchestrator declares itself is never downloaded (see "Pack"). The core
+reads only the finished directories and never runs git. The cache is one per user,
 `$XDG_CACHE_HOME/loop-manager/git` (`~/.cache/loop-manager/git` without it):
 
 - `<cache>/<url>/<commit>/` is a detached checkout of the commit, never changed once in place;
@@ -533,13 +543,13 @@ and `GET /v1/doctor`, and the CLI at `loop-manager config check|explain` and `lo
 - `<cache>/<url>/head` names the commit of the latest revision last seen.
 
 The url and the tag are written as one file name: letters, digits, `_`, `-` and `.` (not first) as they are, any
-other byte as `%XX`. Something not in the cache is cloned in full into a temporary directory next to its place,
-checked out detached at its commit and renamed into place. The network:
+other byte as `%XX`. Something not in the cache is fetched into a temporary directory next to its place: only its
+commit, without the history (`git fetch --depth 1`), checked out detached and renamed into place. The network:
 
 - a commit whose checkout is in the cache: git is not run at all;
 - a tag the cache names, with its checkout there: git is not run either. Tags are taken as immutable: a tag moved on
   the remote is not seen until the cache is cleared;
-- no pin: `git ls-remote <url> HEAD` at every load; a commit already in the cache is used as is, any other is cloned.
+- no pin: `git ls-remote <url> HEAD` at every load; a commit already in the cache is used as is, any other is fetched.
   When the remote cannot be asked (any failure of `ls-remote`) and the cache names a last seen revision, that
   checkout is used with a warning on the stderr of the process that loaded the config (the daemon's log, the output
   of `loop-manager config check`); with none, it is a config error.
@@ -553,17 +563,28 @@ of a checkout in the cache are not detected. git must be in `PATH`; access to th
 helpers) is git's own, and git never asks for a password (`GIT_TERMINAL_PROMPT=0`). Each git command is killed after
 30 s, which fails the load that ran it.
 
-An addon runs any command with the user's rights, so nothing installs or enables one implicitly: its orchestrator
-side and its agent side run only where it is attached in `addons`, and a
-addon from git runs only at the tag or commit its declaration pins.
+An addon runs any command with the user's rights, so nothing enables one implicitly: its orchestrator
+side and its agent side run only where it is attached in `addons`, and an
+addon from git runs only at the tag or commit its declaration pins. A pack is trusted the same way as its agents and
+formulas are: listing it in `packs` takes the addons it declares and the attachments its agents make, at the
+revisions the pack pins; a project that wants another revision of one declares the addon itself (see "Pack").
 
 ## Pack: `<pack>/pack.toml`
 
 ```toml
 name = "kit"
 version = "0.3.0"
-requires_addons = ["mail"]         # must be declared by the orchestrator or the project
+requires_addons = ["mail"]         # must be declared: by the orchestrator, the project or a pack of the project
 min_loop_manager = "0.0.1"                   # optional
+
+[[addon]]                           # an addon the pack declares for every project that lists it
+name = "notes"                      # the addon's own name, the one in its `addon.toml`
+path = "addons/notes"               # relative to the pack's directory
+[[addon]]                           # or from git, pinned, as in a project's file
+name = "review"
+git = "https://github.com/acme/loop-manager-addon-review"
+rev = "v1.2.0"
+dir = "addons/review"               # optional
 
 [settings]                          # layer 7: launch settings of the runs of its formulas
 model = "sonnet"
@@ -577,11 +598,35 @@ inputs = { bead = { next_ready = true, epic = "{{ event.bead.epic }}" } }
 ```
 
 Content: `agents/<agent>/agent.toml` (plus `prompt.md`, `prompt.template.md` and any other files of the agent, see
-"Agent") and
-`formulas/**/*.toml`: every `.toml` file under `formulas/`, in subdirectories too, is a formula. A pack
-is the unit of content: agents, formulas and triggers. It may require addons but never contains one; an addon is
-declared by the orchestrator or the project. A pack holds no word of a user's task: what to do comes only from the
-inputs of a run.
+"Agent"),
+`formulas/**/*.toml`: every `.toml` file under `formulas/`, in subdirectories too, is a formula; and `bin/`, the
+executables its formulas run. A pack
+is the unit of content: agents, formulas, triggers and those executables. A pack holds no word of a user's task: what
+to do comes only from the inputs of a run.
+
+A pack is not an addon, but it may declare the addons its agents attach: an `[[addon]]` of `pack.toml` has the form
+of a project's (`path`, relative to the pack's directory, or `git` with `rev` and an optional `dir`; see
+[above](#packs-and-addons-from-git)) and a required `name`, the addon's own. It declares the addon for every project
+that lists the pack, so the project writes nothing for it. Like any declaration it attaches nothing: the pack's
+agents, or any settings layer of the project, attach it by name. An `addon.toml` with another `name` than the
+declared one is a config error of `pack.toml` naming both. The version of an addon is pinned at either level:
+
+- An `[[addon]]` of the same name in the project's `loop-manager.toml` or in the orchestrator file replaces the pack's
+  declaration for that project, and so pins the addon there. The pack's source is then not looked at: it is not
+  resolved, read or downloaded, and may not exist. So a pack pins its addons to git for every project, and a project
+  that has them in a directory names that directory and needs no network.
+- Two packs of a project may declare one addon name from one source (the same directory; from git, the same
+  repository at the same commit and the same `dir`): that is one declaration. From different sources it is a config
+  error of the project's file naming both packs, until the project or the orchestrator declares the addon.
+- One `pack.toml` that declares one name twice is a config error.
+
+`requires_addons` lists addons the pack needs and does not declare itself; any of the three declarations satisfies it.
+
+A pack's `bin/` directory, when it has one, goes ahead of `PATH` in the environment of every `exec` step and every
+check script of the pack's formulas (see "Formula"), so a formula writes `command = ["epic-gate"]` wherever the pack
+lies, a directory or the git cache. Nothing else names the pack to a command: a script finds the files beside it by its
+own `$0`. An agent's session gets no such `PATH`. The project root, a pack too, has no `bin/` of this kind: its scripts
+are reached by a path from the run's workdir, and a `bin/` of the repository shadows no command.
 
 Formulas belong to a project. One daemon serves many projects, and a project sees only the formulas of its own packs
 (its root included); two projects that use one pack each have their own formulas, and neither affects the other. A
@@ -607,22 +652,39 @@ rig's layer, so "explain config" of it is the same with a rig or without; `expla
 rig's `agents` that edits it, edits a variant of it or maps it to a variant is a config error, its edits go in the
 project's `[agents]`), `prompt` (role prompt file, default `prompt.md` when it exists; its text is the agent layer's
 `system_prompt`, so an `[agents.<agent>]` edit may still replace it, and setting `system_prompt` in `agent.toml`
-too is an error), `description` and `subagents` (see "Subagents"), `max_runs` (optional positive integer: runs of this agent
+too is an error), `template` (prompt template file, below), `description` and `subagents` (see "Subagents"), `max_runs` (optional positive integer: runs of this agent
 started at once in its project; the orchestrator's `max_runs` still applies; a run whose next step is of an agent
 at its limit parks until a run of that agent ends or leaves its step), then the settings keys above. Its
 `harness`, `model` and `effort` are the defaults of the role: a pack, a formula, a variant or an `[agents]` edit may change
 any of them, and an agent that names no `harness` needs a layer that does.
 A role prompt file that is empty or only whitespace is a load error naming the file.
 
-`prompt.template.md` is the template of the agent's prompt, in the agent's own directory, so the agent is
-self-contained: an `ai` step names the agent and its run gets
+The role prompt reaches the harness as an addition to its own system prompt, never in place of it, and a user adds
+to the role prompt the same way. `prompt_append = "<file>"` in `[agents.<agent>]` of the orchestrator, a project or a
+rig, or in a variant's table, names a file relative to the directory of the config file that names it; its text
+follows the role prompt after a blank line:
+
+```toml
+[agents.coder]
+prompt_append = "prompts/coder.md"
+```
+
+The role prompt it follows is the `system_prompt` the layers came to; with none, the text is the role prompt. Several
+levels append in the order of the layers: the variant, then the orchestrator, the project and the rig. The result is
+the agent's `system_prompt` wherever it goes: the session of a step, the definition of a subagent, the run's snapshot.
+A file that is missing, empty or only whitespace is a load error naming the key and the file. `agent.toml` does not
+take the key: the agent's own text is its `prompt`.
+
+`template` names the file of the agent's prompt template, in the agent's own directory (default
+`prompt.template.md`), so the agent is self-contained: an `ai` step names the agent and its run gets
 this template, rendered (contracts 2.3); the step has no prompt file of its own. A run whose agent a variant or a
-bead's `agent:` label gives renders that agent's template (a variant's is its base agent's). An agent that an `ai` step
+bead's `agent:` label gives renders that agent's template (a variant's is its base agent's). A `template` that names
+a file the directory has not is a load error naming the file. An agent that an `ai` step
 names and that has no template is a config error naming the path to put it at. The template is checked against every
 formula whose steps name the agent, with that formula's inputs and earlier steps.
 
 A project rewrites an agent of its packs with files, without forking the pack: `.loop-manager/agents/<agent>/` next to
-`loop-manager.toml` lays over the agent's directory. Its `prompt.template.md` replaces the pack's. `{{ agent.<name> }}`
+`loop-manager.toml` lays over the agent's directory. Its file of the template's name replaces the pack's. `{{ agent.<name> }}`
 in the template is the text of `<name>.md`, the project's file over the pack agent's: text the project gives an agent
 (the conditions `qa` checks, say `.loop-manager/agents/qa/checks.md`) is a file of that agent, not a string in
 `loop-manager.toml`. A `{{ agent.<name> }}` with neither file is a config error naming where to put it; so is a
@@ -682,8 +744,8 @@ matches a target unfit so is the same error.
 ## Agent variants
 
 `[agents.<name>]` of the orchestrator or a project declares a pack agent under another name with settings of its own:
-`base = "<pack>.<agent>"` and any keys of `agent.toml` but `prompt` (the role prompt, skills and directory are the
-base agent's). A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
+`base = "<pack>.<agent>"` and any keys of `agent.toml` but `prompt` and `template` (the role prompt, the prompt
+template, skills and directory are the base agent's), with `prompt_append` as in an edit. A rig runs a variant in place of an agent the formulas name: `[rigs.<r>] agents = { <agent> =
 "<variant>" }`. A run of the variant is of the variant's name: `max_runs` (its own, else the base agent's), the gate
 `agent:<variant>`, the events and `explain` count it as an agent of its own. The formulas of the pack still name the
 base agent; the other way to the same change, without a new name, is an edit (`[rigs.<r>.agents.<agent>]`).
@@ -705,6 +767,7 @@ budget = 10                         # optional: the spend limit of a run in USD,
 
 [inputs]
 task = { type = "task", required = true }   # task | string | integer | boolean
+focus = { type = "string", default = "all of it" }  # optional `default`: the value when nobody gives one
 
 [[step]]
 name = "implement"                  # optional (default: the position, "1", "2", ..)
@@ -775,7 +838,9 @@ step's, else the project's `[exec]`, else the orchestrator's; default false); th
 ([tracker-br](tracker-br.md#one-database-per-project)); the `env` of the orchestrator's `[exec]`, the project's `[exec]`
 and the step, merged by key (see "Environment values"), and over it the `env` of `run.preparing` hooks; then the
 variables of loop-manager: the tracker actor and the `LOOP_MANAGER_*` variables (those above, `LOOP_MANAGER_REMARKS` and
-`LOOP_MANAGER_STEP_*` below), so an `env` key cannot replace them. A rig has no `[exec]`.
+`LOOP_MANAGER_STEP_*` below), so an `env` key cannot replace them. A rig has no `[exec]`. The `bin/` of the pack of the
+run's formula (see "Pack"; of a run a `drain` or `formula` step started, its own formula's pack) then goes ahead of the
+`PATH` that came out, the daemon's or the one an `env` gave.
 
 A `drain` step gives every ready bead of its own under the run's bead, at any depth, a run of `formula`, on each read of
 the tracker, until none is left. A run of a rig owns the beads of its rig under its root; a run of the project root owns
@@ -895,7 +960,8 @@ as `infrastructure`. The script runs after the step has run on its own and its h
 and the script is not started. It gets the environment of an `exec` step — its own step's, when that is an `exec` step,
 else the one of the orchestrator's and the project's `[exec]`, without the `env` of `run.preparing` hooks, which goes to
 the agent's session; never the agent's `env` — plus `LOOP_MANAGER_STEP_<NAME>_RESULT`, `_SUMMARY` and `_DATA` of its own
-step, in the run's workdir under the step timeout. A reference to a variable the daemon does not have keeps the script
+step, with the `bin/` of the formula's pack ahead of `PATH` as for an `exec` step, in the run's workdir under the step
+timeout. A reference to a variable the daemon does not have keeps the script
 from starting and fails the run at once with reason `config_error: …` (see "Environment values"). A repeat of an `ai`
 step starts a new session and gets the script's output as a remark: through `{{ remarks }}`, or appended to the prompt
 when the template has none. A repeat of a `drain` step is a new entry. The count is within a round: a round back to the
@@ -917,11 +983,17 @@ session (`continue_from`) continues it in its first step only, so a formula whos
 
 An input a start does not give, or gives `null`, takes the value of `[inputs]` of the project's `loop-manager.toml`,
 else that of the orchestrator config: a table of values by input name, for any formula of the project that declares an
-input of that name; a formula that declares none ignores it. What the caller gives — the start, a trigger, the
-`inputs` of a `formula` step and what such a step's child inherits — beats both. A value is checked at load as a
-start checks it, for every formula it applies to; a value for an input of type `task`, or of the wrong type, is an
-error of the file that gives it (`` `inputs.n` for formula `kit.flow`: must be an integer, not "many" ``). A
-`required` input the config gives counts as given: a trigger, a `formula` step or a `drain` step need not give it.
+input of that name; a formula that declares none ignores it. An input neither config gives a value takes its own
+`default`, the weakest source: `default = <value>` in the input's declaration. What the caller gives — the start, a
+trigger, the `inputs` of a `formula` step and what such a step's child inherits, a default of its parent's too —
+beats all three. A value is checked at load as a start checks it, for every formula it applies to; a value for an
+input of type `task`, or of the wrong type, is an error of the file that gives it (`` `inputs.n` for formula
+`kit.flow`: must be an integer, not "many" ``; of the formula file for a default: ``input `n`: `default` must be an
+integer, not "many" ``, ``input `task`: a `task` input takes no `default` ``). An input filled so is a given one
+from then on: the run stores it with its inputs, and its steps, templates, `if` tables and children see it as any
+other. A `required` input the config gives, or one with a default, counts as given: a trigger, a `formula` step or a
+`drain` step need not give it. `GET /v1/formulas` and `loop-manager formula list` show an input's `default` beside
+its `type` and `required`.
 
 A run start checks the inputs: no undeclared one, every `required` one present (`null` is no value), an `integer` input
 a JSON integer or its text, a `boolean` one a JSON boolean or `true`/`false` as text, a `string` one a string (the CLI
@@ -1089,8 +1161,11 @@ command = ["${LOOP_MANAGER_ADDON_DIR}/bin/inbox", "--folder", "${params.folder}"
 ```
 
 A declaration only names where an addon is: `[[addon]]` with `path`, or `git`, `rev` and an optional `dir` (see
-[above](#packs-and-addons-from-git)), in the orchestrator file or a project's. Addon names are unique across the
-orchestrator and the project. Attaching is the one switch: `addons = [{ name = "mail", params = { folder = "work" }
+[above](#packs-and-addons-from-git)), in the orchestrator file, a project's, or the `pack.toml` of a pack (for the
+projects that list it; there with the addon's `name` too, see "Pack"). Addon names are unique across the orchestrator file and a project's own: a name
+both declare is a config error. A pack's declaration is the weakest: one of the same name in either file replaces it.
+Each project has its own set, the orchestrator's addons and its own, so two projects of one daemon may declare one
+name from different places; what the daemon keeps by the addon's name alone, `${LOOP_MANAGER_ADDON_DATA}`, they share. Attaching is the one switch: `addons = [{ name = "mail", params = { folder = "work" }
 }]` in any settings layer. In `[settings]` of the orchestrator or a project it attaches the addon to every agent there,
 on a rig to the agents of the rig, in `agent.toml`, a variant or an edit to that agent only; `enabled = false` on a
 stronger layer detaches it. An agent has any number of addons, applied in the order of their first mention: the

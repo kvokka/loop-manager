@@ -1,0 +1,41 @@
+name: addon-pack-tags
+
+on:
+  push:
+    branches: [main]
+    paths: ["addons/*/addon.toml", "packs/*/pack.toml", ".github/workflows/addon-pack-tags.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: addon-pack-tags
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      # Tags the pushed commit `addons/<name>/<version>` or `packs/<name>/<version>` for each manifest version without a
+      # tag; never moves a tag.
+      - name: Tag new addon and pack versions
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          status=0
+          for manifest in addons/*/addon.toml packs/*/pack.toml; do
+            tag=$(python3 -c 'import sys, tomllib; m = tomllib.load(open(sys.argv[1], "rb")); print("%s/%s/%s" % (sys.argv[1].split("/")[0], m["name"], m["version"]))' "$manifest")
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null && continue
+            version=${tag##*/}
+            if ! grep -qx "## $version" "${manifest%/*}/CHANGELOG.md"; then
+              echo "::error file=$manifest::no '## $version' heading in the changelog, $tag is not published"
+              status=1
+              continue
+            fi
+            git tag -a "$tag" -m "${tag#*/}"
+            git push origin "refs/tags/$tag"
+            echo "published $tag at $GITHUB_SHA"
+          done
+          exit "$status"

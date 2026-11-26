@@ -8,7 +8,7 @@ use super::{
 };
 use axum::{Json, extract::Query, http::HeaderMap, http::StatusCode};
 use loop_manager_core::{
-    config::{Config, Name, OnItemFailure, Project, Rig, StepKind},
+    config::{Config, Name, OnItemFailure, Project, Rig, Step, StepKind},
     run::Msg,
 };
 use serde::Deserialize;
@@ -130,7 +130,8 @@ pub(crate) async fn list_packs(state: State, Param(Query(query)): Param<Query<Pr
 }
 
 /// Lists the declared addons and the enabled bundled ones: of the orchestrator (`project` null) and of every
-/// project (those on for its runs), or of the project `project` only.
+/// project (those on for its runs; `pack` names the pack that declares one the project's own file does not), or of
+/// the project `project` only.
 #[utoipa::path(get, path = "/v1/addons", params(ProjectQuery),
     responses((status = OK, body = [Addon]),
         (status = BAD_REQUEST, description = BAD_QUERY, body = ErrorReply),
@@ -148,13 +149,13 @@ pub(crate) async fn list_addons(state: State, Param(Query(query)): Param<Query<P
     for (project, declared, bundled) in lists {
         out.extend(declared.iter().map(|p| {
             let on: Vec<&str> = p.hooks.iter().map(|h| h.on.as_str()).collect();
-            json!({ "project": project, "name": p.name, "version": p.version, "root": p.root, "on": on,
-                "bundled": false })
+            json!({ "project": project, "pack": p.pack, "name": p.name, "version": p.version, "root": p.root,
+                "on": on, "bundled": false })
         }));
         out.extend(
             bundled
                 .iter()
-                .map(|b| json!({ "project": project, "name": b.name, "on": b.on, "bundled": true })),
+                .map(|b| json!({ "project": project, "pack": null, "name": b.name, "on": b.on, "bundled": true })),
         );
     }
     Ok(Json(out.into()))
@@ -234,7 +235,7 @@ fn explain_formula(config: &Config, project: &str, formula: &str, rig: Option<&s
     let p = (config.projects.iter()).find(|p| p.name == project);
     let p = p.ok_or_else(|| format!("no project `{project}`"))?;
     let rig = rig.unwrap_or(&p.root.0);
-    let (_, f) = p.formula(formula)?;
+    let (name, f) = p.formula(formula)?;
     let (mut text, mut steps, mut host) = (String::new(), Vec::new(), false);
     text += &format!("rounds = {}  # {}\n", f.rounds.value, f.rounds.from);
     if let Some(n) = p.rigs.get(rig).and_then(|r| r.max_writers) {
@@ -242,6 +243,15 @@ fn explain_formula(config: &Config, project: &str, formula: &str, rig: Option<&s
     }
     for (input, given) in &f.defaults {
         text += &format!("inputs.{input} = {}  # {}\n", given.value, given.from);
+    }
+    let commands = |s: &Step| s.check.is_some() || matches!(s.kind, StepKind::Exec { .. });
+    let bin = (p.packs.iter().find(|pack| pack.name == name.pack)).and_then(|pack| pack.bin.as_ref());
+    if let Some(bin) = bin.filter(|_| f.steps.iter().any(commands)) {
+        let bin = bin.display();
+        text += &format!(
+            "# `PATH` of the exec steps and check scripts starts with {bin}  # pack {}\n",
+            name.pack
+        );
     }
     for step in &f.steps {
         let name = &step.name;

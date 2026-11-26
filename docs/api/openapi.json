@@ -12,7 +12,7 @@
   "paths": {
     "/v1/addons": {
       "get": {
-        "summary": "Lists the declared addons and the enabled bundled ones: of the orchestrator (`project` null) and of every\nproject (those on for its runs), or of the project `project` only.",
+        "summary": "Lists the declared addons and the enabled bundled ones: of the orchestrator (`project` null) and of every\nproject (those on for its runs; `pack` names the pack that declares one the project's own file does not), or of\nthe project `project` only.",
         "operationId": "list_addons",
         "parameters": [
           {
@@ -3104,6 +3104,13 @@
             },
             "description": "The events its hooks run on."
           },
+          "pack": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The pack of the project whose `pack.toml` declares it; null when the orchestrator's or the project's file does."
+          },
           "project": {
             "type": [
               "string",
@@ -3907,6 +3914,9 @@
           "required"
         ],
         "properties": {
+          "default": {
+            "description": "The value of the input nobody gives, of the input's type; absent when the formula sets none."
+          },
           "required": {
             "type": "boolean"
           },

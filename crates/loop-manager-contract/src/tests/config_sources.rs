@@ -65,6 +65,32 @@ fn a_git_source_loads_from_the_directory_it_was_downloaded_to() {
 }
 
 #[test]
+fn a_pack_from_git_may_live_in_a_directory_of_the_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let file = d.join("config.toml");
+    let load = |rev: Option<&str>, sub: &str| {
+        let pin = rev.map(|r| format!(r#"rev = "{r}", "#)).unwrap_or_default();
+        write(d, &format!(r#"packs = [{{ git = "{KIT}", {pin}dir = "{sub}" }}]"#));
+        let (kit, mail) = (source(KIT, rev), source(MAIL, Some("v1")));
+        assert_eq!(
+            git_sources(&file, &Checkouts::new()),
+            [kit.clone(), mail.clone()].into()
+        );
+        let checkouts = [(kit, Ok(d.join("dl"))), (mail, Ok(d.join("dl/mail")))];
+        load_for(&file, &[], checkouts.into())
+    };
+    for rev in [None, Some("v1")] {
+        let config = load(rev, "kit").unwrap();
+        let pack = &config.projects[0].packs[1];
+        assert_eq!((pack.name.as_str(), &pack.root), ("kit", &d.join("dl/kit")));
+    }
+    let errors = load(None, "../dl/kit").expect_err("outside the repository");
+    let outside = "`dir = \"../dl/kit\"` is not a path inside the repository";
+    assert!(errors.iter().any(|e| e.message == outside), "{errors:?}");
+}
+
+#[test]
 fn a_addon_from_git_must_be_pinned() {
     fails(
         &[("config.toml", "[[addon]]\ngit = \"x\"\n")],
@@ -80,16 +106,87 @@ fn git_sources_names_every_declared_source() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
     write(d, &format!(r#"packs = [{{ git = "{KIT}" }}]"#));
-    let found = git_sources(&d.join("config.toml"));
+    let found = git_sources(&d.join("config.toml"), &Checkouts::new());
     assert_eq!(found, [source(KIT, None), source(MAIL, Some("v1"))].into());
 
     fs::write(d.join("shop/loop-manager.toml"), "packs = [").unwrap();
-    let found = git_sources(&d.join("config.toml"));
+    let found = git_sources(&d.join("config.toml"), &Checkouts::new());
     assert_eq!(
         found,
         [source(MAIL, Some("v1"))].into(),
         "a broken project hides only its own"
     );
+}
+
+/// The addon a pack from git declares from git is a source once the pack is downloaded, and loads from its own
+/// checkout.
+#[test]
+fn the_addons_of_a_pack_from_git_are_sources_once_the_pack_is_downloaded() {
+    const NOTES: &str = "https://example.com/notes.git";
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    write(d, &format!(r#"packs = [{{ git = "{KIT}" }}]"#));
+    let manifest = d.join("dl/kit/pack.toml");
+    let declared = format!("[[addon]]\nname = \"notes\"\ngit = \"{NOTES}\"\nrev = \"v2\"\ndir = \"notes\"\n");
+    fs::write(&manifest, fs::read_to_string(&manifest).unwrap() + &declared).unwrap();
+    fs::create_dir_all(d.join("dl/all/notes")).unwrap();
+    fs::write(
+        d.join("dl/all/notes/addon.toml"),
+        "name = \"notes\"\nversion = \"2.0.0\"\n",
+    )
+    .unwrap();
+    let file = d.join("config.toml");
+    let (kit, mail, notes) = (source(KIT, None), source(MAIL, Some("v1")), source(NOTES, Some("v2")));
+
+    let mut checkouts = Checkouts::new();
+    assert_eq!(git_sources(&file, &checkouts), [kit.clone(), mail.clone()].into());
+    checkouts.insert(kit.clone(), Ok(d.join("dl/kit")));
+    checkouts.insert(mail.clone(), Ok(d.join("dl/mail")));
+    assert_eq!(git_sources(&file, &checkouts), [kit, mail, notes.clone()].into());
+    checkouts.insert(notes, Ok(d.join("dl/all")));
+    let config = load_for(&file, &[], checkouts).unwrap();
+    let addon = &config.projects[0].addons[0];
+    assert_eq!(
+        (addon.name.as_str(), addon.pack.as_deref(), &addon.root),
+        ("notes", Some("kit"), &d.join("dl/all/notes"))
+    );
+}
+
+/// An addon of a pack that the orchestrator file or the project's declares is no source, so it is never downloaded;
+/// what replaces it is known once the addons of those two files are downloaded, and a pack's wait until then.
+#[test]
+fn a_replaced_addon_of_a_pack_is_no_source() {
+    const AWAY: &str = "https://example.com/away.git";
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let file = d.join("config.toml");
+    let (mail, away) = (source(MAIL, Some("v1")), source(AWAY, Some("v2")));
+    let downloaded = Checkouts::from([(mail.clone(), Ok(d.join("dl/mail")))]);
+    let manifest = d.join("dl/kit/pack.toml");
+    let declare = |name: &str| {
+        write(d, r#"packs = ["../dl/kit"]"#);
+        let declared = format!("[[addon]]\nname = \"{name}\"\ngit = \"{AWAY}\"\nrev = \"v2\"\n");
+        fs::write(&manifest, fs::read_to_string(&manifest).unwrap() + &declared).unwrap();
+    };
+    // The orchestrator's `mail` comes from git: before it is there its name is not known, and the pack's addon waits.
+    declare("mail");
+    assert_eq!(git_sources(&file, &Checkouts::new()), [mail.clone()].into());
+    assert_eq!(git_sources(&file, &downloaded), [mail.clone()].into());
+    load_for(&file, &[], downloaded.clone()).unwrap();
+
+    declare("notes");
+    assert_eq!(git_sources(&file, &Checkouts::new()), [mail.clone()].into());
+    assert_eq!(git_sources(&file, &downloaded), [mail.clone(), away].into());
+    // The project's own declaration, from a directory, replaces it.
+    fs::create_dir_all(d.join("notes")).unwrap();
+    fs::write(d.join("notes/addon.toml"), "name = \"notes\"\nversion = \"1.0.0\"\n").unwrap();
+    let project = d.join("shop/loop-manager.toml");
+    let own = "[[addon]]\npath = \"../notes\"\n";
+    fs::write(&project, fs::read_to_string(&project).unwrap() + own).unwrap();
+    assert_eq!(git_sources(&file, &downloaded), [mail].into());
+    let config = load_for(&file, &[], downloaded).unwrap();
+    let addon = &config.projects[0].addons[0];
+    assert_eq!((addon.name.as_str(), addon.pack.as_deref()), ("notes", None));
 }
 
 #[test]
@@ -116,6 +213,6 @@ fn a_pack_with_an_unknown_key_says_what_a_pack_is() {
     );
     fails(
         &[("shop/loop-manager.toml", &project)],
-        "a pack is a path or `{ git, rev }`",
+        "a pack is a path or `{ git, rev, dir }`",
     );
 }

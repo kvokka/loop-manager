@@ -352,7 +352,7 @@ fn step_inputs(child: &super::Formula, parent: &BTreeMap<String, super::Input>, 
     };
     let unknown = (given.iter()).filter(|k| !child.inputs.contains_key(**k));
     let mut errors: Vec<String> = unknown.map(|k| format!("has no input `{k}`")).collect();
-    let inherited = |k: &str| parent.get(k).is_some_and(|i| i.required);
+    let inherited = |k: &str| parent.get(k).is_some_and(|i| i.required || i.default.is_some());
     for k in child.inputs.keys() {
         if child.needs(k) && !given.contains(&k.as_str()) && !inherited(k) {
             errors.push(format!("needs input `{k}`, which the step neither gives nor inherits"));

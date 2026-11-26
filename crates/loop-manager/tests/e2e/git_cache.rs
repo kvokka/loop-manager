@@ -117,13 +117,22 @@ fn a_rev_that_is_no_tag_and_no_commit_is_a_config_error() {
     let d = tmp.path();
     repo(d, "pack", PACK);
     let missing = "0123456789abcdef0123456789abcdef01234567";
-    for (name, rev) in [("pack", Some("main")), ("pack", Some(missing)), ("away", None)] {
+    let cases = [
+        ("pack", Some("main"), "no tag `main` in the repository"),
+        (
+            "pack",
+            Some(missing),
+            "no commit `0123456789abcdef0123456789abcdef01234567` in the repository",
+        ),
+        ("away", None, "git ls-remote"),
+    ];
+    for (name, rev, why) in cases {
         config(d, &[(name, rev)]);
         let (ok, out) = check(d);
         assert!(!ok, "{name} {rev:?}: {out}");
         let url = d.join("remote").join(name);
         assert!(
-            out.contains("loop-manager.toml") && out.contains(&*url.to_string_lossy()),
+            out.contains("loop-manager.toml") && out.contains(&*url.to_string_lossy()) && out.contains(why),
             "{out}"
         );
     }
@@ -175,6 +184,30 @@ fn without_a_pin_the_cache_serves_when_the_remote_is_away() {
 
     assert!(loop_manager(d, &["cache", "clear"]).0);
     assert!(!check(d).0, "nothing to load from");
+}
+
+/// A pack in a directory of a repository whose root is no pack, at a tag and at the latest revision.
+#[test]
+fn a_pack_from_git_may_live_in_a_directory_of_the_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let files: Vec<(String, &str)> = PACK.iter().map(|(p, t)| (format!("packs/remote/{p}"), *t)).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+    let commit = repo(d, "all", &files);
+    git(d, &d.join("remote/all"), &["tag", "v1"]);
+    config(d, &[("all", Some("v1"))]);
+    let (ok, out) = check(d);
+    assert!(!ok && out.contains("pack.toml"), "the root is no pack: {out}");
+    for rev in ["rev = \"v1\", ", ""] {
+        let pack = format!(
+            "packs = [{{ git = \"{}\", {rev}dir = \"packs/remote\" }}]\n",
+            d.join("remote/all").display()
+        );
+        fs::write(d.join("config/loop-manager/shop/loop-manager.toml"), pack).unwrap();
+        let (ok, out) = check(d);
+        assert!(ok, "{rev}: {out}");
+    }
+    assert_eq!(cached(d), [commit].into());
 }
 
 #[test]
@@ -268,4 +301,73 @@ fn a_addon_from_a_directory_of_a_repository_is_the_addon_at_its_path() {
     let (checkout, local) = (checkout.to_str().unwrap(), local.to_str().unwrap());
     assert!(by_git.contains(checkout) && !by_git.contains(local), "{by_git}");
     assert_eq!(by_git.replace(checkout, local), by_path);
+}
+
+/// A pack from git declares an addon from git in its `pack.toml`: one load downloads the pack, then the addon it
+/// declares, and the project says nothing of the addon (docs/design/config.md "Pack").
+#[test]
+fn the_addon_a_pack_from_git_declares_is_downloaded_after_the_pack() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let files: Vec<(String, &str)> = MAIL.iter().map(|(p, t)| (format!("sub/mail/{p}"), *t)).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+    let addon = repo(d, "addons", &files);
+    git(d, &d.join("remote/addons"), &["tag", "v1"]);
+    let manifest = format!(
+        "name = \"remote\"\nversion = \"0.1.0\"\n\
+         [[addon]]\nname = \"mail\"\ngit = \"{}\"\nrev = \"v1\"\ndir = \"sub/mail\"\n",
+        d.join("remote/addons").display()
+    );
+    let agent = "harness = \"claude\"\naddons = [{ name = \"mail\" }]\n";
+    let pack = repo(
+        d,
+        "pack",
+        &[
+            ("pack.toml", manifest.as_str()),
+            ("agents/coder/agent.toml", agent),
+            ("agents/coder/prompt.md", "You code."),
+        ],
+    );
+    config(d, &[("pack", None)]);
+    let file = d.join("config/loop-manager/config.toml");
+    let args = ["--json", "config", "explain", "--config", file.to_str().unwrap()];
+    let (ok, out, err) = loop_manager(
+        d,
+        &[&args[..], &["--project", "shop", "--agent", "remote.coder"]].concat(),
+    );
+    assert!(ok, "{out}{err}");
+    assert_eq!(cached(d), [pack, addon.clone()].into());
+    assert!(out.contains(&format!("{addon}/sub/mail/skills/mail")), "{out}");
+}
+
+/// A pack pins an addon to a repository that cannot be reached; the project declares the addon of that name from a
+/// directory. The pack's declaration is replaced without a download: the load asks git for nothing.
+#[test]
+fn a_replaced_addon_of_a_pack_is_not_downloaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    let config = d.join("config/loop-manager");
+    let away = d.join("remote/away");
+    let pack = format!(
+        "name = \"kit\"\nversion = \"0.1.0\"\n[[addon]]\nname = \"mail\"\ngit = \"{}\"\nrev = \"v1\"\n",
+        away.display()
+    );
+    write(&config.join("addons/mail"), MAIL);
+    write(
+        &config,
+        &[
+            ("config.toml", "projects = [\"shop\"]\n"),
+            ("shop/loop-manager.toml", "packs = [\"../kit\"]\n"),
+            ("kit/pack.toml", &pack),
+        ],
+    );
+    let (ok, out) = check(d);
+    assert!(!ok && out.contains(&*away.to_string_lossy()), "{out}");
+    assert!(loop_manager(d, &["cache", "clear"]).0);
+
+    let own = "packs = [\"../kit\"]\n[[addon]]\npath = \"../addons/mail\"\n";
+    write(&config, &[("shop/loop-manager.toml", own)]);
+    let (ok, out) = check(d);
+    assert!(ok, "{out}");
+    assert!(!d.join("cache/loop-manager/git").exists(), "nothing was asked of git");
 }

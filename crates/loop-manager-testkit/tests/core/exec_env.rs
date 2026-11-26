@@ -40,10 +40,14 @@ fn world_hooked(top: &str, own: &str, step: &str, script: &str, addons: &str, ex
 
 impl World {
     async fn start_check(&self) -> String {
+        self.start_of("check").await
+    }
+
+    async fn start_of(&self, formula: &str) -> String {
         let create = Create {
             project: "shop".into(),
             rig: Some("web".into()),
-            formula: "check".into(),
+            formula: formula.into(),
             inputs: serde_json::Map::new(),
             correlation: None,
             depth: 0,
@@ -58,7 +62,12 @@ impl World {
 
     /// The stdout of the command of a run of `check` that passed.
     async fn stdout(&self) -> (String, String) {
-        let run = self.start_check().await;
+        self.stdout_of("check").await
+    }
+
+    /// The stdout of the last command of a run of `formula` that passed.
+    async fn stdout_of(&self, formula: &str) -> (String, String) {
+        let run = self.start_of(formula).await;
         let (kind, data) = self.repeat_end(&run).await;
         assert_eq!(kind, "run.passed", "{data}");
         let out = data["outcome"]["data"]["stdout"].as_str().unwrap().to_owned();
@@ -181,4 +190,52 @@ async fn a_dollar_from_a_hook_reaches_the_command_as_it_is() {
     let extra = [("policy/addon.toml", manifest), ("policy/prepare.sh", prepare)];
     let w = world_hooked("", "", "", r#"printf %s "$X""#, addons, &extra);
     assert_eq!(w.stdout().await.1, "a$b${Y}");
+}
+
+/// The `bin/` of a declared pack is ahead of `PATH` for the exec steps and the check scripts of its formulas, over
+/// the daemon's `PATH` and over an `env.PATH`; the project root's own `bin/` is on no `PATH` (docs/design/config.md
+/// "Pack").
+#[tokio::test]
+async fn the_bin_of_a_pack_is_ahead_of_the_path_of_its_exec_steps_and_check_scripts() {
+    let project = "packs = [\"../kit\"]\n[rigs.web]\npath = \"web\"\n";
+    // The command prints how the step before it ended, then the first and the last directory of its `PATH`.
+    let greet =
+        "#!/bin/sh\nprintf '%s %s %s' \"${LOOP_MANAGER_STEP_PLAIN_RESULT-first}\" \"${PATH%%:*}\" \"${PATH##*:}\"\n";
+    let formula = "name = \"greet\"\n\
+        [[step]]\nname = \"plain\"\nkind = \"exec\"\ncommand = [\"greet.sh\"]\ntimeout = \"5s\"\n\
+        [[step]]\nname = \"custom\"\nkind = \"exec\"\ncommand = [\"greet.sh\"]\ntimeout = \"5s\"\n\
+        env = { PATH = \"/custom\" }\nstep_check_script_path = \"check.sh\"\n";
+    let own = "name = \"check\"\n[[step]]\nkind = \"exec\"\ntimeout = \"5s\"\n\
+        command = [\"sh\", \"-c\", \"command -v greet.sh || echo none\"]\n";
+    let files = [
+        ("config.toml", ORCHESTRATOR),
+        ("shop/loop-manager.toml", project),
+        ("shop/formulas/check.toml", own),
+        ("shop/bin/greet.sh", greet),
+        ("kit/pack.toml", "name = \"kit\"\nversion = \"0.1.0\"\n"),
+        ("kit/bin/greet.sh", greet),
+        ("kit/formulas/greet.toml", formula),
+        ("kit/formulas/check.sh", "#!/bin/sh\ngreet.sh > \"$0.out\"\n"),
+    ];
+    let w = world_with(&files, Arc::new(ExecHooks::default()));
+    let bin = w.dir.path().join("kit/bin");
+    let bin = bin.to_str().unwrap();
+    let (run, out) = w.stdout_of("kit.greet").await;
+    assert_eq!(out, format!("pass {bin} /custom"), "ahead of the step's `env.PATH`");
+    let first = w.all("run.step_finished").into_iter().find(|d| d["run"]["id"] == run);
+    let first = first.unwrap()["outcome"]["data"]["stdout"].clone();
+    let daemon = std::env::var("PATH").unwrap();
+    let last = daemon.rsplit(':').next().unwrap();
+    assert_eq!(first, format!("first {bin} {last}"), "ahead of the daemon's `PATH`");
+    let check = std::fs::read_to_string(w.dir.path().join("kit/formulas/check.sh.out")).unwrap();
+    assert_eq!(
+        check,
+        format!("pass {bin} /custom"),
+        "the check script finds the command too"
+    );
+    assert_eq!(
+        w.stdout_of("check").await.1,
+        "none\n",
+        "the root's `bin/` is on no `PATH`"
+    );
 }

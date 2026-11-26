@@ -29,7 +29,7 @@ use crate::{
 pub use assemble::{Attached, EffectiveConfig, Layer, Sourced};
 pub use dependency::{Dependency, DependencyScope};
 pub use env::{ExecEnv, env_literal, env_value};
-pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, Settings, Skill};
+pub use files::{AddonUse, Harness, Hook, Mcp, McpScope, PromptAppend, Settings, Skill};
 pub use formula_file::{Formula, Input, InputType, OnItemFailure, Step, StepKind};
 pub use places::Scope;
 pub use pricing::{Price, Pricing, Rates, Source as PriceSource, catalog};
@@ -164,6 +164,7 @@ pub struct Project {
     pub settings: Settings,
     pub edits: BTreeMap<String, Settings>,
     pub variants: BTreeMap<String, Variant>,
+    /// The addons its own file declares, then those its packs declare that neither it nor the orchestrator does.
     pub addons: Vec<Addon>,
     /// The bundled addons on for its runs: the orchestrator's, with the project's `[builtin.<name>]` tables.
     pub bundled: Vec<Bundled>,
@@ -221,6 +222,9 @@ pub struct Rig {
 pub struct Pack {
     pub name: String,
     pub root: PathBuf,
+    /// Its `bin/` directory, when it has one: ahead of `PATH` for the exec steps and check scripts of its formulas.
+    /// `None` for the project root pack.
+    pub bin: Option<PathBuf>,
     /// `None` for the project root pack.
     pub version: Option<String>,
     pub requires_addons: Vec<String>,
@@ -233,8 +237,10 @@ pub struct Pack {
 
 #[derive(Clone, Debug)]
 pub struct Agent {
-    /// Its directory in the pack: `agent.toml`, the role prompt, `prompt.template.md` and the files it names.
+    /// Its directory in the pack: `agent.toml`, the role prompt, the prompt template and the files it names.
     pub dir: PathBuf,
+    /// The file of its prompt template in `dir`: `template` of `agent.toml`, else `prompt.template.md`.
+    pub template: String,
     /// The harness `agent.toml` names, part of the agent layer.
     pub harness: Option<String>,
     /// Where it works; an agent of the root takes no rig's layer, edits or variant.
@@ -282,6 +288,9 @@ pub enum Source {
 pub struct Addon {
     pub dependencies: BTreeMap<String, Dependency>,
     pub name: String,
+    /// The pack whose `pack.toml` declares it for its project; `None` when the orchestrator file or the project's
+    /// does.
+    pub pack: Option<String>,
     pub version: String,
     /// The harnesses it is for; any when `None`.
     pub harnesses: Option<Vec<String>>,

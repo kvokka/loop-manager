@@ -29,7 +29,7 @@ impl RunHandler {
         let rig = project
             .place(&row.rig)
             .ok_or(format!("rig `{}` is gone from the config", row.rig))?;
-        let (_, formula) = project.formula(&row.formula)?;
+        let (name, formula) = project.formula(&row.formula)?;
         let timeout_ms = |t: &Option<std::time::Duration>, default| {
             t.map_or(default, |t| i64::try_from(t.as_millis()).unwrap_or(i64::MAX))
         };
@@ -52,9 +52,11 @@ impl RunHandler {
             return Ok(None);
         }
         let (env, inherit_env) = step_env(project, rig, &step.kind);
+        // The `bin/` of the pack of the run's formula, ahead of `PATH` for the command and the check script.
+        let bin = (project.packs.iter().find(|p| p.name == name.pack)).and_then(|p| p.bin.as_ref());
         let (timeout, last_comments) = match (&step.kind, row.step_kind.as_str()) {
             (StepKind::Exec { command, timeout, .. }, "exec") => {
-                let config = json!({ "command": command, "env": env, "inherit_env": inherit_env });
+                let config = json!({ "command": command, "env": env, "inherit_env": inherit_env, "bin": bin });
                 return Ok(Some((None, timeout_ms(timeout, EXEC_STEP_TIMEOUT_MS), config)));
             }
             // The environment is for the check script of the step (docs/design/config.md).
@@ -69,7 +71,7 @@ impl RunHandler {
                 "drain",
             ) => {
                 let config = json!({ "drain": formula.to_string(), "pool": pool, "worktree": worktree,
-                    "on_item_failure": on_item_failure, "env": env, "inherit_env": inherit_env });
+                    "on_item_failure": on_item_failure, "env": env, "inherit_env": inherit_env, "bin": bin });
                 return Ok(Some((None, timeout_ms(timeout, DRAIN_TIMEOUT_MS), config)));
             }
             // The inputs of the formula's run: the parent's that it declares, its task among them (the child works on
@@ -90,8 +92,8 @@ impl RunHandler {
                     .resolve_in(&context)
                     .map_err(|e| format!("step `{}`: {e}", row.step))?;
                 given.extend(explicit.as_object().cloned().unwrap_or_default());
-                let config =
-                    json!({ "formula": run.to_string(), "inputs": given, "env": env, "inherit_env": inherit_env });
+                let config = json!({ "formula": run.to_string(), "inputs": given, "env": env,
+                    "inherit_env": inherit_env, "bin": bin });
                 return Ok(Some((None, timeout_ms(timeout, DRAIN_TIMEOUT_MS), config)));
             }
             (
@@ -120,7 +122,7 @@ impl RunHandler {
         let text = self.render_prompt(tx, row, &agent, context, *last_comments)?;
         // The check script of the step gets the environment of an exec step, not the agent's.
         let mut config = json!(config);
-        config["exec"] = json!({ "env": env, "inherit_env": inherit_env });
+        config["exec"] = json!({ "env": env, "inherit_env": inherit_env, "bin": bin });
         Ok(Some((Some(text), timeout_ms(timeout, AI_STEP_TIMEOUT_MS), config)))
     }
 }

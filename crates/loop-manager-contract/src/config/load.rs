@@ -248,7 +248,21 @@ impl Loader {
             .name
             .unwrap_or_else(|| dir.file_name().unwrap_or_default().to_string_lossy().into_owned());
         self.name(&file, "project", &name);
-        let addons = self.addons(&file, dir, raw.addon, outer);
+        let mut addons = self.addons(&file, dir, raw.addon, outer);
+        // The manifests of the packs come first: the addons they declare are the project's, for every file of it.
+        let mut manifests = Vec::new();
+        for source in &raw.packs {
+            let Some(root) = self.root(&file, dir, source) else {
+                continue;
+            };
+            let manifest = root.join("pack.toml");
+            let Some(mut raw) = self.read::<PackFile>(&manifest) else {
+                continue;
+            };
+            let decls = std::mem::take(&mut raw.addon);
+            self.pack_addons(&file, outer, (&manifest, &raw.name), decls, &mut addons);
+            manifests.push((root, manifest, raw));
+        }
         let all: Vec<&Addon> = outer.iter().chain(&addons).collect();
         let names = all.as_slice();
         let mut settings = self.settings(&file, dir, raw.settings, names);
@@ -256,14 +270,7 @@ impl Loader {
         let (edits, variants) = self.agents(&file, dir, raw.agents, names);
         let (root, rigs) = self.places(&file, dir, raw.root, raw.rigs, names);
         let mut packs = vec![self.pack(dir, &file, name.clone(), raw.trigger, true, names)];
-        for source in &raw.packs {
-            let Some(root) = self.root(&file, dir, source) else {
-                continue;
-            };
-            let manifest = root.join("pack.toml");
-            let Some(raw) = self.read::<PackFile>(&manifest) else {
-                continue;
-            };
+        for (root, manifest, raw) in manifests {
             self.name(&manifest, "pack", &raw.name);
             for required in raw
                 .requires_addons
@@ -353,6 +360,7 @@ impl Loader {
         let root = root.to_owned();
         Pack {
             name,
+            bin: (!project).then(|| root.join("bin")).filter(|b| b.is_dir()),
             root,
             version: None,
             requires_addons: Vec::new(),

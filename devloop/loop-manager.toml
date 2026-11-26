@@ -1,12 +1,26 @@
-# The project of loop-manager's own development. Its root is this directory: the agents (agents/), the formula
-# (formulas/), the scripts the formula names (scripts/) and the tracker (.beads/). The work itself is done in the rig.
+# The project of loop-manager's own development. Its workflow is the pack `review-loop` (../packs/review-loop): the
+# formula `epic`, its agents and the commands of its steps. This directory holds what is this project's own: the rig,
+# the triggers, the addons, the inputs of the formula, the rules of this repository for the agents (prompts/, named
+# by the `[agents.*]` edits below), the operator's scripts (scripts/) and the tracker (.beads/). The work itself is
+# done in the rig.
 name = "devloop"
+packs = ["../packs/review-loop"]
 
-# The addons of this repository, from this checkout by relative path (README.md, "The addons"). The agents that
-# attach them, with their params, are agents/coder and agents/reviewer.
+# What the formula `epic` asks of a project (../packs/review-loop/README.md, "Inputs"); the paths are from the rig.
+[inputs]
+# The full CI. `test-env` keeps the credentials of the outer run from it and gives it private state directories.
+ci_command = "devloop/scripts/test-env mise run ci"
+# A run keeps its CI logs and notes in `target/devloop/runs/<run>`; git ignores `target/`.
+scratch_dir = "target/devloop/runs"
+# `close` copies them to `devloop/artifacts/<run>`, local and ignored by git (.gitignore).
+archive_dir = "devloop/artifacts"
+
+# The addons of this repository, from this checkout by relative path (README.md, "The addons"). The agents attach
+# them in the `[agents.*]` edits below.
 [[addon]]
 path = "../addons/code-search"
 
+# The pack pins `context-budget` to a release from git. This replaces that with this checkout's, as the others are.
 [[addon]]
 path = "../addons/context-budget"
 
@@ -38,6 +52,36 @@ env.DCG_CUSTOM_PATHS = "${DEVLOOP_DCG_PACK}"
 # the long test run is a step of its own, outside any session.
 native.claude.promptCacheTtl = "5m"
 native.claude.subagentPromptCacheTtl = "5m"
+
+# What this project adds to the agents of the pack. `prompt_append` names the file of this directory with the rules
+# of this repository for the agent: its text follows the role prompt the pack gives the agent. The addons are
+# attached here and not in `[settings]`: the agents do not take the same ones. `dcg` refuses a destructive shell
+# command before it runs.
+[agents.coder]
+prompt_append = "prompts/coder.md"
+addons = [{ name = "dcg" }, { name = "conventional-commits" }, { name = "lessons" }, { name = "code-search" }]
+
+[agents.reviewer]
+prompt_append = "prompts/reviewer.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
+
+# The subagents of the coder. Each attaches the coder's addons but two, so the text an addon adds to a role
+# (`code-search`) is in the subagent's definition too. The hooks of `dcg` and `lessons` are the very hooks of the
+# coder's session, which run inside its subagents already: the definition leaves them out, and none runs twice.
+# `conventional-commits` is not attached: a subagent does not commit. Nor is `context-budget`: the pack attaches it
+# to the coder with params, and an attachment with other params here would be another hook beside the session's.
+[agents.helper]
+prompt_append = "prompts/helper.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
+
+[agents.subcoder]
+prompt_append = "prompts/subcoder.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
+
+[agents.expert]
+prompt_append = "prompts/expert.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
+description = "The expert of loop-manager: the plan or the design of a critical part (the core, the invariants, recovery, the harness protocols), a disputed design choice, a bug the coder failed to fix twice. Writes a document, changes no code."
 
 # The repository itself. A bead an agent files on this rig has the id prefix `lm`; the tracker's own prefix is `dev`.
 [rigs.repo]

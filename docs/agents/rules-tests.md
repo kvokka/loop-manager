@@ -21,7 +21,7 @@ A temporary working directory or a change to XDG variables alone still leaves th
 | When | What | Command |
 |---|---|---|
 | while you work | the tests of what you touch, clippy of the crate | `cargo nextest run -p <crate> -E 'test(<name>)'`, `cargo clippy -p <crate> --all-targets -q -- -D warnings` |
-| once, on the committed HEAD, before you hand the work over | **the gate** | `mise run ci` (the `tests` step runs it in devloop) |
+| once, on the committed HEAD, before you hand the work over | **the gate** | `mise run ci` (the `ci_report` step runs it in devloop) |
 | only when the owner asks | the model-free acceptance scenarios and the chaos stand, in CI | `gh workflow run acceptance`, then `gh run watch` |
 | only when the owner asks | live models, the demos, on this machine | `mise run acceptance`, `demos/<demo>/run.sh` |
 

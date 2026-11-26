@@ -56,7 +56,8 @@ is for the review to catch.
   the CLI (`loop-manager comment`, `loop-manager finish`, `loop-manager run show`, `loop-manager bead show`) and the
   environment they are given. Only the adapter of a tool runs it
   (`loop-manager-br` runs br, `loop-manager-claude` runs claude); a part that needs more of a tool asks for it through
-  an interface of loop-manager. The devloop pack is exempt: it belongs to a br project by design
+  an interface of loop-manager. The pack `packs/review-loop/` and the project `devloop/` are exempt: their
+  workflow belongs to a br project by design
   ([trackers](../guide/trackers.md#the-br-tracker)).
 - mise is a convenience, not a requirement. A command that is not found: `mise exec -- <command>`.
 - Structural search in Rust is `ast-grep`: `ast-grep -l rust -p '$X.unwrap()' crates/`.

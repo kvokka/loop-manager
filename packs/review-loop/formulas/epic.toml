@@ -1,0 +1,95 @@
+name = "epic"
+description = "One epic of a project: rounds of a coder, the project's full CI and a review, until the review passes"
+# A review under the bar starts another round, whatever the CI says; an answer from the owner also starts a new
+# round. A run still sent back after the last round fails.
+rounds = 50
+
+# A project replaces a default once, in `[inputs]` of its `loop-manager.toml` (README.md, "Inputs").
+[inputs]
+epic = { type = "task", required = true }            # the bead of the epic
+# The project's full CI: a shell command, run from the workdir of the run. The default always passes: a project
+# names its real CI.
+ci_command = { type = "string", default = "echo 'TODO: replace me with tests command'" }
+# A run keeps its logs and notes in `<scratch_dir>/<run>`. Inside the repository, it is a directory git ignores.
+scratch_dir = { type = "string", default = "/tmp/review-loop/runs" }
+# `close` copies the run's scratch directory to `<archive_dir>/<run>`; an empty value keeps no copy.
+archive_dir = { type = "string", default = "/tmp/review-loop/archive" }
+
+# The coder of the round: a new session each round, with the epic, its last comments and what the gate said. It hands
+# over whatever it reached; a session stopped at its context limit hands over too (`cut = "pass"` in agent.toml).
+[[step]]
+name = "code"
+kind = "ai"
+agent = "coder"
+last_comments = 8
+
+# A genuine blocker ends the model session and waits for the owner. Resolving with `pass` records the answer and
+# starts a new coder round; `fail` rejects the work and ends the run. Discretionary choices do not enter this wait.
+[[step]]
+name = "code_owner"
+kind = "await"
+if = { "steps.code.data.needs_owner" = true }
+timeout = "168h"
+
+[[step]]
+name = "code_answer"
+kind = "exec"
+command = ["epic-owner-answer", "code"]
+if = { "steps.code.data.needs_owner" = true }
+back_to = "code"
+
+# The CI command bounds its own time; the step's timeout is the backstop of a command that hangs.
+[[step]]
+name = "ci_report"
+kind = "exec"
+command = ["epic-ci-report"]
+timeout = "45m"
+inherit_env = true
+
+# Three consecutive returns give the coder the failed checks. The next red report goes to a reviewer.
+[[step]]
+name = "ci_route"
+kind = "exec"
+command = ["epic-ci-route"]
+back_to = "code"
+
+# The reviewer leaves the review as a comment on the epic and its score and verdict as the data of its outcome. A
+# review that could not be written (the session failed or was stopped) is written once more by a new session.
+[[step]]
+name = "review"
+kind = "ai"
+agent = "reviewer"
+max_attempts = 2
+last_comments = 8
+
+# The review can discover a blocker too. Its answer is handed to a new coder by the same path.
+[[step]]
+name = "review_owner"
+kind = "await"
+if = { "steps.review.data.needs_owner" = true }
+timeout = "168h"
+
+[[step]]
+name = "review_answer"
+kind = "exec"
+command = ["epic-owner-answer", "review"]
+if = { "steps.review.data.needs_owner" = true }
+back_to = "code"
+
+# Commit the tracker locally, when it is the repository's. Green CI on the current revision and an accepted review
+# allow the epic to close.
+[[step]]
+name = "gate"
+kind = "exec"
+command = ["epic-gate"]
+timeout = "10m"
+inherit_env = true
+back_to = "code"
+
+# Close the epic and publish the work, with the tracker when it is the repository's, after the gate passes.
+[[step]]
+name = "close"
+kind = "exec"
+command = ["epic-close"]
+timeout = "10m"
+inherit_env = true

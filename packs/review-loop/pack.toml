@@ -1,0 +1,11 @@
+# The workflow `epic`: a coder, the project's full CI and a reviewer, in rounds, until the review passes (README.md).
+name = "review-loop"
+version = "0.1.0"
+
+# The one addon the pack's own agents attach: the context budget of the coder's and the reviewer's sessions, pinned
+# to a release. A project that declares `context-budget` itself replaces this (README.md, "Use it in a project").
+[[addon]]
+name = "context-budget"
+git = "https://github.com/kvokka/loop-manager.git"
+rev = "addons/context-budget/0.7.0"
+dir = "addons/context-budget"

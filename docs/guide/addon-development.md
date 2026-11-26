@@ -7,7 +7,8 @@ An addon is a directory with an `addon.toml`. It has two independent sides:
 - the **orchestrator side** (`[[hook]]`): programs loop-manager runs on the events of those agents' runs, which may
   observe them or decide what happens next (veto a pass, retry a failed attempt, remark on a turn...).
 
-An addon is not a pack: a pack brings agents and formulas, an addon extends the agents that attach it. It is a
+An addon is not a pack: a pack brings agents and formulas, an addon extends the agents that attach it; a pack may
+declare the addons its agents attach, each by its name, and that is all it does with one. It is a
 directory, not a library: hooks are any executables, in any language. How an addon is declared and attached is in
 [using addons](addons.md); every rule of the manifest is in
 [the config reference](../design/config.md#addon-addonaddontoml).
@@ -303,7 +304,7 @@ and tag. The same convention works in a separate repository, including one with 
    check a config using the addon, and update the README installation example with the Git URL,
    release tag, optional subdirectory and attachment a user can copy into their project. Include these
    files in the release commit.
-5. Merge the release commit to `main`. The `addon-tags` workflow then tags the merged commit with an annotated
+5. Merge the release commit to `main`. The `addon-pack-tags` workflow then tags the merged commit with an annotated
    `addons/<name>/<version>` for every manifest whose version has no tag yet. It fails, and publishes no tag for
    that addon, when the changelog has no `## <version>` heading. Do not tag addon releases by hand in this repository.
    In a separate repository, publish the tag of the tested commit yourself:
@@ -316,6 +317,10 @@ and tag. The same convention works in a separate repository, including one with 
 
 Delivering a new addon or a user-visible addon update includes the version bump and changelog in the commit to `main`.
 An unreleased change can stay on a development branch until the intended release.
+
+A pack of this repository is versioned and released the same way: `version` in `pack.toml`, a `CHANGELOG.md` beside
+it, and the tag `packs/<name>/<version>` that the same workflow puts on the commit merged to `main`. A project pins
+the pack to that tag, or to the full id of a commit that has no tag yet.
 
 Keep published tags on their original commits. A client caches the commit it first resolves for a tag.
 Publish a new version for a correction. When moving an addon, keep old tags reachable at the old URL

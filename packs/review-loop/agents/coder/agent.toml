@@ -1,0 +1,18 @@
+# The agent's own files, in this directory.
+# The role: appended to the system prompt of the harness in every session of the agent.
+prompt = "prompt.md"
+# The prompt of the step `code`: rendered each round with the epic, its last comments and the remarks of the checks.
+template = "prompt.template.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.coder]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role.
+
+# The defaults of the role; a project changes them in `[agents.coder]` of its loop-manager.toml.
+harness = "claude"
+model = "opus"
+effort = "high"
+# The agents its session may call as native subagents; each has a `description` in its own agent.toml.
+subagents = ["helper", "subcoder", "expert"]
+# Past 300k tokens of context the coder is told to wrap up; a session stopped past 420k still goes on to the review
+# (`cut = "pass"`). Each round is a session of its own. The addon is attached here and not in `[settings]`: a hook of
+# the session also runs inside its subagents. A project attaches its own addons in `[agents.coder]`.
+addons = [{ name = "context-budget", params = { cut = "pass" } }]
