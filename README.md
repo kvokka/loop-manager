@@ -1,8 +1,21 @@
 # loop-manager
 
-loop-manager is an event-driven orchestrator for coding agents. One daemon runs formulas — an agent with a prompt, or a
-command — as runs on your projects, through the agents' own harnesses (Claude Code, Codex), started by hand, by events,
-by a schedule or by a task tracker, and decides each run's end by an explicit finisher and by addons.
+loop-manager is an orchestrator for long-running agent workflows, independent of the harness. A workflow can take any
+shape: agent steps, commands, questions to the owner, gates and loops back to an earlier step, in any order. Its agents
+run through their own harnesses (Claude Code, Codex), and every run lives in an isolated environment: a git worktree of
+its own and, if asked, an isolated harness config.
+
+One event-driven daemon runs formulas — an agent with a prompt, or a command — as runs on your projects, started by
+hand, by events, by a schedule or by a task tracker, and decides each run's end by an explicit finisher and by addons.
+
+![A review loop in the T3 Code run card: code, CI, review, owner questions and a gate, looping back](docs/images/run-card-devloop-epic.png)
+
+![A release workflow in the T3 Code run card: build, owner sign-off, publish](docs/images/run-card-delivery-release.png)
+
+> [!WARNING]
+> **Development is paused.** [T3 Code](https://github.com/pingdotgg/t3code) v0.1.12 ships workflows, and they look like
+> a potential replacement for loop-manager: for the author of this repository, what they offer is enough. Development
+> of loop-manager resumes only if that proves wrong.
 
 The CLI returns structured data in TOON by default. For example, agents can read `loop-manager run list` directly.
 Scripts can request JSON with the global `--json` flag, as in `loop-manager run list --json | jq '.[].id'`.
