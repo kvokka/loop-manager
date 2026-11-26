@@ -97,14 +97,21 @@ the log, and the agents read the log.
 
 ### The project's text for the agents
 
-The prompt templates of the coder and the reviewer have one slot, `{{ agent.project }}`: the rules of the project.
-Its text is `project.md` in the project's `.loop-manager/agents/coder/` and `.loop-manager/agents/reviewer/`, which
-lies over the pack's default. Write there where the rules live, the build, lint and test commands, what the review
-checks beyond the role, and the language of the product and of the comments.
+Each of the five agents names its own files in its `agent.toml`: `prompt`, the role, and for the coder and the
+reviewer `template`, the prompt of their step. The harness gets the role as an addition to its own system prompt. A
+project adds its rules to the role of any agent in the same way: a file of its own, named by `prompt_append` in the
+agent's table of the project's `loop-manager.toml`.
 
-The helper, the subcoder and the expert are subagents of the coder: a role prompt and no template. A project that
-needs its own rules in one replaces the role prompt whole with `system_prompt` in an `[agents.<agent>]` edit of its
-`loop-manager.toml`, and may change `description`, `model` and `effort` there too.
+```toml
+[agents.coder]
+prompt_append = "prompts/coder.md"
+```
+
+The path is from the directory of `loop-manager.toml`, and the text of the file follows the role. Write there where
+the rules live, the build, lint and test commands, what the review checks beyond the role, and the language of the
+product and of the comments. Begin it with a heading such as `# Rules of this project`, so the project's part is
+plain in the whole prompt, which `loop-manager config explain --project <project> --agent review-loop.<agent>`
+prints as `system_prompt`. The same table changes the agent's `description`, `model` and `effort`.
 
 ## A run
 

@@ -1,5 +1,10 @@
-# A subagent of the coder: no step of a formula names it, so it has a role prompt and no prompt template. A project
-# gives it the text of its own in `[agents.expert]` (`description`, `system_prompt`).
+# A subagent of the coder: no step of a formula names it, so it has a role and no prompt template.
+# The agent's own file, in this directory.
+# The role: the instructions of the subagent, in the definition the harness of the coder's session gets of it.
+prompt = "prompt.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.expert]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role. A project says what
+# its expert is for with `description` there.
 description = "The expert of the project: the plan or the design of a critical part, a disputed design choice, a bug the coder failed to fix twice. Writes a document, changes no code."
 harness = "claude"
 model = "fable"

@@ -1,4 +1,9 @@
-# A subagent of the coder: no step of a formula names it, so it has a role prompt and no prompt template.
+# A subagent of the coder: no step of a formula names it, so it has a role and no prompt template.
+# The agent's own file, in this directory.
+# The role: the instructions of the subagent, in the definition the harness of the coder's session gets of it.
+prompt = "prompt.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.helper]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role.
 description = "A fast helper of the coder: a small edit by an exact description, a build, test or lint run with a digest of the errors, a search over the code and the documents, a summary of a long file."
 harness = "claude"
 model = "sonnet"

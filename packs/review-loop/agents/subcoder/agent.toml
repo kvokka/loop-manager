@@ -1,5 +1,9 @@
-# A subagent of the coder: no step of a formula names it, so it has a role prompt and no prompt template. A project
-# gives it the rules of its own in `[agents.subcoder]` (`system_prompt`).
+# A subagent of the coder: no step of a formula names it, so it has a role and no prompt template.
+# The agent's own file, in this directory.
+# The role: the instructions of the subagent, in the definition the harness of the coder's session gets of it.
+prompt = "prompt.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.subcoder]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role.
 description = "A second coder for a separate piece of the implementation, on files the coder itself does not touch, in parallel with it. Does not commit."
 harness = "claude"
 model = "opus"

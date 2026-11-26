@@ -19,7 +19,7 @@ devloop/                the project
   config.toml           the orchestrator config of the loop's own daemon
   loop-manager.toml     the pack, the inputs of its formula, the addons, the settings of the sessions, the edits of
                         the pack's agents, the rig `repo` (`..`), the triggers
-  .loop-manager/agents/ the rules of this repository for the coder and the reviewer (`project.md` of each)
+  prompts/              the rules of this repository for each agent of the pack (`<agent>.md`)
   lm, scripts/          the operator's commands (`lm`, `install.sh`), `test-env` and their self-test
   dcg.yaml              what the sessions may not do to the working daemon
   artifacts/<run>/      full logs and notes, local and ignored by git
@@ -30,11 +30,11 @@ devloop/                the project
 
 - **Inputs** (`[inputs]` of `loop-manager.toml`): the CI command `devloop/scripts/test-env mise run ci`, the scratch
   directory of runs `target/devloop/runs` and the archive `devloop/artifacts`.
-- **Rules for the agents**: `.loop-manager/agents/coder/project.md` and `.loop-manager/agents/reviewer/project.md`
-  fill the slot `{{ agent.project }}` of the pack's prompt templates: where the rules of this repository live, its
-  build, lint and test commands, what the review checks here, the language of the product and of the comments. The
-  subcoder and the expert have no template, so `[agents.subcoder]` and `[agents.expert]` of `loop-manager.toml`
-  replace their role prompts.
+- **Rules for the agents**: `prompts/<agent>.md`, one file for each of the five agents, named by `prompt_append`
+  in the agent's `[agents.<agent>]` table of `loop-manager.toml`. Its text follows the role prompt the pack gives
+  the agent: where the rules of this repository live, its build, lint and test commands, what the review checks
+  here, the language of the product and of the comments. `loop-manager config explain --config devloop/config.toml
+  --project devloop --rig repo --agent review-loop.<agent>` prints the whole prompt as `system_prompt`.
 - **Addons**: the pack attaches `context-budget` and pins it to a release from git; the project declares it again
   from this checkout, which replaces the pin. The project declares the rest and attaches them in `[agents.coder]`
   and `[agents.reviewer]` (see "The addons").
@@ -285,7 +285,7 @@ can [pin a published addon](../docs/guide/addons.md#declare-it).
 Anyone may change `devloop/` and `packs/review-loop/`, the agents of an epic included. The daemon runs the commands
 of `packs/review-loop/bin/` and `scripts/test-env` from the working tree at the moment a step needs them, so an edit
 of `epic-gate` or `epic-ci-report` holds from the next step on. The config, the formula, the prompts and the
-project's files under `.loop-manager/agents/` are held in memory: an edit of them holds only after
+project's files under `prompts/` are held in memory: an edit of them holds only after
 `devloop/lm config reload`, and a running run keeps the ones it started with. `mise run ci` runs the pack's
 `tests/selftest.sh`, `scripts/selftest.sh` and `config check` on this directory.
 

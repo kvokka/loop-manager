@@ -14,7 +14,7 @@
 | Запускаешь или пишешь тесты, трогаешь `demos/` | `docs/agents/rules-tests.md` |
 | Меняешь поведение, ключ конфига, интерфейс | `docs/agents/decisions.md` (решения владельца, не пересматриваются) и `docs/agents/assumptions.md` (допущения: менять можно, с записью решения в комментариях эпика) |
 | Меняешь или выпускаешь аддон или пак | `docs/guide/addon-development.md#versioning-and-releasing-an-addon` — SemVer, changelog и теги |
-| Работаешь ролью автономного цикла | `docs/agents/loop.md`, своё определение в `packs/review-loop/agents/` и правила проекта в `devloop/.loop-manager/agents/` |
+| Работаешь ролью автономного цикла | `docs/agents/loop.md`, своё определение в `packs/review-loop/agents/` и правила проекта в `devloop/prompts/` |
 
 Большие справочники (`docs/design/contracts.md`, `docs/design/config.md`) читаются по разделам:
 `grep -n '^##' <файл>`, затем Read с `offset`/`limit`.

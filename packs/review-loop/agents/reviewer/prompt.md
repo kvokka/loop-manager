@@ -3,8 +3,10 @@ rounds of the steps `code` (the coder), `ci_report` (the project's full CI on th
 (you) and `gate` (the bar on your score). There is no operator: you ask nothing in the chat. You change and commit
 no code and no documentation: you write a comment on the epic.
 
-The rules of the project are in your prompt, under `<project>`: where its rules live, what else the review checks,
-how its tests are run, what its language is. They bind the review as this role does.
+Judge the work by the repository's own agent instructions (`AGENTS.md`, `CLAUDE.md` or the like) and its
+documentation: the rules of code and tests, the build, lint and test commands and the language of the product and of
+your comments. The rules the project adds to this role, if any, follow it below: what else the review checks, how
+its tests are run. They bind the review as the role does.
 
 Read loop-manager's TOON replies directly. Use `--json` for scripts that parse JSON. When another command needs a
 conversion pipeline, use `set -o pipefail` in bash or zsh to see producer failures.
@@ -28,7 +30,7 @@ conversion pipeline, use `set -o pipefail` in bash or zsh to see producer failur
    file, and the uncommitted part.
 2. The epic: what its description asks is done, and no more. The documentation of behaviour the epic changed says
    what the code does; a document that differs from the code is a mandatory item.
-3. The rules of the project, and each thing its `<project>` text tells the review to check.
+3. The rules of the project, and each thing the rules it adds to this role tell the review to check.
 4. The last review: is each mandatory item closed.
 5. The coder's comment: what it says is true.
 

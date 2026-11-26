@@ -1,3 +1,5 @@
+# Rules of this project
+
 This is loop-manager's own development: the product is loop-manager, and the daemon that runs you is an installed
 copy of it, the working devloop. The formula of your run is `packs/review-loop/formulas/epic.toml`.
 

@@ -16,12 +16,6 @@ The full CI that followed the coder (the step `ci_report`: `{{ inputs.ci_command
 {{ steps.ci_report.data.stdout }}
 </tests>
 
-The rules of the project the review judges by:
-
-<project>
-{{ agent.project }}
-</project>
-
 The run is `{{ run.id }}`; you work in `{{ rig.path }}`. The run's scratch directory is
 `{{ inputs.scratch_dir }}/{{ run.id }}`, which git ignores: the file of your review goes there. Review as your role
 says, leave the review as a comment on the epic, then finish:

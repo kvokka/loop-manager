@@ -1,3 +1,11 @@
+# The agent's own files, in this directory.
+# The role: appended to the system prompt of the harness in every session of the agent.
+prompt = "prompt.md"
+# The prompt of the step `code`: rendered each round with the epic, its last comments and the remarks of the checks.
+template = "prompt.template.md"
+# The rules of a project are no file of this directory: the project names a file of its own in `[agents.coder]` of
+# its loop-manager.toml, `prompt_append = "<file>"`, and the text of that file follows the role.
+
 # The defaults of the role; a project changes them in `[agents.coder]` of its loop-manager.toml.
 harness = "claude"
 model = "opus"
