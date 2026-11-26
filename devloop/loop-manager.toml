@@ -55,8 +55,8 @@ native.claude.subagentPromptCacheTtl = "5m"
 
 # What this project adds to the agents of the pack. `prompt_append` names the file of this directory with the rules
 # of this repository for the agent: its text follows the role prompt the pack gives the agent. The addons are
-# attached here and not in `[settings]`: a hook of the session also runs inside its subagents. `dcg` refuses a
-# destructive shell command before it runs.
+# attached here and not in `[settings]`: the agents do not take the same ones. `dcg` refuses a destructive shell
+# command before it runs.
 [agents.coder]
 prompt_append = "prompts/coder.md"
 addons = [{ name = "dcg" }, { name = "conventional-commits" }, { name = "lessons" }, { name = "code-search" }]
@@ -65,15 +65,22 @@ addons = [{ name = "dcg" }, { name = "conventional-commits" }, { name = "lessons
 prompt_append = "prompts/reviewer.md"
 addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
 
-# The subagents of the coder.
+# The subagents of the coder. Each attaches the coder's addons but two, so the text an addon adds to a role
+# (`code-search`) is in the subagent's definition too. The hooks of `dcg` and `lessons` are the very hooks of the
+# coder's session, which run inside its subagents already: the definition leaves them out, and none runs twice.
+# `conventional-commits` is not attached: a subagent does not commit. Nor is `context-budget`: the pack attaches it
+# to the coder with params, and an attachment with other params here would be another hook beside the session's.
 [agents.helper]
 prompt_append = "prompts/helper.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
 
 [agents.subcoder]
 prompt_append = "prompts/subcoder.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
 
 [agents.expert]
 prompt_append = "prompts/expert.md"
+addons = [{ name = "dcg" }, { name = "lessons" }, { name = "code-search" }]
 description = "The expert of loop-manager: the plan or the design of a critical part (the core, the invariants, recovery, the harness protocols), a disputed design choice, a bug the coder failed to fix twice. Writes a document, changes no code."
 
 # The repository itself. A bead an agent files on this rig has the id prefix `lm`; the tracker's own prefix is `dev`.

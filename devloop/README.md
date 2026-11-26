@@ -36,8 +36,8 @@ devloop/                the project
   here, the language of the product and of the comments. `loop-manager config explain --config devloop/config.toml
   --project devloop --rig repo --agent review-loop.<agent>` prints the whole prompt as `system_prompt`.
 - **Addons**: the pack attaches `context-budget` and pins it to a release from git; the project declares it again
-  from this checkout, which replaces the pin. The project declares the rest and attaches them in `[agents.coder]`
-  and `[agents.reviewer]` (see "The addons").
+  from this checkout, which replaces the pin. The project declares the rest and attaches them in the `[agents.*]`
+  tables (see "The addons").
 - **The report of the CI checks**: the `ci` task of `mise.toml` writes it to the file the pack names in
   `REVIEW_LOOP_CI_REPORT`.
 
@@ -268,6 +268,11 @@ lesson on its epic. An empty answer leaves no comment.
 
 Both roles also attach [code-search](../addons/code-search/README.md): their system prompt says that the shell has
 `rg` and `ast-grep`, which `mise.toml` pins, and when to use each.
+
+The coder's subagents (`helper`, `subcoder`, `expert`) attach `dcg`, `lessons` and `code-search` too, so the text
+`code-search` adds to a role is in each subagent's definition. The hooks of `dcg` and `lessons` there are the very
+hooks of the coder's session, which run inside its subagents already: the definition leaves them out, and none runs
+twice.
 
 The project attaches [t3-notify](../addons/t3-notify/README.md) in `[settings]`. An epic filed or started from a
 T3 Code thread tells that thread when its run starts, enters `code_owner` or `review_owner`, and ends. The daemon needs
